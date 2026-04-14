@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# uv
+.uv/
+uv.lock
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Downloads (runtime data — not for version control)
+downloads/*
+!downloads/.gitkeep
+
+# VPN configs (contain private keys — NEVER commit)
+vpn_configs/*.conf
+
+# Docker
+.docker/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Env files
+.env
+.env.*
