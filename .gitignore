@@ -41,3 +41,18 @@ vpn_configs/*.conf
 # Env files
 .env
 .env.*
+
+# Logs
+logs/
+
+# SQLite database (runtime)
+smuggler.db
+smuggler.db-wal
+smuggler.db-shm
+
+# Node / Web
+web/node_modules/
+web/dist/
+
+# VPN config uploads (private keys)
+vpn_configs/

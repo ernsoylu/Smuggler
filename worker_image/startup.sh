@@ -79,13 +79,23 @@ if [ -n "${WG_EP_HOST}" ] && [ -n "${ORIG_GW}" ]; then
     fi
 fi
 
+# ─── 5. Switch DNS to VPN DNS ────────────────────────────────────────────────
+if [ -n "${WG_DNS}" ]; then
+    echo "nameserver ${WG_DNS}" > /etc/resolv.conf
+    log "DNS switched to VPN DNS: ${WG_DNS}"
+fi
+
+# Ensure replies to traffic originating from the host (via Docker bridge on eth0)
+# are routed back out eth0, avoiding asymmetric routing via wg0.
+ETH0_IP=$(ip -4 addr show eth0 | awk '/inet /{print $2}' | cut -d/ -f1)
+ip rule add from "${ETH0_IP}" table 128
+ip route add default via "${ORIG_GW}" dev "${ORIG_DEV}" table 128
+
 # Route all IPv4 traffic through the tunnel
 ip -4 route replace default dev "${WG_IFACE}"
 
-# ─── 5. Verify external connectivity through VPN ────────────────────────────
-# Keep original resolv.conf during the check so we can resolve ipinfo.io.
-# The VPN DNS (10.x.x.x) is only reachable once the tunnel is confirmed.
-log "Verifying VPN connectivity (using original DNS for name resolution)..."
+# ─── 6. Verify external connectivity through VPN ─────────────────────────────
+log "Verifying VPN connectivity..."
 EXT_JSON=$(curl -sf --max-time "${VPN_CHECK_TIMEOUT}" "https://ipinfo.io/json" || echo "")
 if [ -z "${EXT_JSON}" ]; then
     log "ERROR: No external connectivity through VPN — aborting"
@@ -96,12 +106,6 @@ fi
 EXT_IP=$(echo "${EXT_JSON}"      | grep -o '"ip"[^,]*'      | grep -o '[0-9.]*'   | head -1)
 EXT_COUNTRY=$(echo "${EXT_JSON}" | grep -o '"country"[^,]*' | sed 's/.*"\(.*\)".*/\1/')
 log "VPN active — External IP: ${EXT_IP}  Country: ${EXT_COUNTRY}"
-
-# ─── 6. Switch DNS to VPN DNS (now that the tunnel is confirmed) ─────────────
-if [ -n "${WG_DNS}" ]; then
-    echo "nameserver ${WG_DNS}" > /etc/resolv.conf
-    log "DNS switched to VPN DNS: ${WG_DNS}"
-fi
 
 # ─── 7. Start aria2 daemon ──────────────────────────────────────────────────
 log "Starting aria2 RPC daemon..."

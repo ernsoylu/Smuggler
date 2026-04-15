@@ -1,4 +1,4 @@
-"""dvd — Dockerized VPN Downloader CLI entry point."""
+"""smg — Smuggler CLI entry point."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import click
 from rich.console import Console
 
 from cli.docker_client import build_image, get_docker_client, WORKER_IMAGE
-from cli.worker_commands import worker_group
+from cli.worker_commands import mule_group
 from cli.torrent_commands import torrent_group
 
 console = Console()
@@ -17,9 +17,9 @@ WORKER_IMAGE_DIR = Path(__file__).resolve().parent.parent / "worker_image"
 
 
 @click.group()
-@click.version_option("0.1.0", prog_name="dvd")
+@click.version_option("0.1.0", prog_name="smg")
 def cli() -> None:
-    """dvd — Isolated torrent downloads behind per-worker WireGuard VPN tunnels."""
+    """smg — Smuggle torrents through isolated per-mule WireGuard VPN tunnels."""
 
 
 @cli.command("build")
@@ -32,7 +32,7 @@ def cli() -> None:
 )
 @click.option("--tag", default=WORKER_IMAGE, show_default=True, help="Image tag to build.")
 def build(context: str, tag: str) -> None:
-    """Build the dvd-worker Docker image."""
+    """Build the smuggler mule Docker image."""
     client = get_docker_client()
     console.print(f"Building [bold]{tag}[/bold] from [dim]{context}[/dim]...")
     try:
@@ -43,7 +43,7 @@ def build(context: str, tag: str) -> None:
         raise SystemExit(1)
 
 
-cli.add_command(worker_group)
+cli.add_command(mule_group)
 cli.add_command(torrent_group)
 
 
