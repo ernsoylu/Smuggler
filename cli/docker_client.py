@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import socket
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -109,6 +111,7 @@ def start_worker(
             ports={f"{ARIA2_INTERNAL_PORT}/tcp": host_port},
             environment={"ARIA2_SECRET": rpc_token},
             labels=labels,
+            restart_policy={"Name": "unless-stopped"},
         )
     except docker.errors.ImageNotFound:
         raise RuntimeError(
@@ -118,6 +121,59 @@ def start_worker(
         raise RuntimeError(f"Docker API error while starting worker: {exc}") from exc
 
     return WorkerInfo(container)
+
+
+def wait_for_vpn(
+    client: docker.DockerClient,
+    name_or_id: str,
+    timeout: int = 60,
+    poll_interval: int = 3,
+) -> dict:
+    """
+    Block until the worker's VPN is up and ipinfo.io responds.
+
+    Returns the parsed JSON dict from ipinfo.io on success.
+    Raises RuntimeError with container logs if the container exits or times out.
+    """
+    deadline = time.time() + timeout
+    last_error = "timed out"
+
+    while time.time() < deadline:
+        # Reload the container so we get fresh status
+        worker = get_worker(client, name_or_id)
+        worker.container.reload()
+
+        if worker.container.status == "exited":
+            logs = worker.container.logs(tail=40).decode(errors="replace")
+            raise RuntimeError(
+                f"Worker container exited before VPN came up.\n\nContainer logs:\n{logs}"
+            )
+
+        if worker.container.status != "running":
+            time.sleep(poll_interval)
+            continue
+
+        # Container is running — try to reach ipinfo.io through the VPN
+        try:
+            exit_code, output = worker.container.exec_run(
+                "curl -sf --max-time 8 https://ipinfo.io/json",
+                demux=False,
+            )
+            if exit_code == 0 and output:
+                return json.loads(output.decode().strip())
+        except (docker.errors.APIError, json.JSONDecodeError, ValueError):
+            pass
+
+        last_error = "VPN not ready yet"
+        time.sleep(poll_interval)
+
+    raise RuntimeError(f"VPN confirmation timed out after {timeout}s: {last_error}")
+
+
+def get_container_logs(client: docker.DockerClient, name_or_id: str, tail: int = 50) -> str:
+    """Return the last ``tail`` lines of a container's logs."""
+    worker = get_worker(client, name_or_id)
+    return worker.container.logs(tail=tail).decode(errors="replace")
 
 
 def list_workers(client: docker.DockerClient) -> list[WorkerInfo]:
@@ -141,7 +197,7 @@ def get_worker(client: docker.DockerClient, name_or_id: str) -> WorkerInfo:
 
 
 def stop_worker(client: docker.DockerClient, name_or_id: str, remove: bool = True) -> None:
-    """Stop (and optionally remove) a worker container."""
+    """Gracefully stop (SIGTERM + wait) and optionally remove a worker container."""
     worker = get_worker(client, name_or_id)
     try:
         worker.container.stop(timeout=10)
@@ -149,6 +205,49 @@ def stop_worker(client: docker.DockerClient, name_or_id: str, remove: bool = Tru
             worker.container.remove()
     except docker.errors.APIError as exc:
         raise RuntimeError(f"Failed to stop worker '{name_or_id}': {exc}") from exc
+
+
+def kill_worker(client: docker.DockerClient, name_or_id: str, remove: bool = True) -> None:
+    """Immediately kill (SIGKILL) and optionally remove a worker container."""
+    worker = get_worker(client, name_or_id)
+    try:
+        if worker.container.status == "running":
+            worker.container.kill()
+        if remove:
+            worker.container.remove()
+    except docker.errors.APIError as exc:
+        raise RuntimeError(f"Failed to kill worker '{name_or_id}': {exc}") from exc
+
+
+def kill_all_workers(client: docker.DockerClient, remove: bool = True) -> list[str]:
+    """
+    Immediately kill every dvd worker container.
+
+    Returns the list of names that were killed.  Errors per-container are
+    collected and re-raised together after all workers have been attempted,
+    so a single bad container does not abort the rest.
+    """
+    workers = list_workers(client)
+    if not workers:
+        return []
+
+    killed: list[str] = []
+    errors: list[str] = []
+
+    for w in workers:
+        try:
+            kill_worker(client, w.name, remove=remove)
+            killed.append(w.name)
+        except RuntimeError as exc:
+            errors.append(str(exc))
+
+    if errors:
+        raise RuntimeError(
+            f"Killed {len(killed)} worker(s), but {len(errors)} error(s) occurred:\n"
+            + "\n".join(f"  • {e}" for e in errors)
+        )
+
+    return killed
 
 
 def exec_in_worker(client: docker.DockerClient, name_or_id: str, cmd: str) -> str:

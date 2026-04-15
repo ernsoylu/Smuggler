@@ -3,6 +3,7 @@ FROM debian:bookworm-slim
 # Install WireGuard, aria2, and networking utilities
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wireguard-tools \
+    openresolv \
     aria2 \
     curl \
     iproute2 \

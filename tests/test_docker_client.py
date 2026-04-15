@@ -14,11 +14,15 @@ from cli.docker_client import (
     WorkerInfo,
     build_image,
     exec_in_worker,
+    get_container_logs,
     get_docker_client,
     get_worker,
+    kill_all_workers,
+    kill_worker,
     list_workers,
     start_worker,
     stop_worker,
+    wait_for_vpn,
     WORKER_LABEL,
     WORKER_IMAGE,
 )
@@ -91,6 +95,7 @@ class TestStartWorker:
             assert "NET_ADMIN" in call_kwargs.kwargs["cap_add"]
             assert "SYS_MODULE" in call_kwargs.kwargs["cap_add"]
             assert WORKER_LABEL in call_kwargs.kwargs["labels"]
+            assert call_kwargs.kwargs["restart_policy"] == {"Name": "unless-stopped"}
         finally:
             os.unlink(conf_path)
 
@@ -196,6 +201,81 @@ class TestStopWorker:
             stop_worker(mock_docker_client, "dvd-worker-test")
 
 
+# ─── kill_worker ─────────────────────────────────────────────────────────────
+
+class TestKillWorker:
+    def test_kills_and_removes_running_container(self, mock_docker_client, mock_container):
+        mock_docker_client.containers.get.return_value = mock_container
+        kill_worker(mock_docker_client, "dvd-worker-test", remove=True)
+        mock_container.kill.assert_called_once()
+        mock_container.remove.assert_called_once()
+
+    def test_skips_kill_for_non_running_container(self, mock_docker_client, mock_stopped_container):
+        mock_docker_client.containers.get.return_value = mock_stopped_container
+        kill_worker(mock_docker_client, "dvd-worker-test", remove=True)
+        mock_stopped_container.kill.assert_not_called()
+        mock_stopped_container.remove.assert_called_once()
+
+    def test_kill_without_remove(self, mock_docker_client, mock_container):
+        mock_docker_client.containers.get.return_value = mock_container
+        kill_worker(mock_docker_client, "dvd-worker-test", remove=False)
+        mock_container.kill.assert_called_once()
+        mock_container.remove.assert_not_called()
+
+    def test_raises_on_api_error(self, mock_docker_client, mock_container):
+        mock_docker_client.containers.get.return_value = mock_container
+        mock_container.kill.side_effect = docker.errors.APIError("kill failed")
+        with pytest.raises(RuntimeError, match="Failed to kill worker"):
+            kill_worker(mock_docker_client, "dvd-worker-test")
+
+
+# ─── kill_all_workers ────────────────────────────────────────────────────────
+
+class TestKillAllWorkers:
+    def _make_container(self, name: str):
+        c = MagicMock()
+        c.name = name
+        c.short_id = name[-3:]
+        c.status = "running"
+        c.labels = {
+            "dvd.worker": "true",
+            "dvd.rpc_token": "tok",
+            "dvd.rpc_port": "16800",
+            "dvd.vpn_config": "vpn.conf",
+        }
+        return c
+
+    def test_kills_all_workers_and_returns_names(self, mock_docker_client):
+        containers = [self._make_container("dvd-worker-aaa"), self._make_container("dvd-worker-bbb")]
+        mock_docker_client.containers.list.return_value = containers
+        mock_docker_client.containers.get.side_effect = containers
+
+        killed = kill_all_workers(mock_docker_client, remove=True)
+        assert set(killed) == {"dvd-worker-aaa", "dvd-worker-bbb"}
+        for c in containers:
+            c.kill.assert_called_once()
+            c.remove.assert_called_once()
+
+    def test_returns_empty_list_when_no_workers(self, mock_docker_client):
+        mock_docker_client.containers.list.return_value = []
+        result = kill_all_workers(mock_docker_client)
+        assert result == []
+
+    def test_collects_errors_and_raises_after_all_attempts(self, mock_docker_client):
+        c1 = self._make_container("dvd-worker-aaa")
+        c2 = self._make_container("dvd-worker-bbb")
+        mock_docker_client.containers.list.return_value = [c1, c2]
+        # c1 succeeds; c2 fails
+        mock_docker_client.containers.get.side_effect = [c1, c2]
+        c2.kill.side_effect = docker.errors.APIError("permission denied")
+
+        with pytest.raises(RuntimeError, match="1 error"):
+            kill_all_workers(mock_docker_client)
+
+        # c1 must still have been killed despite c2 failing
+        c1.kill.assert_called_once()
+
+
 # ─── exec_in_worker ──────────────────────────────────────────────────────────
 
 class TestExecInWorker:
@@ -241,3 +321,74 @@ class TestBuildImage:
             )
             with pytest.raises(RuntimeError, match="Image build failed"):
                 build_image(mock_docker_client, context_path=tmpdir)
+
+
+# ─── wait_for_vpn ────────────────────────────────────────────────────────────
+
+class TestWaitForVpn:
+    def _running_container(self, ip_json: bytes):
+        """Return a mock container that is 'running' and returns ip_json from exec_run."""
+        c = MagicMock()
+        c.name = "dvd-worker-test"
+        c.short_id = "abc"
+        c.status = "running"
+        c.labels = {
+            "dvd.worker": "true",
+            "dvd.rpc_token": "tok",
+            "dvd.rpc_port": "16800",
+            "dvd.vpn_config": "vpn.conf",
+        }
+        c.exec_run.return_value = (0, ip_json)
+        return c
+
+    def test_returns_ip_info_when_vpn_is_up(self, mock_docker_client):
+        ip_payload = b'{"ip":"1.2.3.4","country":"NZ","city":"Auckland"}'
+        container = self._running_container(ip_payload)
+        mock_docker_client.containers.get.return_value = container
+        result = wait_for_vpn(mock_docker_client, "dvd-worker-test", timeout=10)
+        assert result["ip"] == "1.2.3.4"
+        assert result["country"] == "NZ"
+
+    def test_raises_when_container_exits_before_vpn(self, mock_docker_client):
+        c = MagicMock()
+        c.name = "dvd-worker-test"
+        c.short_id = "abc"
+        c.status = "exited"
+        c.labels = {"dvd.worker": "true", "dvd.rpc_token": "", "dvd.rpc_port": "0", "dvd.vpn_config": ""}
+        c.logs.return_value = b"wg-quick: failed"
+        mock_docker_client.containers.get.return_value = c
+        with pytest.raises(RuntimeError, match="exited before VPN"):
+            wait_for_vpn(mock_docker_client, "dvd-worker-test", timeout=5)
+
+    def test_retries_until_exec_succeeds(self, mock_docker_client):
+        ip_payload = b'{"ip":"5.6.7.8","country":"DE","city":"Berlin"}'
+        container = self._running_container(ip_payload)
+        # First two exec_run calls fail, third succeeds
+        container.exec_run.side_effect = [
+            (1, b""),
+            (1, b""),
+            (0, ip_payload),
+        ]
+        mock_docker_client.containers.get.return_value = container
+        with patch("cli.docker_client.time.sleep"):
+            result = wait_for_vpn(mock_docker_client, "dvd-worker-test", timeout=30)
+        assert result["ip"] == "5.6.7.8"
+
+    def test_raises_on_timeout(self, mock_docker_client):
+        container = self._running_container(b"")
+        container.exec_run.return_value = (1, b"")
+        mock_docker_client.containers.get.return_value = container
+        with patch("cli.docker_client.time.sleep"):
+            with pytest.raises(RuntimeError, match="timed out"):
+                wait_for_vpn(mock_docker_client, "dvd-worker-test", timeout=1, poll_interval=0)
+
+
+# ─── get_container_logs ──────────────────────────────────────────────────────
+
+class TestGetContainerLogs:
+    def test_returns_decoded_logs(self, mock_docker_client, mock_container):
+        mock_docker_client.containers.get.return_value = mock_container
+        mock_container.logs.return_value = b"line1\nline2\n"
+        result = get_container_logs(mock_docker_client, "dvd-worker-test", tail=10)
+        assert result == "line1\nline2\n"
+        mock_container.logs.assert_called_once_with(tail=10)

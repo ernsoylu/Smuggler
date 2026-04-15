@@ -50,8 +50,11 @@ def make_container(
 
 # ─── dvd worker start ────────────────────────────────────────────────────────
 
+VPN_INFO = {"ip": "1.2.3.4", "country": "NZ", "city": "Auckland", "region": "Auckland", "org": "AS1234 Mega"}
+
+
 class TestWorkerStart:
-    def test_start_prints_worker_info(self, runner, mock_docker):
+    def test_start_confirms_vpn_and_prints_ip(self, runner, mock_docker):
         container = make_container()
         mock_docker.containers.run.return_value = container
 
@@ -60,13 +63,16 @@ class TestWorkerStart:
             conf = f.name
 
         try:
-            with patch("cli.docker_client._find_free_port", return_value=16800):
+            with patch("cli.docker_client._find_free_port", return_value=16800), \
+                 patch("cli.worker_commands.wait_for_vpn", return_value=VPN_INFO):
                 result = runner.invoke(cli, ["worker", "start", "--config", conf])
         finally:
             os.unlink(conf)
 
         assert result.exit_code == 0
         assert "dvd-worker-test" in result.output
+        assert "1.2.3.4" in result.output
+        assert "NZ" in result.output
 
     def test_start_fails_with_missing_config(self, runner, mock_docker):
         result = runner.invoke(cli, ["worker", "start", "--config", "/no/such/file.conf"])
@@ -87,6 +93,28 @@ class TestWorkerStart:
 
         assert result.exit_code != 0
         assert "dvd build" in result.output.lower() or "not found" in result.output.lower()
+
+    def test_start_stops_container_when_vpn_fails(self, runner, mock_docker):
+        container = make_container()
+        mock_docker.containers.run.return_value = container
+        mock_docker.containers.get.return_value = container
+
+        with tempfile.NamedTemporaryFile(suffix=".conf", delete=False) as f:
+            f.write(b"[Interface]\n")
+            conf = f.name
+
+        try:
+            with patch("cli.docker_client._find_free_port", return_value=16800), \
+                 patch("cli.worker_commands.wait_for_vpn",
+                       side_effect=RuntimeError("VPN confirmation timed out")), \
+                 patch("cli.worker_commands.stop_worker") as mock_stop:
+                result = runner.invoke(cli, ["worker", "start", "--config", conf])
+        finally:
+            os.unlink(conf)
+
+        assert result.exit_code != 0
+        assert "VPN failed" in result.output or "timed out" in result.output
+        mock_stop.assert_called_once()
 
 
 # ─── dvd worker list ─────────────────────────────────────────────────────────
@@ -162,3 +190,71 @@ class TestWorkerIp:
         mock_docker.containers.get.side_effect = docker.errors.NotFound("no")
         result = runner.invoke(cli, ["worker", "ip", "ghost", "--wait", "1"])
         assert result.exit_code != 0
+
+
+# ─── dvd worker kill ─────────────────────────────────────────────────────────
+
+class TestWorkerKill:
+    def test_kill_individual_worker(self, runner, mock_docker):
+        container = make_container()
+        mock_docker.containers.get.return_value = container
+        result = runner.invoke(cli, ["worker", "kill", "dvd-worker-test"])
+        assert result.exit_code == 0
+        container.kill.assert_called_once()
+        container.remove.assert_called_once()
+        assert "killed and removed" in result.output
+
+    def test_kill_individual_keep_flag(self, runner, mock_docker):
+        container = make_container()
+        mock_docker.containers.get.return_value = container
+        result = runner.invoke(cli, ["worker", "kill", "--keep", "dvd-worker-test"])
+        assert result.exit_code == 0
+        container.kill.assert_called_once()
+        container.remove.assert_not_called()
+
+    def test_kill_all_with_yes_flag(self, runner, mock_docker):
+        containers = [make_container("dvd-worker-aaa"), make_container("dvd-worker-bbb")]
+        mock_docker.containers.list.return_value = containers
+        mock_docker.containers.get.side_effect = containers
+        result = runner.invoke(cli, ["worker", "kill", "--all", "--yes"])
+        assert result.exit_code == 0
+        assert "2" in result.output
+        for c in containers:
+            c.kill.assert_called_once()
+
+    def test_kill_all_prompts_without_yes(self, runner, mock_docker):
+        containers = [make_container("dvd-worker-aaa")]
+        mock_docker.containers.list.return_value = containers
+        mock_docker.containers.get.side_effect = containers
+        # Simulate user typing "y" at the confirmation prompt
+        result = runner.invoke(cli, ["worker", "kill", "--all"], input="y\n")
+        assert result.exit_code == 0
+        assert "killed" in result.output
+
+    def test_kill_all_aborts_on_no(self, runner, mock_docker):
+        containers = [make_container("dvd-worker-aaa")]
+        mock_docker.containers.list.return_value = containers
+        result = runner.invoke(cli, ["worker", "kill", "--all"], input="n\n")
+        assert result.exit_code != 0
+
+    def test_kill_all_empty(self, runner, mock_docker):
+        mock_docker.containers.list.return_value = []
+        result = runner.invoke(cli, ["worker", "kill", "--all", "--yes"])
+        assert result.exit_code == 0
+        assert "No workers" in result.output
+
+    def test_kill_requires_name_or_all(self, runner, mock_docker):
+        result = runner.invoke(cli, ["worker", "kill"])
+        assert result.exit_code != 0
+        assert "worker name or --all" in result.output
+
+    def test_kill_rejects_name_and_all_together(self, runner, mock_docker):
+        result = runner.invoke(cli, ["worker", "kill", "--all", "dvd-worker-test"])
+        assert result.exit_code != 0
+
+    def test_kill_nonexistent_worker(self, runner, mock_docker):
+        import docker.errors
+        mock_docker.containers.get.side_effect = docker.errors.NotFound("no")
+        result = runner.invoke(cli, ["worker", "kill", "ghost"])
+        assert result.exit_code != 0
+        assert "not found" in result.output.lower()
