@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getWorkers } from '../api/client';
-import { WorkerCard } from '../components/WorkerCard';
+import { getMules } from '../api/client';
+import { WorkerCard } from '../components/MuleCard';
 import { DeployMuleModal } from '../components/DeployMuleModal';
 import { ShieldCheck, Rocket } from 'lucide-react';
 
@@ -35,7 +35,7 @@ export function WorkersPage() {
 
   const { data: workers = [], isLoading } = useQuery({
     queryKey: ['workers'],
-    queryFn: getWorkers,
+    queryFn: getMules,
     refetchInterval: 3_000,
   });
 

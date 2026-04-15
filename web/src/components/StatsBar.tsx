@@ -61,7 +61,7 @@ export function StatsBar({ stats }: Props) {
           </div>
           <div>
             <p className="text-neutral-500 text-xs font-semibold uppercase tracking-wider">Mules</p>
-             <p className="text-neutral-100 font-mono font-medium text-base mt-0.5">{stats.num_workers} <span className="text-neutral-500 text-sm">active</span></p>
+             <p className="text-neutral-100 font-mono font-medium text-base mt-0.5">{stats.num_mules} <span className="text-neutral-500 text-sm">active</span></p>
           </div>
         </div>
 

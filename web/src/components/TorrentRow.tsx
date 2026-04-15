@@ -45,17 +45,17 @@ export function TorrentRow({ torrent }: Props) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   const pause = useMutation({
-    mutationFn: () => pauseTorrent(torrent.worker, torrent.gid),
+    mutationFn: () => pauseTorrent(torrent.mule, torrent.gid),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['torrents'] }),
   });
 
   const resume = useMutation({
-    mutationFn: () => resumeTorrent(torrent.worker, torrent.gid),
+    mutationFn: () => resumeTorrent(torrent.mule, torrent.gid),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['torrents'] }),
   });
 
   const remove = useMutation({
-    mutationFn: () => removeTorrent(torrent.worker, torrent.gid),
+    mutationFn: () => removeTorrent(torrent.mule, torrent.gid),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['torrents'] }),
   });
 
@@ -88,7 +88,7 @@ export function TorrentRow({ torrent }: Props) {
                  {torrent.name || torrent.gid}
                </p>
                <p className="text-[11px] text-neutral-500 font-mono mt-1 tracking-tight truncate max-w-full">
-                 {torrent.worker} • {torrent.gid}
+                 {torrent.mule} • {torrent.gid}
                </p>
             </div>
           </div>
@@ -137,7 +137,7 @@ export function TorrentRow({ torrent }: Props) {
         {/* Worker */}
         <td className="px-4 py-4 whitespace-nowrap">
           <span className="px-2 py-1 bg-white/5 text-neutral-300 rounded text-xs font-mono ring-1 ring-white/10">
-            {torrent.worker}
+            {torrent.mule}
           </span>
         </td>
 

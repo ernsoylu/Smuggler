@@ -6,6 +6,7 @@ from pathlib import Path
 from flask import Blueprint, request, jsonify
 
 from api.database import get_all_settings, update_settings, get_setting
+from api.settings_sync import sync_all_mules
 from cli.log import get_logger
 
 log = get_logger(__name__)
@@ -33,4 +34,6 @@ def save_settings_endpoint():
         data["download_dir"] = str(Path(data["download_dir"]).resolve())
 
     result = update_settings(data)
+    # Sync to running Mules
+    sync_all_mules()
     return jsonify({"ok": True, "settings": result})

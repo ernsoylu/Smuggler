@@ -6,7 +6,7 @@ from flask import Flask
 from flask_cors import CORS
 
 from cli.log import get_logger, log_file_path
-from api.workers import workers_bp
+from api.mules import mules_bp
 from api.torrents import torrents_bp
 from api.stats import stats_bp
 from api.settings import settings_bp
@@ -29,7 +29,7 @@ def create_app() -> Flask:
     app = Flask(__name__)
     CORS(app)
 
-    app.register_blueprint(workers_bp)
+    app.register_blueprint(mules_bp)
     app.register_blueprint(torrents_bp)
     app.register_blueprint(stats_bp)
     app.register_blueprint(settings_bp)
@@ -45,5 +45,5 @@ def create_app() -> Flask:
         log.error("500: %s", e)
         return {"error": str(e)}, 500
 
-    log.info("create_app: blueprints registered — workers, torrents, stats, settings, configs")
+    log.info("create_app: blueprints registered — mules, torrents, stats, settings, configs")
     return app

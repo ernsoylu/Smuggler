@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { getWorkers, addMagnet, addTorrentFile } from '../api/client';
+import { getMules, addMagnet, addTorrentFile } from '../api/client';
 import { X, UploadCloud, Link as LinkIcon } from 'lucide-react';
 
 interface Props {
@@ -18,7 +18,7 @@ export function AddTorrentModal({ onClose }: Props) {
 
   const { data: workers = [] } = useQuery({
     queryKey: ['workers'],
-    queryFn: getWorkers,
+    queryFn: getMules,
     staleTime: 10_000,
   });
 

@@ -11,7 +11,7 @@ from rich.table import Table
 from rich import box
 
 from cli.aria2_client import Aria2Client, Aria2Error
-from cli.docker_client import get_docker_client, get_worker
+from cli.docker_client import get_docker_client, get_mule, list_mules
 
 console = Console()
 
@@ -20,7 +20,7 @@ def _get_aria2(worker_name: str) -> Aria2Client:
     """Resolve a mule name to a live Aria2Client, or raise SystemExit."""
     client = get_docker_client()
     try:
-        worker = get_worker(client, worker_name)
+        worker = get_mule(client, worker_name)
     except RuntimeError as exc:
         console.print(f"[red]Error:[/red] {exc}")
         raise SystemExit(1)
@@ -98,12 +98,10 @@ def torrent_list(worker_name: Optional[str]) -> None:
     """List torrents. If WORKER_NAME is omitted, lists across all running mules."""
     docker_client = get_docker_client()
 
-    from cli.docker_client import list_workers
-
     if worker_name:
-        target_workers = [get_worker(docker_client, worker_name)]
+        target_workers = [get_mule(docker_client, worker_name)]
     else:
-        target_workers = [w for w in list_workers(docker_client) if w.status == "running"]
+        target_workers = [w for w in list_mules(docker_client) if w.status == "running"]
 
     if not target_workers:
         console.print("[yellow]No running mules found.[/yellow]")

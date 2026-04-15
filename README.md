@@ -1,139 +1,207 @@
-# DVD — Dockerized VPN Downloader
+# Smuggler — Dockerized VPN Downloader
 
-Isolated torrent downloads inside per-worker Docker containers, each behind its own WireGuard VPN tunnel. No torrent process ever starts without a verified VPN connection.
+Isolated torrent downloads inside per-mule Docker containers, each behind its own WireGuard VPN tunnel. No torrent process ever starts without a verified VPN connection.
 
 ## How it works
 
-1. You supply a WireGuard `.conf` file and start a worker.
-2. The worker container sets up `wg0` using raw `wg`/`ip` commands (no `wg-quick`), verifies the external IP through the tunnel, then starts the aria2 daemon.
-3. `dvd worker start` blocks until the VPN is confirmed — it only returns once it has the worker's real external IP and country.
-4. Workers restart automatically (`unless-stopped`) if the container crashes.
+1. You supply a WireGuard `.conf` file and start a mule (CLI or Web UI).
+2. The mule container sets up `wg0` using raw `wg`/`ip` commands (no `wg-quick`), verifies the external IP through the tunnel, then starts the aria2 daemon.
+3. `smg mule start` blocks until both VPN and aria2 are confirmed ready — it only returns once it has the mule's real external IP and country.
+4. Mules restart automatically (`unless-stopped`) if the container crashes.
 5. A kill-switch watchdog inside the container kills aria2 immediately if `wg0` disappears.
-6. You add torrents to the worker via the CLI. All downloads land in the shared `./downloads` folder on the host.
+6. You add torrents to the mule via the CLI or Web UI. All downloads land in the shared `./downloads` folder on the host.
 
 ## Requirements
 
 - Docker
 - Python 3.12+
 - [uv](https://github.com/astral-sh/uv)
-- A WireGuard `.conf` file (e.g. from [Mega VPN](https://mega.nz/vpn))
+- Node.js 18+ (for the Web UI)
+- A WireGuard `.conf` file
 
 ## Installation
 
 ```bash
 git clone <repo>
-cd DVD
+cd Smuggler
 uv sync
 ```
 
-This installs the `dvd` CLI into the project's virtual environment.
+This installs the `smg` CLI into the project's virtual environment.
 
 ## Quick start
 
 ```bash
-# 1. Build the worker Docker image (one-time)
-dvd build
+# 1. Build the mule Docker image (one-time)
+smg build
 
-# 2. Drop your WireGuard config into vpn_configs/
-cp ~/Downloads/my-vpn.conf vpn_configs/
+# 2. Start a mule — blocks until VPN is confirmed
+smg mule start --config vpn_configs/my-vpn.conf
 
-# 3. Start a worker — blocks until VPN is confirmed, prints external IP on success
-dvd worker start --config vpn_configs/my-vpn.conf
+# 3. Add a torrent
+smg torrent add smuggler-mule-<name> --magnet "magnet:?xt=urn:btih:..."
 
-# 4. Add a torrent
-dvd torrent add dvd-worker-<name> --magnet "magnet:?xt=urn:btih:..."
-# or with a .torrent file:
-dvd torrent add dvd-worker-<name> --file ~/Downloads/file.torrent
-
-# 5. Monitor progress
-dvd torrent list
-
-# 6. Shut down a worker when done
-dvd worker stop dvd-worker-<name>
-
-# Or forcefully kill all workers at once
-dvd worker kill --all --yes
+# 4. Monitor progress
+smg torrent list
 ```
 
 Downloaded files appear in `./downloads/` on your host machine.
 
+## Web UI
+
+Start the API and frontend together:
+
+```bash
+./start.sh
+```
+
+Or separately:
+
+```bash
+# API (port 5000)
+uv run python -m api.run
+
+# Frontend (port 5173)
+cd web && npm install && npm run dev
+```
+
+Open `http://localhost:5173` in your browser.
+
+### Web UI pages
+
+| Page | Description |
+|---|---|
+| **Torrents** | Live dashboard — global speed stats, per-torrent progress, add/pause/remove |
+| **Mules** | Manage mule containers — start from uploaded config, stop, kill, view external IP |
+| **Configs** | Upload WireGuard configs and deploy them as new mules in one click |
+| **Settings** | Configure download directory, max concurrent downloads, and speed limits |
+
 ## CLI reference
 
-### `dvd build`
+### `smg build`
 
-Builds the `dvd-worker:latest` Docker image from `worker_image/`.
+Builds the `smuggler-mule:latest` Docker image.
 
 ```
-dvd build [--context PATH] [--tag TAG]
+smg build [--context PATH] [--tag TAG]
 ```
 
-### `dvd worker`
+### `smg mule`
 
 | Command | Description |
 |---|---|
-| `dvd worker start --config FILE` | Start a worker — blocks until VPN is confirmed |
-| `dvd worker list` | List all workers and their status |
-| `dvd worker stop NAME` | Gracefully stop and remove a worker (SIGTERM) |
-| `dvd worker stop --keep NAME` | Stop but keep the container |
-| `dvd worker ip NAME` | Show the worker's current external IP and geolocation |
-| `dvd worker kill NAME` | Force-kill a worker immediately (SIGKILL) |
-| `dvd worker kill --all` | Force-kill every worker (prompts for confirmation) |
-| `dvd worker kill --all --yes` | Force-kill every worker, skip confirmation |
+| `smg mule start --config FILE` | Start a mule — blocks until VPN and aria2 are confirmed |
+| `smg mule start --config FILE --name NAME` | Start a mule with a custom name |
+| `smg mule list` | List all mules and their status |
+| `smg mule stop NAME` | Gracefully stop and remove a mule |
+| `smg mule stop --keep NAME` | Stop but keep the container |
+| `smg mule ip NAME` | Show the mule's current external IP and geolocation |
+| `smg mule kill NAME` | Force-kill a mule immediately |
+| `smg mule kill --all` | Force-kill every mule (prompts for confirmation) |
+| `smg mule kill --all --yes` | Force-kill every mule without prompt |
 
-**`worker start` options:**
-
-| Flag | Description |
-|---|---|
-| `--config`, `-c` | Path to the WireGuard `.conf` file (required) |
-| `--name`, `-n` | Worker name (auto-generated if omitted) |
-| `--downloads-dir` | Host directory for downloads (default: `./downloads`) |
-
-**`worker kill` options:**
-
-| Flag | Description |
-|---|---|
-| `--all` | Kill every worker instead of a named one |
-| `--keep` | Kill but do not remove the container |
-| `--yes`, `-y` | Skip the confirmation prompt (useful with `--all`) |
-
-### `dvd torrent`
+### `smg torrent`
 
 | Command | Description |
 |---|---|
-| `dvd torrent add WORKER --magnet URI` | Add a magnet link to a worker |
-| `dvd torrent add WORKER --file FILE` | Add a `.torrent` file to a worker |
-| `dvd torrent list [WORKER]` | List torrents (all workers if WORKER omitted) |
-| `dvd torrent remove WORKER GID` | Remove a torrent by GID |
-| `dvd torrent pause WORKER GID` | Pause a torrent |
-| `dvd torrent resume WORKER GID` | Resume a paused torrent |
+| `smg torrent add MULE --magnet URI` | Add a magnet link to a mule |
+| `smg torrent add MULE --file FILE` | Add a `.torrent` file to a mule |
+| `smg torrent list` | List torrents across all running mules |
+| `smg torrent list MULE` | List torrents for a specific mule |
+| `smg torrent remove MULE GID` | Remove a torrent by GID |
+| `smg torrent pause MULE GID` | Pause a torrent |
+| `smg torrent resume MULE GID` | Resume a paused torrent |
+
+## REST API
+
+The Flask API runs on `http://localhost:5000`. All endpoints are prefixed with `/api`.
+
+### Mules
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/mules/` | List all mules |
+| `POST` | `/api/mules/` | Create mule from uploaded VPN config |
+| `GET` | `/api/mules/<name>` | Get a single mule |
+| `DELETE` | `/api/mules/<name>` | Stop and remove a mule |
+| `POST` | `/api/mules/<name>/kill` | Force-kill a mule |
+| `GET` | `/api/mules/<name>/ip` | Get mule's current external IP |
+
+### Torrents
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/torrents/` | List all torrents (all mules) |
+| `GET` | `/api/torrents/<mule>` | List torrents for one mule |
+| `POST` | `/api/torrents/<mule>` | Add magnet or `.torrent` file |
+| `DELETE` | `/api/torrents/<mule>/<gid>` | Remove a torrent |
+| `POST` | `/api/torrents/<mule>/<gid>/pause` | Pause a torrent |
+| `POST` | `/api/torrents/<mule>/<gid>/resume` | Resume a torrent |
+
+### Stats / Settings / Configs
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/stats/` | Global speed, counts, and mule total |
+| `GET/POST` | `/api/settings/` | Read and update download settings |
+| `GET` | `/api/configs/` | List stored VPN configs |
+| `POST` | `/api/configs/` | Upload a new VPN config |
+| `DELETE` | `/api/configs/<id>` | Delete a stored VPN config |
+| `POST` | `/api/configs/<id>/deploy` | Deploy a config as a new mule |
 
 ## Project layout
 
 ```
-DVD/
-├── worker_image/
-│   ├── Dockerfile       # Debian + wireguard-tools + aria2
-│   └── startup.sh       # VPN-first boot + kill-switch watchdog
-├── cli/
-│   ├── main.py          # CLI entry point
+Smuggler/
+├── worker_image/        # Docker context for mule containers
+│   ├── Dockerfile
+│   ├── entrypoint.sh    # WireGuard setup + aria2 start
+│   └── watchdog.sh      # Kill-switch watchdog
+├── api/                 # Flask REST API
+│   ├── app.py           # App factory
+│   ├── mules.py         # /api/mules blueprint
+│   ├── torrents.py      # /api/torrents blueprint
+│   ├── stats.py         # /api/stats blueprint
+│   ├── settings.py      # /api/settings blueprint
+│   ├── configs.py       # /api/configs blueprint
+│   ├── database.py      # SQLite layer
+│   └── settings_sync.py # Propagate settings to running mules
+├── cli/                 # Python CLI (smg)
+│   ├── main.py          # Entry point
+│   ├── mule_commands.py # smg mule subcommands
+│   ├── torrent_commands.py  # smg torrent subcommands
 │   ├── docker_client.py # Docker SDK wrapper
 │   ├── aria2_client.py  # aria2 JSON-RPC client
-│   ├── worker_commands.py
-│   └── torrent_commands.py
-├── tests/               # 82 unit tests
-├── downloads/           # Shared downloads volume (host-side)
-├── vpn_configs/         # Place .conf files here (gitignored)
-└── pyproject.toml
+│   └── log.py           # Shared logging setup
+├── web/                 # React/TypeScript Web UI
+│   ├── src/
+│   │   ├── pages/       # TorrentsPage, MulesPage, ConfigsPage, SettingsPage
+│   │   ├── components/  # MuleCard, TorrentRow, StatsBar, SpeedGraph, modals
+│   │   └── api/         # Axios client + TypeScript types
+│   └── package.json
+├── tests/               # 108 unit and integration tests
+├── downloads/           # Shared downloads volume (mounted into mules)
+├── logs/                # Dated log files (dvd_YYYY-MM-DD_HH-MM-SS.log)
+├── start.sh             # Launch API + frontend together
+└── .env                 # DVD_LOGGING, DVD_LOG_LEVEL
+```
+
+## Configuration
+
+Copy `.env.example` to `.env` and adjust as needed:
+
+```env
+DVD_LOGGING=true
+DVD_LOG_LEVEL=INFO
 ```
 
 ## Security notes
 
-- `vpn_configs/*.conf` is gitignored — private keys are never committed.
-- Workers require `NET_ADMIN` + `SYS_MODULE` capabilities for WireGuard.
-- WireGuard is configured with raw `wg`/`ip` commands (not `wg-quick`) to avoid `sysctl` permission issues inside containers.
-- The VPN endpoint is pinned to the original Docker gateway so WireGuard's own UDP traffic never loops through `wg0`.
-- DNS is switched to the VPN's nameserver only after external connectivity is confirmed.
-- The kill-switch is enforced at the process level inside the container: if `wg0` disappears, aria2 is killed with `SIGKILL` before any traffic can leak to the host IP.
+- Kill-switch is enforced at the process level: if `wg0` disappears, aria2 is killed with `SIGKILL` before any traffic leaks.
+- DNS is switched to the VPN nameserver only after connectivity is verified.
+- The VPN endpoint is pinned to avoid routing loops through the tunnel.
+- WireGuard private keys are never logged or returned through the API.
+- `vpn_configs/*.conf` is gitignored.
 
 ## Development
 
@@ -141,10 +209,9 @@ DVD/
 # Run tests
 uv run pytest tests/ -v
 
-# Run the CLI directly (without installing)
-uv run dvd --help
+# Run tests (quiet)
+uv run pytest tests/ -q
+
+# Run the CLI directly
+uv run smg --help
 ```
-
-## Roadmap
-
-- **Phase 2:** Flask REST API + React/TypeScript web UI with a Deluge-like dashboard (worker management, per-torrent progress, speed graphs).

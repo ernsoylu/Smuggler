@@ -1,4 +1,4 @@
-"""Integration-style tests for CLI worker commands (no real Docker)."""
+"""Integration-style tests for CLI mule commands (no real Docker)."""
 
 from __future__ import annotations
 
@@ -24,13 +24,13 @@ def mock_docker():
     """Patch get_docker_client everywhere it is imported."""
     mock_client = MagicMock()
     mock_client.ping.return_value = True
-    with patch("cli.worker_commands.get_docker_client", return_value=mock_client), \
+    with patch("cli.mule_commands.get_docker_client", return_value=mock_client), \
          patch("cli.docker_client.get_docker_client", return_value=mock_client):
         yield mock_client
 
 
 def make_container(
-    name="dvd-worker-test",
+    name="smuggler-mule-test",
     status="running",
     rpc_port=16800,
     token="tok",
@@ -40,15 +40,15 @@ def make_container(
     c.short_id = "abc"
     c.status = status
     c.labels = {
-        "dvd.worker": "true",
-        "dvd.rpc_token": token,
-        "dvd.rpc_port": str(rpc_port),
-        "dvd.vpn_config": "vpn.conf",
+        "smuggler.mule": "true",
+        "smuggler.rpc_token": token,
+        "smuggler.rpc_port": str(rpc_port),
+        "smuggler.vpn_config": "vpn.conf",
     }
     return c
 
 
-# ─── dvd worker start ────────────────────────────────────────────────────────
+# ─── smg mule start ────────────────────────────────────────────────────────────
 
 VPN_INFO = {"ip": "1.2.3.4", "country": "NZ", "city": "Auckland", "region": "Auckland", "org": "AS1234 Mega"}
 
@@ -64,18 +64,18 @@ class TestWorkerStart:
 
         try:
             with patch("cli.docker_client._find_free_port", return_value=16800), \
-                 patch("cli.worker_commands.wait_for_vpn", return_value=VPN_INFO):
-                result = runner.invoke(cli, ["worker", "start", "--config", conf])
+                 patch("cli.mule_commands.wait_for_vpn", return_value=VPN_INFO):
+                result = runner.invoke(cli, ["mule", "start", "--config", conf])
         finally:
             os.unlink(conf)
 
         assert result.exit_code == 0
-        assert "dvd-worker-test" in result.output
+        assert "smuggler-mule-test" in result.output
         assert "1.2.3.4" in result.output
         assert "NZ" in result.output
 
     def test_start_fails_with_missing_config(self, runner, mock_docker):
-        result = runner.invoke(cli, ["worker", "start", "--config", "/no/such/file.conf"])
+        result = runner.invoke(cli, ["mule", "start", "--config", "/no/such/file.conf"])
         assert result.exit_code != 0
 
     def test_start_fails_when_image_missing(self, runner, mock_docker):
@@ -87,12 +87,12 @@ class TestWorkerStart:
             conf = f.name
 
         try:
-            result = runner.invoke(cli, ["worker", "start", "--config", conf])
+            result = runner.invoke(cli, ["mule", "start", "--config", conf])
         finally:
             os.unlink(conf)
 
         assert result.exit_code != 0
-        assert "dvd build" in result.output.lower() or "not found" in result.output.lower()
+        assert "smg build" in result.output.lower() or "not found" in result.output.lower()
 
     def test_start_stops_container_when_vpn_fails(self, runner, mock_docker):
         container = make_container()
@@ -105,10 +105,10 @@ class TestWorkerStart:
 
         try:
             with patch("cli.docker_client._find_free_port", return_value=16800), \
-                 patch("cli.worker_commands.wait_for_vpn",
+                 patch("cli.mule_commands.wait_for_vpn",
                        side_effect=RuntimeError("VPN confirmation timed out")), \
-                 patch("cli.worker_commands.stop_worker") as mock_stop:
-                result = runner.invoke(cli, ["worker", "start", "--config", conf])
+                 patch("cli.mule_commands.stop_mule") as mock_stop:
+                result = runner.invoke(cli, ["mule", "start", "--config", conf])
         finally:
             os.unlink(conf)
 
@@ -117,32 +117,32 @@ class TestWorkerStart:
         mock_stop.assert_called_once()
 
 
-# ─── dvd worker list ─────────────────────────────────────────────────────────
+# ─── smg mule list ─────────────────────────────────────────────────────────────
 
 class TestWorkerList:
     def test_list_shows_running_workers(self, runner, mock_docker):
-        containers = [make_container("dvd-worker-a"), make_container("dvd-worker-b", status="exited")]
+        containers = [make_container("smuggler-mule-a"), make_container("smuggler-mule-b", status="exited")]
         mock_docker.containers.list.return_value = containers
-        result = runner.invoke(cli, ["worker", "list"])
+        result = runner.invoke(cli, ["mule", "list"])
         assert result.exit_code == 0
-        assert "dvd-worker-a" in result.output
-        assert "dvd-worker-b" in result.output
+        assert "smuggler-mule-a" in result.output
+        assert "smuggler-mule-b" in result.output
         assert "running" in result.output
 
     def test_list_shows_empty_message(self, runner, mock_docker):
         mock_docker.containers.list.return_value = []
-        result = runner.invoke(cli, ["worker", "list"])
+        result = runner.invoke(cli, ["mule", "list"])
         assert result.exit_code == 0
-        assert "No workers" in result.output
+        assert "No mules" in result.output
 
 
-# ─── dvd worker stop ─────────────────────────────────────────────────────────
+# ─── smg mule stop ─────────────────────────────────────────────────────────────
 
 class TestWorkerStop:
     def test_stop_removes_container(self, runner, mock_docker):
         container = make_container()
         mock_docker.containers.get.return_value = container
-        result = runner.invoke(cli, ["worker", "stop", "dvd-worker-test"])
+        result = runner.invoke(cli, ["mule", "stop", "smuggler-mule-test"])
         assert result.exit_code == 0
         container.stop.assert_called_once()
         container.remove.assert_called_once()
@@ -151,7 +151,7 @@ class TestWorkerStop:
     def test_stop_keep_flag(self, runner, mock_docker):
         container = make_container()
         mock_docker.containers.get.return_value = container
-        result = runner.invoke(cli, ["worker", "stop", "--keep", "dvd-worker-test"])
+        result = runner.invoke(cli, ["mule", "stop", "--keep", "smuggler-mule-test"])
         assert result.exit_code == 0
         container.stop.assert_called_once()
         container.remove.assert_not_called()
@@ -159,12 +159,12 @@ class TestWorkerStop:
     def test_stop_nonexistent_worker(self, runner, mock_docker):
         import docker.errors
         mock_docker.containers.get.side_effect = docker.errors.NotFound("no")
-        result = runner.invoke(cli, ["worker", "stop", "ghost"])
+        result = runner.invoke(cli, ["mule", "stop", "ghost"])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()
 
 
-# ─── dvd worker ip ───────────────────────────────────────────────────────────
+# ─── smg mule ip ───────────────────────────────────────────────────────────────
 
 class TestWorkerIp:
     def test_shows_ip_info(self, runner, mock_docker):
@@ -179,7 +179,7 @@ class TestWorkerIp:
         })
         container.exec_run.return_value = (0, ip_json.encode())
 
-        result = runner.invoke(cli, ["worker", "ip", "dvd-worker-test", "--wait", "5"])
+        result = runner.invoke(cli, ["mule", "ip", "smuggler-mule-test", "--wait", "5"])
         assert result.exit_code == 0
         assert "1.2.3.4" in result.output
         assert "TestCity" in result.output
@@ -188,17 +188,17 @@ class TestWorkerIp:
     def test_shows_error_on_exec_failure(self, runner, mock_docker):
         import docker.errors
         mock_docker.containers.get.side_effect = docker.errors.NotFound("no")
-        result = runner.invoke(cli, ["worker", "ip", "ghost", "--wait", "1"])
+        result = runner.invoke(cli, ["mule", "ip", "ghost", "--wait", "1"])
         assert result.exit_code != 0
 
 
-# ─── dvd worker kill ─────────────────────────────────────────────────────────
+# ─── smg mule kill ─────────────────────────────────────────────────────────────
 
 class TestWorkerKill:
     def test_kill_individual_worker(self, runner, mock_docker):
         container = make_container()
         mock_docker.containers.get.return_value = container
-        result = runner.invoke(cli, ["worker", "kill", "dvd-worker-test"])
+        result = runner.invoke(cli, ["mule", "kill", "smuggler-mule-test"])
         assert result.exit_code == 0
         container.kill.assert_called_once()
         container.remove.assert_called_once()
@@ -207,54 +207,53 @@ class TestWorkerKill:
     def test_kill_individual_keep_flag(self, runner, mock_docker):
         container = make_container()
         mock_docker.containers.get.return_value = container
-        result = runner.invoke(cli, ["worker", "kill", "--keep", "dvd-worker-test"])
+        result = runner.invoke(cli, ["mule", "kill", "--keep", "smuggler-mule-test"])
         assert result.exit_code == 0
         container.kill.assert_called_once()
         container.remove.assert_not_called()
 
     def test_kill_all_with_yes_flag(self, runner, mock_docker):
-        containers = [make_container("dvd-worker-aaa"), make_container("dvd-worker-bbb")]
+        containers = [make_container("smuggler-mule-aaa"), make_container("smuggler-mule-bbb")]
         mock_docker.containers.list.return_value = containers
         mock_docker.containers.get.side_effect = containers
-        result = runner.invoke(cli, ["worker", "kill", "--all", "--yes"])
+        result = runner.invoke(cli, ["mule", "kill", "--all", "--yes"])
         assert result.exit_code == 0
         assert "2" in result.output
         for c in containers:
             c.kill.assert_called_once()
 
     def test_kill_all_prompts_without_yes(self, runner, mock_docker):
-        containers = [make_container("dvd-worker-aaa")]
+        containers = [make_container("smuggler-mule-aaa")]
         mock_docker.containers.list.return_value = containers
         mock_docker.containers.get.side_effect = containers
-        # Simulate user typing "y" at the confirmation prompt
-        result = runner.invoke(cli, ["worker", "kill", "--all"], input="y\n")
+        result = runner.invoke(cli, ["mule", "kill", "--all"], input="y\n")
         assert result.exit_code == 0
         assert "killed" in result.output
 
     def test_kill_all_aborts_on_no(self, runner, mock_docker):
-        containers = [make_container("dvd-worker-aaa")]
+        containers = [make_container("smuggler-mule-aaa")]
         mock_docker.containers.list.return_value = containers
-        result = runner.invoke(cli, ["worker", "kill", "--all"], input="n\n")
+        result = runner.invoke(cli, ["mule", "kill", "--all"], input="n\n")
         assert result.exit_code != 0
 
     def test_kill_all_empty(self, runner, mock_docker):
         mock_docker.containers.list.return_value = []
-        result = runner.invoke(cli, ["worker", "kill", "--all", "--yes"])
+        result = runner.invoke(cli, ["mule", "kill", "--all", "--yes"])
         assert result.exit_code == 0
-        assert "No workers" in result.output
+        assert "No mules" in result.output
 
     def test_kill_requires_name_or_all(self, runner, mock_docker):
-        result = runner.invoke(cli, ["worker", "kill"])
+        result = runner.invoke(cli, ["mule", "kill"])
         assert result.exit_code != 0
-        assert "worker name or --all" in result.output
+        assert "mule name or --all" in result.output
 
     def test_kill_rejects_name_and_all_together(self, runner, mock_docker):
-        result = runner.invoke(cli, ["worker", "kill", "--all", "dvd-worker-test"])
+        result = runner.invoke(cli, ["mule", "kill", "--all", "smuggler-mule-test"])
         assert result.exit_code != 0
 
     def test_kill_nonexistent_worker(self, runner, mock_docker):
         import docker.errors
         mock_docker.containers.get.side_effect = docker.errors.NotFound("no")
-        result = runner.invoke(cli, ["worker", "kill", "ghost"])
+        result = runner.invoke(cli, ["mule", "kill", "ghost"])
         assert result.exit_code != 0
         assert "not found" in result.output.lower()

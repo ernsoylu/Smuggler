@@ -139,6 +139,16 @@ class Aria2Client:
         log.debug("get_version: url=%s", self.url)
         return self._call("aria2.getVersion")
 
+    def change_global_option(self, options: dict[str, str]) -> str:
+        """Change global options (e.g. speed limits). Returns 'OK'."""
+        log.info("change_global_option: options=%s", options)
+        return self._call("aria2.changeGlobalOption", [options])
+
+    def get_global_option(self) -> dict[str, str]:
+        """Fetch current global options."""
+        log.debug("get_global_option: url=%s", self.url)
+        return self._call("aria2.getGlobalOption")
+
     def is_alive(self) -> bool:
         """Return True if aria2 responds to a version ping."""
         try:

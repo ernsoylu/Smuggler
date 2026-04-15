@@ -12,5 +12,5 @@ if __name__ == "__main__":
         print(f"  Logging  → {lf}")
 
     app = create_app()
-    log.info("Starting Flask development server on 0.0.0.0:5000")
+    log.info("Starting Smuggler API development server on 0.0.0.0:5000")
     app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)

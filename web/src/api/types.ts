@@ -1,4 +1,4 @@
-export interface Worker {
+export interface Mule {
   name: string;
   id: string;
   status: string;
@@ -27,7 +27,7 @@ export interface TorrentFile {
 
 export interface Torrent {
   gid: string;
-  worker: string;
+  mule: string;
   name: string;
   status: 'active' | 'waiting' | 'paused' | 'error' | 'complete' | 'removed';
   completed_length: number;
@@ -61,5 +61,5 @@ export interface GlobalStats {
   num_active: number;
   num_waiting: number;
   num_stopped: number;
-  num_workers: number;
+  num_mules: number;
 }

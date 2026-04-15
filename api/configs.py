@@ -12,11 +12,12 @@ from api.database import list_vpn_configs, get_vpn_config, add_vpn_config, delet
 from cli.log import get_logger
 from cli.docker_client import (
     get_docker_client,
-    start_worker,
+    start_mule,
     wait_for_vpn,
-    stop_worker,
+    stop_mule,
 )
 from api.settings import read_settings
+from api.settings_sync import apply_settings_to_mule
 
 log = get_logger(__name__)
 configs_bp = Blueprint("configs", __name__, url_prefix="/api/configs")
@@ -93,27 +94,30 @@ def deploy_mule(config_id: int):
         downloads_dir = Path(settings.get("download_dir", str(Path(os.getcwd()) / "downloads")))
         downloads_dir.mkdir(parents=True, exist_ok=True)
 
-        worker = start_worker(client, vpn_config_path=tmp.name, name=mule_name,
-                              downloads_dir=downloads_dir)
-        log.info("POST /api/configs/%d/deploy: container started name=%s", config_id, worker.name)
+        mule = start_mule(client, vpn_config_path=tmp.name, name=mule_name,
+                               downloads_dir=downloads_dir)
+        log.info("POST /api/configs/%d/deploy: container started name=%s", config_id, mule.name)
 
         try:
-            ip_info = wait_for_vpn(client, worker.name, timeout=90)
+            ip_info = wait_for_vpn(client, mule.name, timeout=90)
             log.info("POST /api/configs/%d/deploy: VPN up ip=%s", config_id, ip_info.get("ip"))
+            
+            # Apply current global settings to the new Mule
+            apply_settings_to_mule(mule.name, settings)
         except RuntimeError as exc:
             log.error("POST /api/configs/%d/deploy: VPN failed — %s", config_id, exc)
             try:
-                stop_worker(client, worker.name, remove=True)
+                stop_mule(client, mule.name, remove=True)
             except RuntimeError:
                 pass
             return jsonify({"error": str(exc)}), 502
 
         result = {
-            "name": worker.name,
-            "id": worker.id,
-            "status": worker.status,
-            "rpc_port": worker.rpc_port,
-            "vpn_config": worker.vpn_config,
+            "name": mule.name,
+            "id": mule.id,
+            "status": mule.status,
+            "rpc_port": mule.rpc_port,
+            "vpn_config": mule.vpn_config,
             "ip_info": ip_info,
         }
         return jsonify(result), 201

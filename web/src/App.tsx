@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getStats } from './api/client';
 import { StatsBar } from './components/StatsBar';
 import { SpeedGraph } from './components/SpeedGraph';
-import { WorkersPage } from './pages/WorkersPage';
+import { WorkersPage } from './pages/MulesPage';
 import { TorrentsPage } from './pages/TorrentsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ConfigsPage } from './pages/ConfigsPage';

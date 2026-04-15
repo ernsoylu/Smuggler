@@ -17,16 +17,16 @@ def mock_docker_client():
 
 @pytest.fixture
 def mock_container():
-    """A mock docker container representing a running dvd worker."""
+    """A mock docker container representing a running smoker-mule."""
     c = MagicMock()
-    c.name = "dvd-worker-test"
+    c.name = "smuggler-mule-test"
     c.short_id = "abc123"
     c.status = "running"
     c.labels = {
-        "dvd.worker": "true",
-        "dvd.rpc_token": "test-token-xyz",
-        "dvd.rpc_port": "16800",
-        "dvd.vpn_config": "vpn.conf",
+        "smuggler.mule": "true",
+        "smuggler.rpc_token": "test-token-xyz",
+        "smuggler.rpc_port": "16800",
+        "smuggler.vpn_config": "vpn.conf",
     }
     return c
 

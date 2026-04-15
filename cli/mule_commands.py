@@ -13,17 +13,17 @@ from rich import box
 
 from cli.docker_client import (
     build_image,
-    exec_in_worker,
+    exec_in_mule,
     get_container_logs,
     get_docker_client,
-    get_worker,
-    kill_all_workers,
-    kill_worker,
-    list_workers,
-    start_worker,
-    stop_worker,
+    get_mule,
+    kill_all_mules,
+    kill_mule,
+    list_mules,
+    start_mule,
+    stop_mule,
     wait_for_vpn,
-    WORKER_IMAGE,
+    MULE_IMAGE,
 )
 
 console = Console()
@@ -49,14 +49,14 @@ def mule_group() -> None:
     type=click.Path(file_okay=False),
     help="Host directory for downloads (default: ./downloads).",
 )
-def worker_start(config: str, name: str | None, downloads_dir: str | None) -> None:
+def mule_start(config: str, name: str | None, downloads_dir: str | None) -> None:
     """Start a new mule container with the given VPN config."""
     client = get_docker_client()
 
     # ── Step 1: create the container ────────────────────────────────────────
     with console.status(f"Creating mule with [bold]{Path(config).name}[/bold]..."):
         try:
-            worker = start_worker(
+            mule = start_mule(
                 client,
                 vpn_config_path=config,
                 name=name,
@@ -66,37 +66,37 @@ def worker_start(config: str, name: str | None, downloads_dir: str | None) -> No
             console.print(f"[red]Error:[/red] {exc}")
             raise SystemExit(1)
 
-    console.print(f"Container [bold]{worker.name}[/bold] created — waiting for VPN...")
+    console.print(f"Container [bold]{mule.name}[/bold] created — waiting for VPN...")
 
     # ── Step 2: block until WireGuard is up and VPN IP is confirmed ─────────
     with console.status("Confirming WireGuard connection (up to 60s)..."):
         try:
-            ip_info = wait_for_vpn(client, worker.name, timeout=60)
+            ip_info = wait_for_vpn(client, mule.name, timeout=60)
         except RuntimeError as exc:
             console.print(f"\n[red]VPN failed to come up — stopping container.[/red]")
             console.print(f"[red]{exc}[/red]")
             try:
-                stop_worker(client, worker.name, remove=True)
+                stop_mule(client, mule.name, remove=True)
             except RuntimeError:
                 pass
             raise SystemExit(1)
 
-    console.print(f"[green]Mule ready:[/green] [bold]{worker.name}[/bold]")
-    console.print(f"  Container ID : {worker.id}")
-    console.print(f"  aria2 RPC    : localhost:{worker.rpc_port}")
-    console.print(f"  VPN config   : {worker.vpn_config}")
+    console.print(f"[green]Mule ready:[/green] [bold]{mule.name}[/bold]")
+    console.print(f"  Container ID : {mule.id}")
+    console.print(f"  aria2 RPC    : localhost:{mule.rpc_port}")
+    console.print(f"  VPN config   : {mule.vpn_config}")
     console.print(f"  External IP  : [cyan]{ip_info.get('ip', '?')}[/cyan]"
                   f"  ([bold]{ip_info.get('country', '?')}[/bold]"
                   f" / {ip_info.get('city', '?')})")
 
 
 @mule_group.command("list")
-def worker_list() -> None:
+def mule_list() -> None:
     """List all smuggler mules."""
     client = get_docker_client()
-    workers = list_workers(client)
+    mules = list_mules(client)
 
-    if not workers:
+    if not mules:
         console.print("[yellow]No mules found.[/yellow]  Start one with `smg mule start`.")
         return
 
@@ -107,7 +107,7 @@ def worker_list() -> None:
     table.add_column("RPC Port")
     table.add_column("VPN Config")
 
-    for w in workers:
+    for w in mules:
         status_style = "green" if w.status == "running" else "yellow"
         table.add_row(
             w.name,
@@ -121,35 +121,35 @@ def worker_list() -> None:
 
 
 @mule_group.command("stop")
-@click.argument("worker_name")
+@click.argument("mule_name")
 @click.option("--keep", is_flag=True, default=False, help="Stop but do not remove the container.")
-def worker_stop(worker_name: str, keep: bool) -> None:
+def mule_stop(mule_name: str, keep: bool) -> None:
     """Stop (and remove) a mule container."""
     client = get_docker_client()
-    with console.status(f"Stopping [bold]{worker_name}[/bold]..."):
+    with console.status(f"Stopping [bold]{mule_name}[/bold]..."):
         try:
-            stop_worker(client, worker_name, remove=not keep)
+            stop_mule(client, mule_name, remove=not keep)
         except RuntimeError as exc:
             console.print(f"[red]Error:[/red] {exc}")
             raise SystemExit(1)
     action = "stopped" if keep else "stopped and removed"
-    console.print(f"[green]Mule {action}:[/green] {worker_name}")
+    console.print(f"[green]Mule {action}:[/green] {mule_name}")
 
 
 @mule_group.command("ip")
-@click.argument("worker_name")
+@click.argument("mule_name")
 @click.option("--wait", default=30, show_default=True, help="Seconds to wait for VPN to be ready.")
-def worker_ip(worker_name: str, wait: int) -> None:
+def mule_ip(mule_name: str, wait: int) -> None:
     """Display the external IP and geolocation of a mule's VPN connection."""
     client = get_docker_client()
     deadline = time.time() + wait
     last_exc: Exception | None = None
 
-    with console.status(f"Querying VPN IP for [bold]{worker_name}[/bold]..."):
+    with console.status(f"Querying VPN IP for [bold]{mule_name}[/bold]..."):
         while time.time() < deadline:
             try:
-                raw = exec_in_worker(
-                    client, worker_name,
+                raw = exec_in_mule(
+                    client, mule_name,
                     "curl -sf --max-time 8 https://ipinfo.io/json"
                 )
                 last_exc = None
@@ -176,40 +176,40 @@ def worker_ip(worker_name: str, wait: int) -> None:
 
 
 @mule_group.command("kill")
-@click.argument("worker_name", required=False, default=None)
+@click.argument("mule_name", required=False, default=None)
 @click.option("--all", "kill_all", is_flag=True, default=False, help="Kill every mule.")
 @click.option("--keep", is_flag=True, default=False, help="Kill but do not remove the container(s).")
 @click.option("--yes", "-y", is_flag=True, default=False, help="Skip confirmation prompt.")
-def worker_kill(worker_name: str | None, kill_all: bool, keep: bool, yes: bool) -> None:
+def mule_kill(mule_name: str | None, kill_all: bool, keep: bool, yes: bool) -> None:
     """Force-kill (SIGKILL) one or all mule containers.
 
     \b
     Examples:
-      smg mule kill my-mule-a1b2             # kill a specific mule
-      smg mule kill --all                    # kill every mule (prompts first)
-      smg mule kill --all --yes              # kill every mule, no prompt
+      smg mule kill my-mule             # kill a specific mule
+      smg mule kill --all               # kill every mule (prompts first)
+      smg mule kill --all --yes         # kill every mule, no prompt
     """
-    if not worker_name and not kill_all:
+    if not mule_name and not kill_all:
         console.print("[red]Error:[/red] Provide a mule name or --all.")
         raise SystemExit(1)
-    if worker_name and kill_all:
+    if mule_name and kill_all:
         console.print("[red]Error:[/red] Provide a mule name or --all, not both.")
         raise SystemExit(1)
 
     client = get_docker_client()
 
     if kill_all:
-        workers = list_workers(client)
-        if not workers:
+        mules = list_mules(client)
+        if not mules:
             console.print("[yellow]No mules to kill.[/yellow]")
             return
-        names = [w.name for w in workers]
+        names = [w.name for w in mules]
         if not yes:
             console.print(f"About to kill [bold]{len(names)}[/bold] mule(s): {', '.join(names)}")
             click.confirm("Proceed?", abort=True)
         with console.status(f"Killing {len(names)} mule(s)..."):
             try:
-                killed = kill_all_workers(client, remove=not keep)
+                killed = kill_all_mules(client, remove=not keep)
             except RuntimeError as exc:
                 console.print(f"[red]Error:[/red] {exc}")
                 raise SystemExit(1)
@@ -218,11 +218,11 @@ def worker_kill(worker_name: str | None, kill_all: bool, keep: bool, yes: bool) 
             console.print(f"[red]✗[/red] {n} — {action}")
         console.print(f"[bold]{len(killed)}[/bold] mule(s) killed.")
     else:
-        with console.status(f"Killing [bold]{worker_name}[/bold]..."):
+        with console.status(f"Killing [bold]{mule_name}[/bold]..."):
             try:
-                kill_worker(client, worker_name, remove=not keep)  # type: ignore[arg-type]
+                kill_mule(client, mule_name, remove=not keep)  # type: ignore[arg-type]
             except RuntimeError as exc:
                 console.print(f"[red]Error:[/red] {exc}")
                 raise SystemExit(1)
         action = "killed" if keep else "killed and removed"
-        console.print(f"[red]✗[/red] {worker_name} — {action}")
+        console.print(f"[red]✗[/red] {mule_name} — {action}")

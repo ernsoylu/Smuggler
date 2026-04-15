@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { stopWorker, killWorker } from '../api/client';
-import type { Worker } from '../api/types';
+import { stopMule, killMule } from '../api/client';
+import type { Mule } from '../api/types';
 import { Power, Trash2, Globe2, Shield, Radio, TerminalSquare } from 'lucide-react';
 
 interface Props {
-  worker: Worker;
+  worker: Mule;
 }
 
 export function WorkerCard({ worker }: Props) {
@@ -13,12 +13,12 @@ export function WorkerCard({ worker }: Props) {
   const [showConfirm, setShowConfirm] = useState<'stop' | 'kill' | null>(null);
 
   const stop = useMutation({
-    mutationFn: () => stopWorker(worker.name),
+    mutationFn: () => stopMule(worker.name),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['workers'] }),
   });
 
   const kill = useMutation({
-    mutationFn: () => killWorker(worker.name),
+    mutationFn: () => killMule(worker.name),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['workers'] }),
   });
 
