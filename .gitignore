@@ -21,12 +21,13 @@ uv.lock
 .coverage
 htmlcov/
 
-# Downloads (runtime data — not for version control)
+# Downloads (runtime data — never commit downloaded files)
 downloads/*
 !downloads/.gitkeep
 
-# VPN configs (contain private keys — NEVER commit)
-vpn_configs/*.conf
+# VPN configs (contain WireGuard private keys — NEVER commit)
+vpn_configs/*
+!vpn_configs/.gitkeep
 
 # Docker
 .docker/
@@ -54,5 +55,5 @@ smuggler.db-shm
 web/node_modules/
 web/dist/
 
-# VPN config uploads (private keys)
-vpn_configs/
+# Temp VPN config uploads (private keys)
+/tmp/smuggler_*
