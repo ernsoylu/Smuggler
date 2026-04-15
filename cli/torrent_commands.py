@@ -17,7 +17,7 @@ console = Console()
 
 
 def _get_aria2(worker_name: str) -> Aria2Client:
-    """Resolve a worker name to a live Aria2Client, or raise SystemExit."""
+    """Resolve a mule name to a live Aria2Client, or raise SystemExit."""
     client = get_docker_client()
     try:
         worker = get_worker(client, worker_name)
@@ -26,7 +26,7 @@ def _get_aria2(worker_name: str) -> Aria2Client:
         raise SystemExit(1)
 
     if worker.status != "running":
-        console.print(f"[red]Worker '{worker_name}' is not running (status={worker.status})[/red]")
+        console.print(f"[red]Mule '{worker_name}' is not running (status={worker.status})[/red]")
         raise SystemExit(1)
 
     return Aria2Client(host="localhost", port=worker.rpc_port, token=worker.rpc_token)
@@ -52,7 +52,7 @@ def _progress_bar(completed: int, total: int, width: int = 20) -> str:
 
 @click.group("torrent")
 def torrent_group() -> None:
-    """Manage torrents on worker containers."""
+    """Manage torrents on mule containers."""
 
 
 @torrent_group.command("add")
@@ -67,7 +67,7 @@ def torrent_group() -> None:
     help="Path to a .torrent file.",
 )
 def torrent_add(worker_name: str, magnet: Optional[str], torrent_file: Optional[str]) -> None:
-    """Add a torrent (magnet or .torrent file) to a worker."""
+    """Add a torrent (magnet or .torrent file) to a mule."""
     if not magnet and not torrent_file:
         console.print("[red]Error:[/red] Provide either --magnet or --file.")
         raise SystemExit(1)
@@ -95,7 +95,7 @@ def torrent_add(worker_name: str, magnet: Optional[str], torrent_file: Optional[
 @torrent_group.command("list")
 @click.argument("worker_name", required=False, default=None)
 def torrent_list(worker_name: Optional[str]) -> None:
-    """List torrents. If WORKER_NAME is omitted, lists across all running workers."""
+    """List torrents. If WORKER_NAME is omitted, lists across all running mules."""
     docker_client = get_docker_client()
 
     from cli.docker_client import list_workers
@@ -106,11 +106,11 @@ def torrent_list(worker_name: Optional[str]) -> None:
         target_workers = [w for w in list_workers(docker_client) if w.status == "running"]
 
     if not target_workers:
-        console.print("[yellow]No running workers found.[/yellow]")
+        console.print("[yellow]No running mules found.[/yellow]")
         return
 
     table = Table(box=box.ROUNDED, show_header=True, header_style="bold cyan")
-    table.add_column("Worker")
+    table.add_column("Mule")
     table.add_column("GID")
     table.add_column("Name")
     table.add_column("State")
@@ -168,7 +168,7 @@ def torrent_list(worker_name: Optional[str]) -> None:
 @click.argument("worker_name")
 @click.argument("gid")
 def torrent_remove(worker_name: str, gid: str) -> None:
-    """Remove a torrent (by GID) from a worker."""
+    """Remove a torrent (by GID) from a mule."""
     aria2 = _get_aria2(worker_name)
     try:
         aria2.remove(gid)
@@ -182,7 +182,7 @@ def torrent_remove(worker_name: str, gid: str) -> None:
 @click.argument("worker_name")
 @click.argument("gid")
 def torrent_pause(worker_name: str, gid: str) -> None:
-    """Pause a torrent on a worker."""
+    """Pause a torrent on a mule."""
     aria2 = _get_aria2(worker_name)
     try:
         aria2.pause(gid)
@@ -196,7 +196,7 @@ def torrent_pause(worker_name: str, gid: str) -> None:
 @click.argument("worker_name")
 @click.argument("gid")
 def torrent_resume(worker_name: str, gid: str) -> None:
-    """Resume a paused torrent on a worker."""
+    """Resume a paused torrent on a mule."""
     aria2 = _get_aria2(worker_name)
     try:
         aria2.resume(gid)
