@@ -54,17 +54,15 @@ fi
 
 # ─── 4. Build and launch the openvpn command ────────────────────────────────
 OVPN_ARGS=(
-    --config  "${OVPN_CONF}"
-    --dev     "${VPN_IFACE}"
+    --config   "${OVPN_CONF}"
+    --dev      "${VPN_IFACE}"
     --dev-type tun
-    # Redirect all traffic through the tunnel
-    --redirect-gateway def1
     # Allow up/down scripts (needed for some server-pushed options)
     --script-security 2
     # Write logs to stdout (visible via `docker logs`)
     --log /proc/1/fd/1
-    # Suppress duplicate route warnings from server-pushed routes
-    --route-noexec
+    # Do not cache auth credentials in memory
+    --auth-nocache
 )
 
 if [ -n "${CREDS_FILE}" ]; then

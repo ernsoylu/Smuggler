@@ -113,11 +113,14 @@ def start_mule(
         container_config_path = "/etc/openvpn/client.ovpn"
         cap_add = ["NET_ADMIN"]
         sysctls: dict = {}
+        # OpenVPN requires the host TUN/TAP device to create tun0 inside the container
+        devices = ["/dev/net/tun:/dev/net/tun:rwm"]
     else:
         image = MULE_IMAGE
         container_config_path = "/etc/wireguard/wg0.conf"
         cap_add = ["NET_ADMIN", "SYS_MODULE"]
         sysctls = {"net.ipv4.conf.all.src_valid_mark": "1"}
+        devices = []
 
     volumes = {
         str(vpn_config_path): {"bind": container_config_path, "mode": "ro"},
@@ -151,6 +154,8 @@ def start_mule(
     )
     if sysctls:
         run_kwargs["sysctls"] = sysctls
+    if devices:
+        run_kwargs["devices"] = devices
 
     try:
         container = client.containers.run(**run_kwargs)
