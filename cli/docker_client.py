@@ -20,6 +20,7 @@ log = get_logger(__name__)
 
 MULE_LABEL = "smuggler.mule"
 MULE_IMAGE = "smuggler-mule:latest"
+MULE_IMAGE_OVPN = "smuggler-mule-ovpn:latest"
 ARIA2_INTERNAL_PORT = 6800
 
 
@@ -35,6 +36,7 @@ class MuleInfo:
         self.rpc_token: str = labels.get("smuggler.rpc_token", "")
         self.rpc_port: int = int(labels.get("smuggler.rpc_port", "0"))
         self.vpn_config: str = labels.get("smuggler.vpn_config", "")
+        self.vpn_type: str = labels.get("smuggler.vpn_type", "wireguard")
 
     @property
     def rpc_url(self) -> str:
@@ -70,19 +72,29 @@ def start_mule(
     vpn_config_path: str | Path,
     name: Optional[str] = None,
     downloads_dir: Optional[str | Path] = None,
+    vpn_type: str = "wireguard",
+    ovpn_username: Optional[str] = None,
+    ovpn_password: Optional[str] = None,
 ) -> MuleInfo:
     """
     Spin up a new mule container.
 
-    The container requires NET_ADMIN + SYS_MODULE capabilities for WireGuard.
-    The VPN config is bind-mounted read-only at /etc/wireguard/wg0.conf.
-    Downloads are mapped to ``downloads_dir`` (defaults to ./downloads).
+    For WireGuard (vpn_type='wireguard'):
+      - Uses image smuggler-mule:latest
+      - Config mounted at /etc/wireguard/wg0.conf
+      - Requires NET_ADMIN + SYS_MODULE capabilities
+
+    For OpenVPN (vpn_type='openvpn'):
+      - Uses image smuggler-mule-ovpn:latest
+      - Config mounted at /etc/openvpn/client.ovpn
+      - Credentials passed as OVPN_USERNAME / OVPN_PASSWORD env vars
+      - Only requires NET_ADMIN capability
     """
     vpn_config_path = Path(vpn_config_path).resolve()
-    log.info("start_mule: vpn_config=%s name=%s", vpn_config_path, name)
+    log.info("start_mule: vpn_config=%s name=%s vpn_type=%s", vpn_config_path, name, vpn_type)
 
     if not vpn_config_path.exists():
-        log.error("start_worker: VPN config not found: %s", vpn_config_path)
+        log.error("start_mule: VPN config not found: %s", vpn_config_path)
         raise FileNotFoundError(f"VPN config not found: {vpn_config_path}")
 
     if downloads_dir is None:
@@ -96,44 +108,59 @@ def start_mule(
 
     log.info("start_mule: launching container name=%s host_port=%d", worker_name, host_port)
 
+    if vpn_type == "openvpn":
+        image = MULE_IMAGE_OVPN
+        container_config_path = "/etc/openvpn/client.ovpn"
+        cap_add = ["NET_ADMIN"]
+        sysctls: dict = {}
+    else:
+        image = MULE_IMAGE
+        container_config_path = "/etc/wireguard/wg0.conf"
+        cap_add = ["NET_ADMIN", "SYS_MODULE"]
+        sysctls = {"net.ipv4.conf.all.src_valid_mark": "1"}
+
     volumes = {
-        str(vpn_config_path): {
-            "bind": "/etc/wireguard/wg0.conf",
-            "mode": "ro",
-        },
-        str(downloads_dir): {
-            "bind": "/downloads",
-            "mode": "rw",
-        },
+        str(vpn_config_path): {"bind": container_config_path, "mode": "ro"},
+        str(downloads_dir): {"bind": "/downloads", "mode": "rw"},
     }
+
+    environment: dict = {"ARIA2_SECRET": rpc_token}
+    if vpn_type == "openvpn" and ovpn_username:
+        environment["OVPN_USERNAME"] = ovpn_username
+    if vpn_type == "openvpn" and ovpn_password:
+        environment["OVPN_PASSWORD"] = ovpn_password
 
     labels = {
         MULE_LABEL: "true",
         "smuggler.rpc_token": rpc_token,
         "smuggler.rpc_port": str(host_port),
         "smuggler.vpn_config": vpn_config_path.name,
+        "smuggler.vpn_type": vpn_type,
     }
 
+    run_kwargs: dict = dict(
+        image=image,
+        name=worker_name,
+        detach=True,
+        cap_add=cap_add,
+        volumes=volumes,
+        ports={f"{ARIA2_INTERNAL_PORT}/tcp": host_port},
+        environment=environment,
+        labels=labels,
+        restart_policy={"Name": "unless-stopped"},
+    )
+    if sysctls:
+        run_kwargs["sysctls"] = sysctls
+
     try:
-        container = client.containers.run(
-            image=MULE_IMAGE,
-            name=worker_name,
-            detach=True,
-            cap_add=["NET_ADMIN", "SYS_MODULE"],
-            sysctls={"net.ipv4.conf.all.src_valid_mark": "1"},
-            volumes=volumes,
-            ports={f"{ARIA2_INTERNAL_PORT}/tcp": host_port},
-            environment={"ARIA2_SECRET": rpc_token},
-            labels=labels,
-            restart_policy={"Name": "unless-stopped"},
-        )
+        container = client.containers.run(**run_kwargs)
     except docker.errors.ImageNotFound:
-        msg = f"Mule image '{MULE_IMAGE}' not found. Run `smg build` first."
-        log.error("start_worker: %s", msg)
+        msg = f"Mule image '{image}' not found. Run `smg build` first."
+        log.error("start_mule: %s", msg)
         raise RuntimeError(msg)
     except docker.errors.APIError as exc:
-        log.error("start_worker: Docker API error — %s", exc)
-        raise RuntimeError(f"Docker API error while starting worker: {exc}") from exc
+        log.error("start_mule: Docker API error — %s", exc)
+        raise RuntimeError(f"Docker API error while starting mule: {exc}") from exc
 
     log.info("start_mule: container started id=%s name=%s", container.short_id, worker_name)
     return MuleInfo(container)

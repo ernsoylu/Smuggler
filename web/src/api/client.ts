@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Mule, Torrent, GlobalStats, IpInfo } from './types';
+import type { Mule, Torrent, GlobalStats, IpInfo, VpnConfig } from './types';
 
 const api = axios.create({ baseURL: '/api' });
 
@@ -75,20 +75,22 @@ export const saveSettings = (settings: Partial<AppSettings>): Promise<{ ok: bool
 
 // ── VPN Configs ───────────────────────────────────────────────────────────────
 
-export interface VpnConfig {
-  id: number;
-  name: string;
-  filename: string;
-  created_at: string;
-}
+export { type VpnConfig } from './types';
 
 export const getConfigs = (): Promise<VpnConfig[]> =>
   api.get<VpnConfig[]>('/configs/').then(r => r.data);
 
-export const uploadConfig = (file: File, name?: string): Promise<VpnConfig> => {
+export const uploadConfig = (
+  file: File,
+  name?: string,
+  username?: string,
+  password?: string,
+): Promise<VpnConfig> => {
   const fd = new FormData();
   fd.append('config_file', file);
   if (name) fd.append('name', name);
+  if (username) fd.append('username', username);
+  if (password) fd.append('password', password);
   return api.post<VpnConfig>('/configs/', fd).then(r => r.data);
 };
 
