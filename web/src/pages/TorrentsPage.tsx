@@ -103,7 +103,7 @@ export function TorrentsPage() {
                     </td>
                   </tr>
                 ) : (
-                  filtered.map(t => <TorrentRow key={`${t.worker}:${t.gid}`} torrent={t} />)
+                  filtered.map(t => <TorrentRow key={`${t.mule}:${t.gid}`} torrent={t} />)
                 )}
               </tbody>
             </table>
