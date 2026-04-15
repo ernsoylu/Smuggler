@@ -112,4 +112,8 @@
   - WireGuard private keys are never exposed through the API or logs.
 - **L4.3 Testing:**
   - 108 tests covering CLI commands, Docker client, aria2 client, and all API endpoints.
-  - Tests use mocked Docker and aria2 (via `responses` library) — no real Docker required.
+  - Tests use mocked Docker and aria2 (via `responses` library) — no real Docker or `.conf` files required.
+- **L4.4 CI/CD:**
+  - GitHub Actions runs on every push and pull request to `main`.
+  - `python-ci.yml` — matrix over Python 3.12 and 3.13 using `uv`; coverage report on 3.12.
+  - `frontend-ci.yml` — triggers only on changes under `web/`; runs `tsc --noEmit` then `vite build`.

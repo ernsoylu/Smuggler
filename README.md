@@ -182,6 +182,10 @@ Smuggler/
 ├── tests/               # 108 unit and integration tests
 ├── downloads/           # Shared downloads volume (mounted into mules)
 ├── logs/                # Dated log files (dvd_YYYY-MM-DD_HH-MM-SS.log)
+├── .github/
+│   └── workflows/
+│       ├── python-ci.yml    # Python test matrix (3.12, 3.13) + coverage
+│       └── frontend-ci.yml  # TypeScript type-check + Vite build
 ├── start.sh             # Launch API + frontend together
 └── .env                 # DVD_LOGGING, DVD_LOG_LEVEL
 ```
@@ -201,7 +205,7 @@ DVD_LOG_LEVEL=INFO
 - DNS is switched to the VPN nameserver only after connectivity is verified.
 - The VPN endpoint is pinned to avoid routing loops through the tunnel.
 - WireGuard private keys are never logged or returned through the API.
-- `vpn_configs/*.conf` is gitignored.
+- `vpn_configs/` and `downloads/` are gitignored — only `.gitkeep` placeholders are committed.
 
 ## Development
 
@@ -212,6 +216,20 @@ uv run pytest tests/ -v
 # Run tests (quiet)
 uv run pytest tests/ -q
 
+# Run tests with coverage
+uv run pytest tests/ -q --cov=cli --cov=api --cov-report=term-missing
+
 # Run the CLI directly
 uv run smg --help
 ```
+
+## CI
+
+GitHub Actions runs automatically on every push and pull request to `main`.
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| **Python CI** | All pushes/PRs | Tests on Python 3.12 + 3.13 via `uv`; coverage report on 3.12 |
+| **Frontend CI** | Changes under `web/` | TypeScript type-check (`tsc --noEmit`) + Vite production build |
+
+All tests are fully mocked — no Docker daemon or real WireGuard `.conf` files required in CI.

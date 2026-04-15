@@ -77,6 +77,15 @@ You are assisting in building **Smuggler**, a containerized Torrent Downloader. 
 | `api/client.ts` | Axios API client — all `getMules`, `addMagnet`, `deployMule`, etc. |
 | `api/types.ts` | TypeScript interfaces — `Mule`, `Torrent`, `GlobalStats`, `VpnConfig`, etc. |
 
+## CI
+
+| Workflow | File | Trigger |
+|---|---|---|
+| Python CI | `.github/workflows/python-ci.yml` | Push/PR to `main` — matrix Python 3.12 + 3.13, `uv`, coverage |
+| Frontend CI | `.github/workflows/frontend-ci.yml` | Push/PR to `main` with `web/` changes — `tsc --noEmit` + `vite build` |
+
+All tests run without real Docker or WireGuard configs. Use `DVD_LOGGING=false` to suppress log files in test runs.
+
 ## Rules & Coding Standards
 - **Naming:** Always use "mule" instead of "worker". The project is "Smuggler".
 - **VPN First:** Never start aria2 without a verified WireGuard connection.
