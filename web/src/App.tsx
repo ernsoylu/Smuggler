@@ -1,26 +1,15 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { getStats } from './api/client';
-import { StatsBar } from './components/StatsBar';
-import { SpeedGraph } from './components/SpeedGraph';
 import { WorkersPage } from './pages/MulesPage';
 import { TorrentsPage } from './pages/TorrentsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ConfigsPage } from './pages/ConfigsPage';
+import { StatusFooter } from './components/StatusFooter';
 import { LayoutDashboard, Server, Settings, FileKey2 } from 'lucide-react';
 
 type Page = 'torrents' | 'workers' | 'configs' | 'settings';
 
 export default function App() {
   const [page, setPage] = useState<Page>('torrents');
-
-  const { data: stats } = useQuery({
-    queryKey: ['stats'],
-    queryFn: getStats,
-    refetchInterval: 2_000,
-  });
-
-  const showStatsGraph = page === 'torrents' || page === 'workers';
 
   const tabs: { key: Page; label: string; icon: React.ReactNode }[] = [
     { key: 'torrents', label: 'Torrents', icon: <LayoutDashboard size={16} /> },
@@ -42,7 +31,7 @@ export default function App() {
               Smuggler
             </span>
           </div>
-          
+
           <nav className="flex gap-2">
             {tabs.map(tab => (
               <button
@@ -61,25 +50,16 @@ export default function App() {
         </div>
       </header>
 
-      {/* Stats bar & Speed graph */}
-      {showStatsGraph && (
-        <>
-          <div className="max-w-7xl mx-auto w-full">
-            {stats && <StatsBar stats={stats} />}
-          </div>
-          <div className="px-6 pt-6 pb-0 max-w-7xl mx-auto w-full">
-            <SpeedGraph stats={stats} />
-          </div>
-        </>
-      )}
-
-      {/* Page content */}
-      <main className="flex-1 w-full max-w-7xl mx-auto">
+      {/* Page content — pb-14 to clear the fixed footer */}
+      <main className="flex-1 w-full max-w-7xl mx-auto pb-14">
         {page === 'torrents' && <TorrentsPage />}
-        {page === 'workers' && <WorkersPage />}
-        {page === 'configs' && <ConfigsPage />}
+        {page === 'workers'  && <WorkersPage />}
+        {page === 'configs'  && <ConfigsPage />}
         {page === 'settings' && <SettingsPage />}
       </main>
+
+      {/* Persistent status bar + graph footer */}
+      <StatusFooter />
     </div>
   );
 }
