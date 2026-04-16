@@ -9,7 +9,7 @@ interface Props {
   onDeployStart?: (configName: string) => void;
 }
 
-export function DeployMuleModal({ onClose, onDeployStart }: Props) {
+export function DeployMuleModal({ onClose, onDeployStart }: Readonly<Props>) {
   const qc = useQueryClient();
   const [deployingId, setDeployingId] = useState<number | null>(null);
   const [error, setError] = useState('');
@@ -41,10 +41,8 @@ export function DeployMuleModal({ onClose, onDeployStart }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
       <div
-        role="presentation"
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={deployingId ? undefined : onClose}
-        onKeyDown={e => !deployingId && e.key === 'Escape' && onClose()}
       />
 
       {/* Modal */}
@@ -65,18 +63,20 @@ export function DeployMuleModal({ onClose, onDeployStart }: Props) {
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-4">
-          {isLoading ? (
+          {isLoading && (
             <div className="flex items-center justify-center gap-3 py-12 text-neutral-500">
               <div className="w-5 h-5 border-2 border-neutral-500 border-t-transparent rounded-full animate-spin" />
               <span className="text-sm font-medium">Loading configs...</span>
             </div>
-          ) : configs.length === 0 ? (
+          )}
+          {!isLoading && configs.length === 0 && (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <FileKey2 size={40} className="text-neutral-700 mb-3" strokeWidth={1} />
               <p className="text-neutral-400 font-medium text-sm">No VPN configurations stored.</p>
               <p className="text-neutral-500 text-xs mt-1">Go to the Configs tab to upload one.</p>
             </div>
-          ) : (
+          )}
+          {!isLoading && configs.length > 0 && (
             <div className="space-y-2">
               {configs.map(cfg => (
                 <div

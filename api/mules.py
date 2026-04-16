@@ -262,6 +262,6 @@ def get_ip(mule_name: str):
         info.pop("readme", None)
         log.info("GET /api/mules/%s/ip: ip=%s", safe, info.get("ip"))
         return jsonify(info)
-    except (json.JSONDecodeError, ValueError):
+    except ValueError:
         log.error("GET /api/mules/%s/ip: unexpected response — %r", safe, raw)
         return jsonify({"error": "Unexpected response from ipinfo.io", "raw": raw}), 502

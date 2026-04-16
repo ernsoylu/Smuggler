@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { stopMule, killMule, getMuleTorrents } from '../api/client';
-import type { Mule } from '../api/types';
+import type { Mule, Torrent } from '../api/types';
 import { SpeedGraph } from './SpeedGraph';
 import type { DataPoint } from './SpeedGraph';
 import {
@@ -31,11 +31,101 @@ function torrentStatusColor(status: string): string {
   return 'text-neutral-500';
 }
 
+interface ExpandedStatsPanelProps {
+  history: DataPoint[];
+  torrents: Torrent[];
+  liveDl: number;
+  liveUl: number;
+  activeCount: number;
+  pausedCount: number;
+  completeCount: number;
+  totalDl: number;
+  totalUl: number;
+  expanded: boolean;
+}
+
+function ExpandedStatsPanel({ history, torrents, liveDl, liveUl, activeCount, pausedCount, completeCount, totalDl, totalUl, expanded }: Readonly<ExpandedStatsPanelProps>) {
+  return (
+    <div className="overflow-hidden transition-all duration-300 ease-in-out" style={{ maxHeight: expanded ? '600px' : '0px' }}>
+      <div className="border-t border-white/5 bg-neutral-950/30">
+        <div className="px-4 pt-4 pb-2">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500 mb-2">Speed</p>
+          <SpeedGraph data={history} height={110} />
+        </div>
+        <div className="px-4 pb-3 flex gap-3">
+          <div className="flex items-center gap-1.5 text-xs">
+            <Download size={11} className="text-emerald-400" />
+            <span className="font-mono font-semibold text-emerald-300">{fmt(liveDl)}</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs">
+            <Download size={11} className="text-blue-400 rotate-180" />
+            <span className="font-mono font-semibold text-blue-300">{fmt(liveUl)}</span>
+          </div>
+        </div>
+        <div className="px-4 pb-3 flex flex-wrap gap-2">
+          {activeCount > 0 && (
+            <span className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/15">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              {activeCount} active
+            </span>
+          )}
+          {pausedCount > 0 && (
+            <span className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/15">
+              <PauseCircle size={11} />
+              {pausedCount} paused
+            </span>
+          )}
+          {completeCount > 0 && (
+            <span className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-neutral-700/60 text-neutral-400 border border-white/5">
+              <CheckCircle2 size={11} />
+              {completeCount} done
+            </span>
+          )}
+          {torrents.length === 0 && (
+            <span className="text-[11px] text-neutral-500 italic">No torrents</span>
+          )}
+        </div>
+        {(totalDl > 0 || totalUl > 0) && (
+          <div className="px-4 pb-4 flex gap-4 text-xs text-neutral-500">
+            <span>↓ {fmtBytes(totalDl)}</span>
+            <span>↑ {fmtBytes(totalUl)}</span>
+          </div>
+        )}
+        {torrents.length > 0 && (
+          <div className="px-4 pb-4 flex flex-col gap-1">
+            {torrents.slice(0, 5).map(t => {
+              const pct = t.total_length > 0 ? Math.round((t.completed_length / t.total_length) * 100) : 0;
+              const statusColor = torrentStatusColor(t.status);
+              return (
+                <div key={t.gid} className="flex items-center gap-2 text-[11px]">
+                  <div className="flex-1 min-w-0">
+                    <p className={`truncate font-medium ${statusColor}`}>{t.name || t.gid}</p>
+                    <div className="w-full h-0.5 bg-neutral-800 rounded-full mt-0.5 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${t.status === 'complete' ? 'bg-neutral-500' : 'bg-emerald-500'}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                  <span className="text-neutral-500 shrink-0 font-mono">{pct}%</span>
+                </div>
+              );
+            })}
+            {torrents.length > 5 && (
+              <p className="text-[10px] text-neutral-600 mt-1">+{torrents.length - 5} more</p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 interface Props {
   worker: Mule;
 }
 
-export function WorkerCard({ worker }: Props) {
+export function WorkerCard({ worker }: Readonly<Props>) {
   const qc = useQueryClient();
   const [showConfirm, setShowConfirm] = useState<'stop' | 'kill' | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -124,7 +214,7 @@ export function WorkerCard({ worker }: Props) {
       <div className="p-5 flex flex-col gap-4 flex-1">
 
         {/* Network info */}
-        {ip ? (
+        {ip && (
           <div className="bg-neutral-950/50 rounded-xl p-3 border border-white/5 flex flex-col gap-2.5">
             <div className="flex items-center justify-between text-sm">
               <span className="text-neutral-500 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider"><Globe2 size={14}/> IP</span>
@@ -143,12 +233,13 @@ export function WorkerCard({ worker }: Props) {
               </div>
             )}
           </div>
-        ) : isRunning ? (
+        )}
+        {!ip && isRunning && (
           <div className="bg-neutral-950/50 rounded-xl p-4 border border-white/5 flex flex-col items-center justify-center gap-2">
             <div className="w-5 h-5 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin"></div>
             <span className="text-xs font-medium text-emerald-400">Establishing tunnel...</span>
           </div>
-        ) : null}
+        )}
 
         {/* Config meta */}
         <div className="flex flex-col gap-2 text-sm mt-auto">
@@ -164,90 +255,18 @@ export function WorkerCard({ worker }: Props) {
       </div>
 
       {/* ── Expanded stats panel ─────────────────────────────────────────────── */}
-      <div
-        className="overflow-hidden transition-all duration-300 ease-in-out"
-        style={{ maxHeight: expanded ? '600px' : '0px' }}
-      >
-        <div className="border-t border-white/5 bg-neutral-950/30">
-          {/* Speed graph */}
-          <div className="px-4 pt-4 pb-2">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500 mb-2">Speed</p>
-            <SpeedGraph data={history} height={110} />
-          </div>
-
-          {/* Live speed row */}
-          <div className="px-4 pb-3 flex gap-3">
-            <div className="flex items-center gap-1.5 text-xs">
-              <Download size={11} className="text-emerald-400" />
-              <span className="font-mono font-semibold text-emerald-300">{fmt(liveDl)}</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-xs">
-              <Download size={11} className="text-blue-400 rotate-180" />
-              <span className="font-mono font-semibold text-blue-300">{fmt(liveUl)}</span>
-            </div>
-          </div>
-
-          {/* Torrent stat pills */}
-          <div className="px-4 pb-3 flex flex-wrap gap-2">
-            {activeCount > 0 && (
-              <span className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/15">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                {activeCount} active
-              </span>
-            )}
-            {pausedCount > 0 && (
-              <span className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/15">
-                <PauseCircle size={11} />
-                {pausedCount} paused
-              </span>
-            )}
-            {completeCount > 0 && (
-              <span className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-neutral-700/60 text-neutral-400 border border-white/5">
-                <CheckCircle2 size={11} />
-                {completeCount} done
-              </span>
-            )}
-            {torrents.length === 0 && (
-              <span className="text-[11px] text-neutral-500 italic">No torrents</span>
-            )}
-          </div>
-
-          {/* Total transferred */}
-          {(totalDl > 0 || totalUl > 0) && (
-            <div className="px-4 pb-4 flex gap-4 text-xs text-neutral-500">
-              <span>↓ {fmtBytes(totalDl)}</span>
-              <span>↑ {fmtBytes(totalUl)}</span>
-            </div>
-          )}
-
-          {/* Compact torrent list */}
-          {torrents.length > 0 && (
-            <div className="px-4 pb-4 flex flex-col gap-1">
-              {torrents.slice(0, 5).map(t => {
-                const pct = t.total_length > 0 ? Math.round((t.completed_length / t.total_length) * 100) : 0;
-                const statusColor = torrentStatusColor(t.status);
-                return (
-                  <div key={t.gid} className="flex items-center gap-2 text-[11px]">
-                    <div className="flex-1 min-w-0">
-                      <p className={`truncate font-medium ${statusColor}`}>{t.name || t.gid}</p>
-                      <div className="w-full h-0.5 bg-neutral-800 rounded-full mt-0.5 overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${t.status === 'complete' ? 'bg-neutral-500' : 'bg-emerald-500'}`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
-                    <span className="text-neutral-500 shrink-0 font-mono">{pct}%</span>
-                  </div>
-                );
-              })}
-              {torrents.length > 5 && (
-                <p className="text-[10px] text-neutral-600 mt-1">+{torrents.length - 5} more</p>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+      <ExpandedStatsPanel
+        history={history}
+        torrents={torrents}
+        liveDl={liveDl}
+        liveUl={liveUl}
+        activeCount={activeCount}
+        pausedCount={pausedCount}
+        completeCount={completeCount}
+        totalDl={totalDl}
+        totalUl={totalUl}
+        expanded={expanded}
+      />
 
       {/* Footer — actions */}
       <div className="p-4 bg-neutral-950/50 border-t border-white/5 mt-auto">

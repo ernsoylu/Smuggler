@@ -62,6 +62,8 @@ function WatchdogPanel({ watchdog }: { watchdog: WatchdogStatus | undefined }) {
   const unhealthy = watchdog.mules.filter(m => !m.healthy);
   const healthy   = watchdog.mules.filter(m => m.healthy);
   const allHealthy = unhealthy.length === 0;
+  const mulesPlural = unhealthy.length > 1 ? 's' : '';
+  const watchdogTitle = allHealthy ? 'All VPN connections secure' : `${unhealthy.length} mule${mulesPlural} compromised`;
 
   return (
     <div className={`rounded-2xl border shadow-xl p-5 mb-8 ${
@@ -76,7 +78,7 @@ function WatchdogPanel({ watchdog }: { watchdog: WatchdogStatus | undefined }) {
             : <ShieldAlert size={18} className="text-red-400" />}
           <div>
             <h3 className={`text-sm font-bold ${allHealthy ? 'text-emerald-300' : 'text-red-300'}`}>
-              {allHealthy ? 'All VPN connections secure' : `${unhealthy.length} mule${unhealthy.length > 1 ? 's' : ''} compromised`}
+              {watchdogTitle}
             </h3>
             <p className="text-[11px] text-neutral-500 mt-0.5">
               Watchdog · interval {watchdog.config.interval_seconds}s · {watchdog.stats.total_sweeps} sweeps · {watchdog.stats.total_evacuations} evacuations
@@ -196,7 +198,7 @@ export function WorkersPage() {
     setShowModal(false);
     // Mark any remaining deploying mules as DEPLOYED when modal closes (API returned success)
     setDeployingMules(prev =>
-      prev.map(m => m.stage !== 'DEPLOYED' ? { ...m, stage: 'DEPLOYED' as DeployStage } : m)
+      prev.map(m => m.stage === 'DEPLOYED' ? m : { ...m, stage: 'DEPLOYED' as DeployStage })
     );
     // Clean them up after 3 seconds
     setTimeout(() => {
@@ -266,6 +268,10 @@ export function WorkersPage() {
                       const isActive = i === stageIdx;
                       const isDone = i < stageIdx;
                       const isPending = i > stageIdx;
+                      let stageTextColor: string;
+                      if (isActive) { stageTextColor = 'text-white'; }
+                      else if (isDone) { stageTextColor = 'text-neutral-400'; }
+                      else { stageTextColor = 'text-neutral-600'; }
                       return (
                         <div key={stage} className={`flex items-center gap-2.5 text-xs transition-all ${isPending ? 'opacity-30' : ''}`}>
                           {isDone ? (
@@ -277,7 +283,7 @@ export function WorkersPage() {
                           ) : (
                             <div className="w-4 h-4 rounded-full border border-neutral-700" />
                           )}
-                          <span className={`font-medium ${isActive ? 'text-white' : isDone ? 'text-neutral-400' : 'text-neutral-600'}`}>
+                          <span className={`font-medium ${stageTextColor}`}>
                             {stage.charAt(0) + stage.slice(1).toLowerCase()}
                           </span>
                         </div>
@@ -300,17 +306,19 @@ export function WorkersPage() {
         <span className="px-2.5 py-0.5 rounded-full bg-neutral-800 text-neutral-400 text-xs font-semibold">{workers.length}</span>
       </div>
 
-      {isLoading ? (
+      {isLoading && (
         <div className="flex items-center justify-center p-12 text-neutral-500 gap-3">
           <div className="w-5 h-5 border-2 border-neutral-500 border-t-transparent rounded-full animate-spin" />
           <span className="font-medium text-sm">Querying active mules...</span>
         </div>
-      ) : workers.length === 0 && deployingMules.length === 0 ? (
+      )}
+      {!isLoading && workers.length === 0 && deployingMules.length === 0 && (
         <div className="border-2 border-dashed border-white/10 rounded-2xl p-16 text-center flex flex-col items-center justify-center">
           <ShieldCheck size={48} className="text-neutral-700 mx-auto mb-4" strokeWidth={1} />
           <p className="text-neutral-400 font-medium max-w-sm">No mules are currently running. Click "Deploy Mule" to get started.</p>
         </div>
-      ) : (
+      )}
+      {!isLoading && (workers.length > 0 || deployingMules.length > 0) && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {workers.map(w => (
             <WorkerCard key={w.name} worker={w} />

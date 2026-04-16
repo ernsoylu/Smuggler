@@ -35,7 +35,7 @@ interface Props {
   height?: number;
 }
 
-export function SpeedGraph({ stats, data, height = 140 }: Props) {
+export function SpeedGraph({ stats, data, height = 140 }: Readonly<Props>) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const svgRef  = useRef<SVGSVGElement>(null);
   // Unique ID prefix so multiple graphs on the same page don't clash on <defs>

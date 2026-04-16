@@ -9,14 +9,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'
 BOLD='\033[1m'; RESET='\033[0m'
 
-ok()   { echo -e "${GREEN}  ✓${RESET} $*"; }
-warn() { echo -e "${YELLOW}  ⚠${RESET} $*"; }
-fail() { echo -e "${RED}  ✗${RESET} $*"; }
+ok()   { echo -e "${GREEN}  ✓${RESET} $*"; return; }
+warn() { echo -e "${YELLOW}  ⚠${RESET} $*"; return; }
+fail() { echo -e "${RED}  ✗${RESET} $*"; return; }
 
-has() { command -v "$1" &>/dev/null; }
+has() { local cmd="$1"; command -v "$cmd" &>/dev/null; return; }
 
 SETUP_NEEDED=0
-needs_setup() { fail "$1"; SETUP_NEEDED=1; }
+needs_setup() { local msg="$1"; fail "$msg"; SETUP_NEEDED=1; return; }
 
 # ── Pre-flight checks ─────────────────────────────────────────────────────────
 echo -e "\n${BOLD}Smuggler — pre-flight checks${RESET}"
@@ -93,6 +93,7 @@ cleanup() {
     echo "Shutting down..."
     kill "$API_PID" "$WEB_PID" 2>/dev/null || true
     wait "$API_PID" "$WEB_PID" 2>/dev/null || true
+    return
 }
 trap cleanup EXIT INT TERM
 

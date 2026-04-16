@@ -125,7 +125,7 @@ export function TorrentsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5 bg-neutral-950/20">
-                {isLoading ? (
+                {isLoading && (
                   <tr>
                     <td colSpan={9} className="px-6 py-8 text-center text-neutral-500">
                       <div className="flex items-center justify-center gap-3">
@@ -134,7 +134,8 @@ export function TorrentsPage() {
                       </div>
                     </td>
                   </tr>
-                ) : filtered.length === 0 ? (
+                )}
+                {!isLoading && filtered.length === 0 && (
                   <tr>
                     <td colSpan={9} className="px-6 py-12 text-center">
                        <p className="text-neutral-400 font-medium">
@@ -142,9 +143,8 @@ export function TorrentsPage() {
                        </p>
                     </td>
                   </tr>
-                ) : (
-                  filtered.map(t => <TorrentRow key={`${t.mule}:${t.gid}`} torrent={t} />)
                 )}
+                {!isLoading && filtered.length > 0 && filtered.map(t => <TorrentRow key={`${t.mule}:${t.gid}`} torrent={t} />)}
               </tbody>
             </table>
           </div>
@@ -244,8 +244,8 @@ export function TorrentsPage() {
                         stroke="rgba(0,0,0,0.4)"
                         paddingAngle={2}
                       >
-                        {statusDistribution.map((entry, index) => (
-                          <Cell key={index} fill={entry.color} />
+                        {statusDistribution.map((entry) => (
+                          <Cell key={entry.name} fill={entry.color} />
                         ))}
                       </Pie>
                       <Tooltip

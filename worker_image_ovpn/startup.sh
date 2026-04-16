@@ -18,9 +18,9 @@ CONNECT_TIMEOUT=60        # seconds to wait for tun0 to appear
 KILL_SWITCH_INTERVAL=5
 HEALTH_CHECK_INTERVAL=30  # seconds between runtime IP re-verifications
 
-log()  { echo "[$(date -u +%T)] $*"; }
-warn() { echo "[$(date -u +%T)] WARN  $*"; }
-err()  { echo "[$(date -u +%T)] ERROR $*" >&2; }
+log()  { echo "[$(date -u +%T)] $*"; return; }
+warn() { echo "[$(date -u +%T)] WARN  $*"; return; }
+err()  { echo "[$(date -u +%T)] ERROR $*" >&2; return; }
 
 # ─── Health status file (read by host watchdog) ───────────────────────────────
 write_health() {
@@ -28,6 +28,7 @@ write_health() {
     printf '{"status":"%s","ip":"%s","reason":"%s","ts":"%s"}\n' \
         "$status" "$ip" "$reason" "$(date -u +%FT%TZ)" \
         > /tmp/vpn_health.json
+    return
 }
 write_health "starting" "" "initialising"
 
@@ -43,6 +44,7 @@ fi
 
 cleanup_creds() {
     [[ -n "${CREDS_FILE}" ]] && rm -f "${CREDS_FILE}" 2>/dev/null || true
+    return
 }
 trap cleanup_creds EXIT
 
@@ -241,6 +243,7 @@ kill_switch() {
             exit 1
         fi
     done
+    return
 }
 
 kill_switch &

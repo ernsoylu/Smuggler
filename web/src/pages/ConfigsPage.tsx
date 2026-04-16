@@ -329,36 +329,47 @@ export function ConfigsPage() {
         {/* Row 1: file + name + upload */}
         <div className="flex flex-col sm:flex-row gap-4 items-end">
           <div className="flex-1 w-full group">
-            <label htmlFor="config-file-input" className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">Config File</label>
-            <div
-              role="button"
-              tabIndex={0}
+            <p className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">Config File</p>
+            <label
+              htmlFor="config-file-input"
               className="w-full flex items-center gap-3 bg-neutral-950 hover:bg-neutral-900 border border-white/10 hover:border-emerald-500/50 transition-all rounded-xl px-4 py-3 cursor-pointer ring-4 ring-transparent focus-within:ring-emerald-500/10"
-              onClick={() => fileRef.current?.click()}
-              onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && fileRef.current?.click()}
             >
-              <div className={`w-8 h-8 rounded-md bg-white/5 flex items-center justify-center transition-colors ${file ? (vpnType === 'openvpn' ? 'text-violet-400' : 'text-emerald-400') : 'text-neutral-400 group-hover:text-emerald-400'}`}>
-                <FileUp size={16} />
-              </div>
-              <input
-                id="config-file-input"
-                ref={fileRef}
-                type="file"
-                accept=".conf,.ovpn"
-                className="hidden"
-                onChange={handleFileChange}
-              />
-              <div className="flex-1 min-w-0">
-                <span className={`text-sm truncate font-medium block ${file ? (vpnType === 'openvpn' ? 'text-violet-400' : 'text-emerald-400') : 'text-neutral-500'}`}>
-                  {file ? file.name : 'Select .conf or .ovpn'}
-                </span>
-                {file && (
-                  <span className="text-xs text-neutral-500 mt-0.5 block">
-                    {vpnType === 'openvpn' ? 'OpenVPN' : 'WireGuard'} detected
-                  </span>
-                )}
-              </div>
-            </div>
+              {(() => {
+                let iconColor: string;
+                if (!file) { iconColor = 'text-neutral-400 group-hover:text-emerald-400'; }
+                else if (vpnType === 'openvpn') { iconColor = 'text-violet-400'; }
+                else { iconColor = 'text-emerald-400'; }
+                let fileTextColor: string;
+                if (!file) { fileTextColor = 'text-neutral-500'; }
+                else if (vpnType === 'openvpn') { fileTextColor = 'text-violet-400'; }
+                else { fileTextColor = 'text-emerald-400'; }
+                return (
+                  <>
+                    <div className={`w-8 h-8 rounded-md bg-white/5 flex items-center justify-center transition-colors ${iconColor}`}>
+                      <FileUp size={16} />
+                    </div>
+                    <input
+                      id="config-file-input"
+                      ref={fileRef}
+                      type="file"
+                      accept=".conf,.ovpn"
+                      className="hidden"
+                      onChange={handleFileChange}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <span className={`text-sm truncate font-medium block ${fileTextColor}`}>
+                        {file ? file.name : 'Select .conf or .ovpn'}
+                      </span>
+                      {file && (
+                        <span className="text-xs text-neutral-500 mt-0.5 block">
+                          {vpnType === 'openvpn' ? 'OpenVPN' : 'WireGuard'} detected
+                        </span>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
+            </label>
           </div>
 
           <div className="flex-[0.6] w-full">
@@ -453,21 +464,23 @@ export function ConfigsPage() {
             <Rocket size={14} className="text-blue-400" /> Deploying
           </h3>
           <div className="space-y-3">
-            {deployingMules.map((m, i) => {
+            {deployingMules.map((m) => {
               const sc = m.error
                 ? { bg: 'bg-red-500/10', text: 'text-red-400', ring: 'ring-red-500/20' }
                 : STAGE_COLORS[m.stage];
               const stageIdx = STAGE_ORDER.indexOf(m.stage);
               const progressPct = m.error ? 0 : ((stageIdx + 1) / STAGE_ORDER.length) * 100;
               return (
-                <div key={i} className={`p-4 rounded-xl border transition-all ${sc.bg} ${sc.ring} ring-1`}>
+                <div key={m.configId} className={`p-4 rounded-xl border transition-all ${sc.bg} ${sc.ring} ring-1`}>
                   <div className="flex items-center justify-between gap-4 mb-3">
                     <div className="flex items-center gap-3">
-                      {!m.error && m.stage !== 'DEPLOYED' ? (
+                      {!m.error && m.stage !== 'DEPLOYED' && (
                         <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                      ) : m.error ? (
+                      )}
+                      {m.error && (
                         <div className="w-5 h-5 rounded-full bg-red-500/20 flex items-center justify-center text-red-400 text-xs font-bold">!</div>
-                      ) : (
+                      )}
+                      {!m.error && m.stage === 'DEPLOYED' && (
                         <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center">
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400"><polyline points="20 6 9 17 4 12" /></svg>
                         </div>
@@ -500,19 +513,21 @@ export function ConfigsPage() {
         <span className="px-2.5 py-0.5 rounded-full bg-neutral-800 text-neutral-400 text-xs font-semibold">{configs.length}</span>
       </div>
 
-      {isLoading ? (
+      {isLoading && (
         <div className="flex items-center justify-center p-12 text-neutral-500 gap-3">
           <div className="w-5 h-5 border-2 border-neutral-500 border-t-transparent rounded-full animate-spin" />
           <span className="font-medium text-sm">Loading configurations...</span>
         </div>
-      ) : configs.length === 0 ? (
+      )}
+      {!isLoading && configs.length === 0 && (
         <div className="border-2 border-dashed border-white/10 rounded-2xl p-16 text-center flex flex-col items-center justify-center max-w-3xl">
           <FileKey2 size={48} className="text-neutral-700 mx-auto mb-4" strokeWidth={1} />
           <p className="text-neutral-400 font-medium max-w-sm">
             No VPN configurations stored yet. Upload a WireGuard (.conf) or OpenVPN (.ovpn) config above.
           </p>
         </div>
-      ) : (
+      )}
+      {!isLoading && configs.length > 0 && (
         <div className="max-w-5xl">
           <ConfigSection
             title="WireGuard"

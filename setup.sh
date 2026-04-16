@@ -10,17 +10,17 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
 
-log()     { echo -e "${BOLD}[setup]${RESET} $*"; }
-ok()      { echo -e "${GREEN}  ✓${RESET} $*"; }
-warn()    { echo -e "${YELLOW}  ⚠${RESET} $*"; }
-fail()    { echo -e "${RED}  ✗${RESET} $*"; }
-section() { echo -e "\n${CYAN}${BOLD}▶ $*${RESET}"; }
+log()     { echo -e "${BOLD}[setup]${RESET} $*"; return; }
+ok()      { echo -e "${GREEN}  ✓${RESET} $*"; return; }
+warn()    { echo -e "${YELLOW}  ⚠${RESET} $*"; return; }
+fail()    { echo -e "${RED}  ✗${RESET} $*"; return; }
+section() { echo -e "\n${CYAN}${BOLD}▶ $*${RESET}"; return; }
 
 ERRORS=0
-error() { fail "$*"; ERRORS=$((ERRORS + 1)); }
+error() { fail "$*"; ERRORS=$((ERRORS + 1)); return; }
 
 # ── Helper: command exists ────────────────────────────────────────────────────
-has() { command -v "$1" &>/dev/null; }
+has() { local cmd="$1"; command -v "$cmd" &>/dev/null; return; }
 
 # ── 1. OS check ───────────────────────────────────────────────────────────────
 section "System check"
@@ -223,7 +223,7 @@ fi
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 if [[ "$ERRORS" -gt 0 ]]; then
-    echo -e "${RED}${BOLD}Setup completed with ${ERRORS} error(s). Fix the errors above and re-run setup.sh.${RESET}"
+    echo -e "${RED}${BOLD}Setup completed with ${ERRORS} error(s). Fix the errors above and re-run setup.sh.${RESET}" >&2
     exit 1
 else
     echo -e "${GREEN}${BOLD}╔══════════════════════════════════════════╗${RESET}"

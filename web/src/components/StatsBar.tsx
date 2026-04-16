@@ -18,7 +18,7 @@ interface Props {
   stats: GlobalStats;
 }
 
-export function StatsBar({ stats }: Props) {
+export function StatsBar({ stats }: Readonly<Props>) {
   return (
     <div className="px-6 mt-6">
       <div className="bg-neutral-900/50 backdrop-blur-md rounded-2xl border border-white/5 shadow-xl flex flex-wrap items-center justify-between gap-6 px-6 py-4 text-sm">

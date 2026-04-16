@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import socket
 import time
@@ -141,17 +142,17 @@ def start_mule(
         "smuggler.vpn_type": vpn_type,
     }
 
-    run_kwargs: dict = dict(
-        image=image,
-        name=worker_name,
-        detach=True,
-        cap_add=cap_add,
-        volumes=volumes,
-        ports={f"{ARIA2_INTERNAL_PORT}/tcp": host_port},
-        environment=environment,
-        labels=labels,
-        restart_policy={"Name": "unless-stopped"},
-    )
+    run_kwargs: dict = {
+        "image": image,
+        "name": worker_name,
+        "detach": True,
+        "cap_add": cap_add,
+        "volumes": volumes,
+        "ports": {f"{ARIA2_INTERNAL_PORT}/tcp": host_port},
+        "environment": environment,
+        "labels": labels,
+        "restart_policy": {"Name": "unless-stopped"},
+    }
     if sysctls:
         run_kwargs["sysctls"] = sysctls
     if devices:
@@ -226,7 +227,7 @@ def wait_for_vpn(
                 "wait_for_vpn: curl exit_code=%s output_len=%s — retrying",
                 exit_code, len(output) if output else 0,
             )
-        except (docker.errors.APIError, json.JSONDecodeError, ValueError) as exc:
+        except (docker.errors.APIError, ValueError) as exc:
             log.debug("wait_for_vpn: exec/parse error — %s", exc)
 
         last_error = "VPN not ready yet"
@@ -452,14 +453,13 @@ def check_mule_vpn(client: docker.DockerClient, name_or_id: str) -> dict:
 
     try:
         info = json.loads(output.decode().strip())
-    except (json.JSONDecodeError, ValueError) as exc:
+    except ValueError as exc:
         return {"name": mule.name, "healthy": False, "ip": None, "reason": f"bad JSON from ipinfo: {exc}"}
 
-    import re as _re
     ip = info.get("ip", "")
     # Private / Docker CIDR ranges
-    private_pattern = _re.compile(
-        r"^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.)"
+    private_pattern = re.compile(
+        r"^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.)"
     )
     if not ip or private_pattern.match(ip):
         return {

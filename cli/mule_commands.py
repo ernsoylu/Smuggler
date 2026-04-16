@@ -87,9 +87,6 @@ def mule_start(
     if vpn_type == "auto":
         vpn_type = "openvpn" if Path(config).suffix.lower() == ".ovpn" else "wireguard"
 
-    # Validate required image exists (warn early rather than after container start)
-    required_image = MULE_IMAGE_OVPN if vpn_type == "openvpn" else MULE_IMAGE
-
     client = get_docker_client()
 
     # ── Step 1: create the container ────────────────────────────────────────
@@ -120,7 +117,7 @@ def mule_start(
         try:
             ip_info = wait_for_vpn(client, mule.name, timeout=timeout)
         except RuntimeError as exc:
-            console.print(f"\n[red]VPN failed to come up — stopping container.[/red]")
+            console.print("\n[red]VPN failed to come up — stopping container.[/red]")
             console.print(f"[red]{exc}[/red]")
             try:
                 stop_mule(client, mule.name, remove=True)

@@ -7,7 +7,7 @@ interface Props {
   onClose: () => void;
 }
 
-export function AddTorrentModal({ onClose }: Props) {
+export function AddTorrentModal({ onClose }: Readonly<Props>) {
   const qc = useQueryClient();
   const [mode, setMode] = useState<'magnet' | 'file'>('magnet');
   const [magnet, setMagnet] = useState('');
@@ -46,10 +46,8 @@ export function AddTorrentModal({ onClose }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
       <div
-        role="presentation"
         className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
         onClick={onClose}
-        onKeyDown={e => e.key === 'Escape' && onClose()}
       />
       
       {/* Modal */}
@@ -98,13 +96,10 @@ export function AddTorrentModal({ onClose }: Props) {
             </>
           ) : (
             <>
-              <label htmlFor="add-torrent-file" className="text-sm font-medium text-neutral-400">Torrent File</label>
-              <div
-                role="button"
-                tabIndex={0}
+              <p className="text-sm font-medium text-neutral-400">Torrent File</p>
+              <label
+                htmlFor="add-torrent-file"
                 className="w-full border-2 border-dashed border-white/10 hover:border-blue-500/50 hover:bg-blue-500/5 bg-neutral-950/50 rounded-xl p-8 text-center cursor-pointer transition-all flex flex-col items-center gap-3"
-                onClick={() => fileRef.current?.click()}
-                onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && fileRef.current?.click()}
               >
                 <div className="w-12 h-12 rounded-full bg-neutral-900 border border-white/5 flex items-center justify-center text-neutral-400">
                    <UploadCloud size={24} />
@@ -122,7 +117,7 @@ export function AddTorrentModal({ onClose }: Props) {
                 ) : (
                   <p className="text-sm text-neutral-500">Click or drag a .torrent file here</p>
                 )}
-              </div>
+              </label>
             </>
           )}
         </div>

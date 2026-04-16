@@ -186,7 +186,6 @@ function FilesTab({ torrent }: { torrent: Torrent }) {
 
   const toggleFile = useMutation({
     mutationFn: async (fileIndex: number) => {
-      const current = torrent.files.map(f => f.index);
       const selected = torrent.files.filter(f => f.selected).map(f => f.index);
       let next: number[];
       if (selected.includes(fileIndex)) {
@@ -222,7 +221,7 @@ function FilesTab({ torrent }: { torrent: Torrent }) {
         {torrent.files.map((file) => (
           <tr
             key={file.index}
-            className={`hover:bg-white/[0.03] transition-colors ${!file.selected ? 'opacity-50' : ''}`}
+            className={`hover:bg-white/[0.03] transition-colors ${file.selected ? '' : 'opacity-50'}`}
           >
             <td className="py-2 text-center text-neutral-500 font-mono">{file.index}</td>
             <td className="py-2 pr-4">
@@ -301,8 +300,8 @@ function PeersTab({ torrent, isVisible }: { torrent: Torrent; isVisible: boolean
         </tr>
       </thead>
       <tbody className="divide-y divide-white/5">
-        {peers.map((peer, i) => (
-          <tr key={i} className="hover:bg-white/[0.03] transition-colors">
+        {peers.map((peer) => (
+          <tr key={`${peer.ip}:${peer.port}`} className="hover:bg-white/[0.03] transition-colors">
             <td className="py-2 font-mono text-neutral-300">{peer.ip}:{peer.port}</td>
             <td className="py-2 text-right text-emerald-400 font-mono">{formatSpeed(peer.download_speed)}</td>
             <td className="py-2 text-right text-blue-400 font-mono">{formatSpeed(peer.upload_speed)}</td>
@@ -376,8 +375,9 @@ function OptionsTab({ torrent, isVisible }: { torrent: Torrent; isVisible: boole
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div>
-          <label className={labelClass}>Max Download (B/s)</label>
+          <label htmlFor="opt-max-dl" className={labelClass}>Max Download (B/s)</label>
           <input
+            id="opt-max-dl"
             type="number"
             min={0}
             className={inputClass}
@@ -386,8 +386,9 @@ function OptionsTab({ torrent, isVisible }: { torrent: Torrent; isVisible: boole
           />
         </div>
         <div>
-          <label className={labelClass}>Max Upload (B/s)</label>
+          <label htmlFor="opt-max-ul" className={labelClass}>Max Upload (B/s)</label>
           <input
+            id="opt-max-ul"
             type="number"
             min={0}
             className={inputClass}
@@ -396,8 +397,9 @@ function OptionsTab({ torrent, isVisible }: { torrent: Torrent; isVisible: boole
           />
         </div>
         <div>
-          <label className={labelClass}>Max Connections</label>
+          <label htmlFor="opt-max-conn" className={labelClass}>Max Connections</label>
           <input
+            id="opt-max-conn"
             type="number"
             min={1}
             max={16}
@@ -432,7 +434,7 @@ interface Props {
   torrent: Torrent;
 }
 
-export function TorrentRow({ torrent }: Props) {
+export function TorrentRow({ torrent }: Readonly<Props>) {
   const qc = useQueryClient();
   const [showConfirm, setShowConfirm] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);

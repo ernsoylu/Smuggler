@@ -21,9 +21,9 @@ KILL_SWITCH_INTERVAL=5    # seconds between kill-switch polls
 HEALTH_CHECK_INTERVAL=30  # seconds between runtime IP re-verifications
 HANDSHAKE_MAX_AGE=180     # seconds — WG handshake older than this = dead peer
 
-log()  { echo "[$(date -u +%T)] $*"; }
-warn() { echo "[$(date -u +%T)] WARN  $*"; }
-err()  { echo "[$(date -u +%T)] ERROR $*" >&2; }
+log()  { echo "[$(date -u +%T)] $*"; return; }
+warn() { echo "[$(date -u +%T)] WARN  $*"; return; }
+err()  { echo "[$(date -u +%T)] ERROR $*" >&2; return; }
 
 # ─── Health status file (read by host watchdog) ───────────────────────────────
 write_health() {
@@ -31,6 +31,7 @@ write_health() {
     printf '{"status":"%s","ip":"%s","reason":"%s","ts":"%s"}\n' \
         "$status" "$ip" "$reason" "$(date -u +%FT%TZ)" \
         > /tmp/vpn_health.json
+    return
 }
 write_health "starting" "" "initialising"
 
@@ -254,6 +255,7 @@ kill_switch() {
             exit 1
         fi
     done
+    return
 }
 
 kill_switch &

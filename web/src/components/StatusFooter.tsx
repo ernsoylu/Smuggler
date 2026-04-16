@@ -105,7 +105,7 @@ export function StatusFooter() {
         <div className="flex items-center gap-1.5 text-xs text-neutral-400">
           <Server size={12} className="shrink-0 text-neutral-500" />
           <span className="font-semibold text-neutral-200">{mules}</span>
-          <span>mule{mules !== 1 ? 's' : ''}</span>
+          <span>mule{mules === 1 ? '' : 's'}</span>
         </div>
 
         {/* Spacer */}
