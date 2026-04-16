@@ -139,7 +139,7 @@ ok "Python dependencies installed"
 # ── 6. Node.js ────────────────────────────────────────────────────────────────
 section "Node.js"
 export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+[[ -s "$NVM_DIR/nvm.sh" ]] && . "$NVM_DIR/nvm.sh"
 
 NODE_OK=0
 if has node; then
@@ -153,7 +153,7 @@ if has node; then
 fi
 
 if [[ "$NODE_OK" -eq 0 ]]; then
-    if has nvm 2>/dev/null || [ -s "$NVM_DIR/nvm.sh" ]; then
+    if has nvm 2>/dev/null || [[ -s "$NVM_DIR/nvm.sh" ]]; then
         warn "Installing Node.js 20 via nvm..."
         nvm install 20
         nvm use 20
@@ -186,7 +186,7 @@ ok "downloads/, vpn_configs/, logs/ ready"
 # ── 9. .env file ─────────────────────────────────────────────────────────────
 section "Environment config"
 cd "$ROOT"
-if [ ! -f .env ]; then
+if [[ ! -f .env ]]; then
     cat > .env <<'EOF'
 DVD_LOGGING=true
 DVD_LOG_LEVEL=INFO

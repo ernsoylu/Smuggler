@@ -70,14 +70,14 @@ wg setconf "${WG_IFACE}" "${WG_CONF_STRIPPED}" || {
 }
 rm -f "${WG_CONF_STRIPPED}"
 
-[ -n "${WG_ADDR4}" ] && ip -4 address add "${WG_ADDR4}" dev "${WG_IFACE}"
-[ -n "${WG_ADDR6}" ] && ip -6 address add "${WG_ADDR6}" dev "${WG_IFACE}" 2>/dev/null || true
+[[ -n "${WG_ADDR4}" ]] && ip -4 address add "${WG_ADDR4}" dev "${WG_IFACE}"
+[[ -n "${WG_ADDR6}" ]] && ip -6 address add "${WG_ADDR6}" dev "${WG_IFACE}" 2>/dev/null || true
 ip link set mtu 1420 up dev "${WG_IFACE}"
 log "Interface ${WG_IFACE} is up"
 
 # ─── 4. Block IPv6 outbound unless WG config carries IPv6 ──────────────────
 # Prevents IPv6 leak when WireGuard only tunnels IPv4.
-if [ -z "${WG_ADDR6}" ]; then
+if [[ -z "${WG_ADDR6}" ]]; then
     log "No IPv6 in WG config — blocking IPv6 outbound to prevent leaks"
     ip6tables -P OUTPUT DROP   2>/dev/null || true
     ip6tables -P FORWARD DROP  2>/dev/null || true
@@ -90,9 +90,9 @@ else
 fi
 
 # ─── 5. Set up routing ──────────────────────────────────────────────────────
-if [ -n "${WG_EP_HOST}" ] && [ -n "${ORIG_GW}" ]; then
+if [[ -n "${WG_EP_HOST}" ]] && [[ -n "${ORIG_GW}" ]]; then
     WG_EP_IP=$(getent ahostsv4 "${WG_EP_HOST}" 2>/dev/null | awk 'NR==1{print $1}' || true)
-    if [ -n "${WG_EP_IP}" ]; then
+    if [[ -n "${WG_EP_IP}" ]]; then
         ip -4 route add "${WG_EP_IP}/32" via "${ORIG_GW}" dev "${ORIG_DEV}" 2>/dev/null || true
         log "Endpoint ${WG_EP_IP} pinned via ${ORIG_GW}"
     fi
@@ -104,7 +104,7 @@ ip rule add from "${ETH0_IP}" table 128
 ip route add default via "${ORIG_GW}" dev "${ORIG_DEV}" table 128
 
 # ─── 6. Switch DNS — hard-lock to VPN DNS, block Docker DNS ─────────────────
-if [ -n "${WG_DNS}" ]; then
+if [[ -n "${WG_DNS}" ]]; then
     echo "nameserver ${WG_DNS}" > /etc/resolv.conf
     log "DNS locked to VPN DNS: ${WG_DNS}"
     # Block outbound DNS to Docker's internal resolver (127.0.0.11)
@@ -126,7 +126,7 @@ EXT_JSON=$(curl -sf \
            --max-time "${VPN_CHECK_TIMEOUT}" \
            "https://ipinfo.io/json" || echo "")
 
-if [ -z "${EXT_JSON}" ]; then
+if [[ -z "${EXT_JSON}" ]]; then
     err "No connectivity through ${WG_IFACE} — aborting to prevent IP leak"
     write_health "dead" "" "initial VPN check failed — no connectivity through wg0"
     ip link delete dev "${WG_IFACE}" 2>/dev/null || true
@@ -193,30 +193,30 @@ kill_switch() {
         fi
 
         # (b) WireGuard handshake freshness
-        if [ -z "${reason}" ]; then
+        if [[ -z "${reason}" ]]; then
             local hs
             hs=$(wg show "${WG_IFACE}" latest-handshakes 2>/dev/null \
                  | awk '{print $2}' | head -1 || echo "0")
             local now
             now=$(date +%s)
             local age=$(( now - ${hs:-0} ))
-            if [ "${hs:-0}" -eq 0 ] || [ "${age}" -gt "${HANDSHAKE_MAX_AGE}" ]; then
+            if [[ "${hs:-0}" -eq 0 ]] || [[ "${age}" -gt "${HANDSHAKE_MAX_AGE}" ]]; then
                 reason="WireGuard handshake stale (${age}s > ${HANDSHAKE_MAX_AGE}s limit)"
             fi
         fi
 
         # (c) Periodic external IP re-verification through wg0
-        if [ -z "${reason}" ]; then
+        if [[ -z "${reason}" ]]; then
             local now
             now=$(date +%s)
-            if [ $(( now - LAST_HEALTH_CHECK )) -ge "${HEALTH_CHECK_INTERVAL}" ]; then
+            if [[ $(( now - LAST_HEALTH_CHECK )) -ge "${HEALTH_CHECK_INTERVAL}" ]]; then
                 LAST_HEALTH_CHECK=${now}
                 local live_json
                 live_json=$(curl -sf \
                             --interface "${WG_IFACE}" \
                             --max-time 8 \
                             "https://ipinfo.io/json" 2>/dev/null || echo "")
-                if [ -z "${live_json}" ]; then
+                if [[ -z "${live_json}" ]]; then
                     reason="runtime IP check failed — no connectivity through ${WG_IFACE}"
                 else
                     local live_ip
@@ -231,7 +231,7 @@ kill_switch() {
             fi
         fi
 
-        if [ -n "${reason}" ]; then
+        if [[ -n "${reason}" ]]; then
             log "KILL-SWITCH TRIGGERED: ${reason}"
             write_health "dead" "" "kill-switch: ${reason}"
 
@@ -243,7 +243,7 @@ kill_switch() {
             log "Sending SIGTERM to aria2 (PID=${ARIA2_PID}) for graceful session save..."
             kill -15 "${ARIA2_PID}" 2>/dev/null || true
             local waited=0
-            while kill -0 "${ARIA2_PID}" 2>/dev/null && [ "${waited}" -lt 10 ]; do
+            while kill -0 "${ARIA2_PID}" 2>/dev/null && [[ "${waited}" -lt 10 ]]; do
                 sleep 1
                 waited=$(( waited + 1 ))
             done

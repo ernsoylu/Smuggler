@@ -34,7 +34,7 @@ write_health "starting" "" "initialising"
 # ─── 1. Write credentials file if env vars are provided ─────────────────────
 # Credentials are removed from disk as soon as the tunnel is established.
 CREDS_FILE=""
-if [ -n "${OVPN_USERNAME:-}" ] && [ -n "${OVPN_PASSWORD:-}" ]; then
+if [[ -n "${OVPN_USERNAME:-}" ]] && [[ -n "${OVPN_PASSWORD:-}" ]]; then
     CREDS_FILE=$(mktemp /tmp/ovpn-creds-XXXXXX)
     chmod 600 "${CREDS_FILE}"
     printf '%s\n%s\n' "${OVPN_USERNAME}" "${OVPN_PASSWORD}" > "${CREDS_FILE}"
@@ -42,7 +42,7 @@ if [ -n "${OVPN_USERNAME:-}" ] && [ -n "${OVPN_PASSWORD:-}" ]; then
 fi
 
 cleanup_creds() {
-    [ -n "${CREDS_FILE}" ] && rm -f "${CREDS_FILE}" 2>/dev/null || true
+    [[ -n "${CREDS_FILE}" ]] && rm -f "${CREDS_FILE}" 2>/dev/null || true
 }
 trap cleanup_creds EXIT
 
@@ -55,10 +55,10 @@ log "Original gateway: ${ORIG_GW} dev ${ORIG_DEV}"
 REMOTE_HOST=$(grep -iP '^\s*remote\s+\S+' "${OVPN_CONF}" \
               | awk '{print $2}' | head -1 || true)
 
-if [ -n "${REMOTE_HOST}" ] && [ -n "${ORIG_GW}" ]; then
+if [[ -n "${REMOTE_HOST}" ]] && [[ -n "${ORIG_GW}" ]]; then
     REMOTE_IP=$(getent ahostsv4 "${REMOTE_HOST}" 2>/dev/null \
                 | awk 'NR==1{print $1}' || true)
-    if [ -n "${REMOTE_IP}" ]; then
+    if [[ -n "${REMOTE_IP}" ]]; then
         ip -4 route add "${REMOTE_IP}/32" via "${ORIG_GW}" dev "${ORIG_DEV}" \
             2>/dev/null || true
         log "VPN endpoint ${REMOTE_IP} (${REMOTE_HOST}) pinned via ${ORIG_GW}"
@@ -79,7 +79,7 @@ OVPN_ARGS=(
     --auth-nocache
 )
 
-if [ -n "${CREDS_FILE}" ]; then
+if [[ -n "${CREDS_FILE}" ]]; then
     OVPN_ARGS+=(--auth-user-pass "${CREDS_FILE}")
 fi
 
@@ -92,7 +92,7 @@ log "OpenVPN started (PID=${OVPN_PID})"
 log "Waiting for ${VPN_IFACE} interface (up to ${CONNECT_TIMEOUT}s)..."
 DEADLINE=$((SECONDS + CONNECT_TIMEOUT))
 TUN_UP=0
-while [ "${SECONDS}" -lt "${DEADLINE}" ]; do
+while [[ "${SECONDS}" -lt "${DEADLINE}" ]]; do
     if ip link show "${VPN_IFACE}" &>/dev/null; then
         TUN_UP=1
         log "${VPN_IFACE} interface is up"
@@ -106,7 +106,7 @@ while [ "${SECONDS}" -lt "${DEADLINE}" ]; do
     sleep 2
 done
 
-if [ "${TUN_UP}" -eq 0 ]; then
+if [[ "${TUN_UP}" -eq 0 ]]; then
     err "${VPN_IFACE} did not appear within ${CONNECT_TIMEOUT}s — aborting"
     write_health "dead" "" "tun0 timeout"
     kill "${OVPN_PID}" 2>/dev/null || true
@@ -116,7 +116,7 @@ fi
 # ─── 6. Policy routing for eth0 reply traffic ────────────────────────────────
 ETH0_IP=$(ip -4 addr show eth0 2>/dev/null \
           | awk '/inet /{print $2}' | cut -d/ -f1 | head -1 || true)
-if [ -n "${ETH0_IP}" ] && [ -n "${ORIG_GW}" ]; then
+if [[ -n "${ETH0_IP}" ]] && [[ -n "${ORIG_GW}" ]]; then
     ip rule add from "${ETH0_IP}" table 128 2>/dev/null || true
     ip route add default via "${ORIG_GW}" dev "${ORIG_DEV}" table 128 2>/dev/null || true
 fi
@@ -132,7 +132,7 @@ EXT_JSON=$(curl -sf \
            --max-time "${VPN_CHECK_TIMEOUT}" \
            "https://ipinfo.io/json" || echo "")
 
-if [ -z "${EXT_JSON}" ]; then
+if [[ -z "${EXT_JSON}" ]]; then
     err "No connectivity through ${VPN_IFACE} — aborting to prevent IP leak"
     write_health "dead" "" "initial VPN check failed — no connectivity through tun0"
     kill "${OVPN_PID}" 2>/dev/null || true
@@ -194,17 +194,17 @@ kill_switch() {
         fi
 
         # (b) Periodic external IP re-verification
-        if [ -z "${reason}" ]; then
+        if [[ -z "${reason}" ]]; then
             local now
             now=$(date +%s)
-            if [ $(( now - LAST_HEALTH_CHECK )) -ge "${HEALTH_CHECK_INTERVAL}" ]; then
+            if [[ $(( now - LAST_HEALTH_CHECK )) -ge "${HEALTH_CHECK_INTERVAL}" ]]; then
                 LAST_HEALTH_CHECK=${now}
                 local live_json
                 live_json=$(curl -sf \
                             --interface "${VPN_IFACE}" \
                             --max-time 8 \
                             "https://ipinfo.io/json" 2>/dev/null || echo "")
-                if [ -z "${live_json}" ]; then
+                if [[ -z "${live_json}" ]]; then
                     reason="runtime IP check failed — no connectivity through ${VPN_IFACE}"
                 else
                     local live_ip
@@ -218,7 +218,7 @@ kill_switch() {
             fi
         fi
 
-        if [ -n "${reason}" ]; then
+        if [[ -n "${reason}" ]]; then
             log "KILL-SWITCH TRIGGERED: ${reason}"
             write_health "dead" "" "kill-switch: ${reason}"
 
@@ -230,7 +230,7 @@ kill_switch() {
             log "Sending SIGTERM to aria2 (PID=${ARIA2_PID}) for graceful session save..."
             kill -15 "${ARIA2_PID}" 2>/dev/null || true
             local waited=0
-            while kill -0 "${ARIA2_PID}" 2>/dev/null && [ "${waited}" -lt 10 ]; do
+            while kill -0 "${ARIA2_PID}" 2>/dev/null && [[ "${waited}" -lt 10 ]]; do
                 sleep 1
                 waited=$(( waited + 1 ))
             done

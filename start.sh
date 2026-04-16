@@ -23,7 +23,7 @@ echo -e "\n${BOLD}Smuggler — pre-flight checks${RESET}"
 
 # nvm + PATH
 export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+[[ -s "$NVM_DIR/nvm.sh" ]] && . "$NVM_DIR/nvm.sh"
 nvm use 20 2>/dev/null || true
 export PATH="$HOME/.local/bin:$PATH"
 
@@ -35,7 +35,7 @@ else
 fi
 
 # 2. Python dependencies (check the venv exists)
-if [ -d "$ROOT/.venv" ]; then
+if [[ -d "$ROOT/.venv" ]]; then
     ok "Python virtualenv ready"
 else
     needs_setup "Python dependencies not installed (.venv missing)"
@@ -49,7 +49,7 @@ else
 fi
 
 # 4. npm dependencies
-if [ -d "$ROOT/web/node_modules" ]; then
+if [[ -d "$ROOT/web/node_modules" ]]; then
     ok "npm dependencies ready"
 else
     needs_setup "npm dependencies not installed (web/node_modules missing)"
