@@ -30,6 +30,17 @@ const STAGE_COLORS: Record<DeployStage, { bg: string; text: string; ring: string
   DEPLOYED:     { bg: 'bg-emerald-500/10', text: 'text-emerald-400', ring: 'ring-emerald-500/20' },
 };
 
+function stepWorkersPageStages(prev: DeployingMule[]): DeployingMule[] {
+  const now = Date.now();
+  return prev.map(m => {
+    if (m.stage === 'DEPLOYED') return m;
+    const elapsed = now - m.startedAt;
+    if (elapsed >= STAGE_TIMINGS.CONNECTING) return { ...m, stage: 'CONNECTING' as DeployStage };
+    if (elapsed >= STAGE_TIMINGS.CONFIGURING) return { ...m, stage: 'CONFIGURING' as DeployStage };
+    return { ...m, stage: 'STARTING' as DeployStage };
+  });
+}
+
 function WatchdogPanel({ watchdog }: { watchdog: WatchdogStatus | undefined }) {
   const qc = useQueryClient();
 
@@ -152,22 +163,9 @@ export function WorkersPage() {
   // Progress deploying mules through stages based on elapsed time
   useEffect(() => {
     if (deployingMules.length === 0) return;
-
     const timer = setInterval(() => {
-      const now = Date.now();
-      setDeployingMules(prev =>
-        prev.map(m => {
-          if (m.stage === 'DEPLOYED') return m;
-          const elapsed = now - m.startedAt;
-          let newStage = m.stage;
-          if (elapsed >= STAGE_TIMINGS.CONNECTING) newStage = 'CONNECTING';
-          else if (elapsed >= STAGE_TIMINGS.CONFIGURING) newStage = 'CONFIGURING';
-          else newStage = 'STARTING';
-          return { ...m, stage: newStage };
-        })
-      );
+      setDeployingMules(stepWorkersPageStages);
     }, 1000);
-
     return () => clearInterval(timer);
   }, [deployingMules.length]);
 

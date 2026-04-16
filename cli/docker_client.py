@@ -475,6 +475,52 @@ def check_mule_vpn(client: docker.DockerClient, name_or_id: str) -> dict:
     }
 
 
+def _collect_source_downloads(client: docker.DockerClient, source_name: str) -> list[dict]:
+    """Return the active + waiting download list from *source_name*, or [] on error."""
+    from cli.aria2_client import Aria2Client, Aria2Error  # local import avoids circular dep
+
+    try:
+        source = get_mule(client, source_name)
+        src_aria2 = Aria2Client("localhost", source.rpc_port, source.rpc_token, timeout=5)
+        return src_aria2.tell_active() + src_aria2.tell_waiting()
+    except (RuntimeError, Aria2Error) as exc:
+        log.warning("evacuate_mule: cannot list torrents on source %s — %s", source_name, exc)
+        return []
+
+
+def _migrate_downloads(downloads: list[dict], targets: list, report: dict) -> None:
+    """Migrate each download to a healthy target mule (round-robin) and update *report*."""
+    import urllib.parse as _up
+    from cli.aria2_client import Aria2Client, Aria2Error  # local import avoids circular dep
+
+    for idx, dl in enumerate(downloads):
+        gid = dl.get("gid", "?")
+        bt = dl.get("bittorrent", {})
+        name = bt.get("info", {}).get("name") or gid
+
+        magnet = dl.get("magnetUri") or dl.get("infoHash") and (
+            "magnet:?xt=urn:btih:" + dl["infoHash"]
+            + ("&dn=" + _up.quote(name) if name and name != gid else "")
+        )
+
+        if not magnet:
+            log.warning("evacuate_mule: gid=%s has no magnet or infoHash — skipping", gid)
+            report["skipped"].append({"gid": gid, "name": name, "reason": "no magnet URI or infoHash"})
+            continue
+
+        target = targets[idx % len(targets)]
+        tgt_aria2 = Aria2Client("localhost", target.rpc_port, target.rpc_token, timeout=5)
+        try:
+            new_gid = tgt_aria2.add_magnet(magnet)
+            log.info("evacuate_mule: migrated gid=%s → %s new_gid=%s", gid, target.name, new_gid)
+            report["migrated"].append(
+                {"gid": gid, "name": name, "target_mule": target.name, "new_gid": new_gid}
+            )
+        except Aria2Error as exc:
+            log.error("evacuate_mule: failed to re-add gid=%s to %s — %s", gid, target.name, exc)
+            report["skipped"].append({"gid": gid, "name": name, "reason": str(exc)})
+
+
 def evacuate_mule(
     client: docker.DockerClient,
     source_name: str,
@@ -497,9 +543,6 @@ def evacuate_mule(
           "killed":    bool,
         }
     """
-    import urllib.parse as _up
-    from cli.aria2_client import Aria2Client, Aria2Error
-
     log.info("evacuate_mule: starting evacuation source=%s kill_after=%s", source_name, kill_after)
 
     report: dict = {"migrated": [], "skipped": [], "no_targets": False, "killed": False}
@@ -519,51 +562,8 @@ def evacuate_mule(
     else:
         log.info("evacuate_mule: %d healthy target(s) available: %s",
                  len(targets), [t.name for t in targets])
-
-        # ── Collect torrents from source mule ──────────────────────────────
-        try:
-            source = get_mule(client, source_name)
-            src_aria2 = Aria2Client("localhost", source.rpc_port, source.rpc_token, timeout=5)
-            downloads = src_aria2.tell_active() + src_aria2.tell_waiting()
-        except (RuntimeError, Aria2Error) as exc:
-            log.warning("evacuate_mule: cannot list torrents on source %s — %s", source_name, exc)
-            downloads = []
-
-        # ── Migrate each torrent ───────────────────────────────────────────
-        for idx, dl in enumerate(downloads):
-            gid = dl.get("gid", "?")
-            bt = dl.get("bittorrent", {})
-            name = bt.get("info", {}).get("name") or gid
-
-            # Build magnet URI
-            magnet = dl.get("magnetUri") or dl.get("infoHash") and (
-                "magnet:?xt=urn:btih:" + dl["infoHash"]
-                + ("&dn=" + _up.quote(name) if name and name != gid else "")
-            )
-
-            if not magnet:
-                log.warning("evacuate_mule: gid=%s has no magnet or infoHash — skipping", gid)
-                report["skipped"].append({"gid": gid, "name": name, "reason": "no magnet URI or infoHash"})
-                continue
-
-            target = targets[idx % len(targets)]
-            tgt_aria2 = Aria2Client("localhost", target.rpc_port, target.rpc_token, timeout=5)
-
-            try:
-                new_gid = tgt_aria2.add_magnet(magnet)
-                log.info(
-                    "evacuate_mule: migrated gid=%s → %s new_gid=%s",
-                    gid, target.name, new_gid,
-                )
-                report["migrated"].append({
-                    "gid": gid,
-                    "name": name,
-                    "target_mule": target.name,
-                    "new_gid": new_gid,
-                })
-            except Aria2Error as exc:
-                log.error("evacuate_mule: failed to re-add gid=%s to %s — %s", gid, target.name, exc)
-                report["skipped"].append({"gid": gid, "name": name, "reason": str(exc)})
+        downloads = _collect_source_downloads(client, source_name)
+        _migrate_downloads(downloads, targets, report)
 
     # ── Kill the compromised mule ────────────────────────────────────────────
     if kill_after:

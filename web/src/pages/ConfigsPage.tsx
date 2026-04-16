@@ -28,6 +28,21 @@ const STAGE_COLORS: Record<DeployStage, { bg: string; text: string; ring: string
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+function stepDeployStages(prev: DeployingMule[]): DeployingMule[] {
+  const now = Date.now();
+  return prev.map(m => {
+    if (m.stage === 'DEPLOYED' || m.error) return m;
+    const elapsed = now - m.startedAt;
+    if (elapsed >= 8000) return { ...m, stage: 'CONNECTING' as DeployStage };
+    if (elapsed >= 3000) return { ...m, stage: 'CONFIGURING' as DeployStage };
+    return { ...m, stage: 'STARTING' as DeployStage };
+  });
+}
+
+function removeDeployedMules(prev: DeployingMule[]): DeployingMule[] {
+  return prev.filter(m => m.stage !== 'DEPLOYED');
+}
+
 function detectVpnType(filename: string): VpnType {
   return filename.toLowerCase().endsWith('.ovpn') ? 'openvpn' : 'wireguard';
 }
@@ -258,17 +273,7 @@ export function ConfigsPage() {
   useEffect(() => {
     if (deployingMules.length === 0) return;
     const timer = setInterval(() => {
-      const now = Date.now();
-      setDeployingMules(prev =>
-        prev.map(m => {
-          if (m.stage === 'DEPLOYED' || m.error) return m;
-          const elapsed = now - m.startedAt;
-          let newStage: DeployStage = 'STARTING';
-          if (elapsed >= 8000) newStage = 'CONNECTING';
-          else if (elapsed >= 3000) newStage = 'CONFIGURING';
-          return { ...m, stage: newStage };
-        })
-      );
+      setDeployingMules(stepDeployStages);
     }, 1000);
     return () => clearInterval(timer);
   }, [deployingMules.length]);
@@ -277,7 +282,7 @@ export function ConfigsPage() {
     const deployed = deployingMules.filter(m => m.stage === 'DEPLOYED');
     if (deployed.length === 0) return;
     const timer = setTimeout(() => {
-      setDeployingMules(prev => prev.filter(m => m.stage !== 'DEPLOYED'));
+      setDeployingMules(removeDeployedMules);
     }, 4000);
     return () => clearTimeout(timer);
   }, [deployingMules]);

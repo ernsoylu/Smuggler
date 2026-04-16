@@ -24,6 +24,13 @@ function fmtBytes(b: number): string {
   return `${b} B`;
 }
 
+function torrentStatusColor(status: string): string {
+  if (status === 'active')   return 'text-emerald-400';
+  if (status === 'paused')   return 'text-amber-400';
+  if (status === 'error')    return 'text-red-400';
+  return 'text-neutral-500';
+}
+
 interface Props {
   worker: Mule;
 }
@@ -218,11 +225,7 @@ export function WorkerCard({ worker }: Props) {
             <div className="px-4 pb-4 flex flex-col gap-1">
               {torrents.slice(0, 5).map(t => {
                 const pct = t.total_length > 0 ? Math.round((t.completed_length / t.total_length) * 100) : 0;
-                const statusColor =
-                  t.status === 'active'   ? 'text-emerald-400' :
-                  t.status === 'paused'   ? 'text-amber-400'   :
-                  t.status === 'error'    ? 'text-red-400'      :
-                  t.status === 'complete' ? 'text-neutral-500'  : 'text-neutral-500';
+                const statusColor = torrentStatusColor(t.status);
                 return (
                   <div key={t.gid} className="flex items-center gap-2 text-[11px]">
                     <div className="flex-1 min-w-0">

@@ -223,6 +223,28 @@ def mule_ip(mule_name: str, wait: int) -> None:
     console.print(f"  [bold]Org[/bold]     : {info.get('org', 'unknown')}")
 
 
+def _kill_all_mules_cmd(client: object, yes: bool, keep: bool) -> None:
+    """Kill every running mule — extracted to reduce cognitive complexity of mule_kill."""
+    mules = list_mules(client)  # type: ignore[arg-type]
+    if not mules:
+        console.print("[yellow]No mules to kill.[/yellow]")
+        return
+    names = [w.name for w in mules]
+    if not yes:
+        console.print(f"About to kill [bold]{len(names)}[/bold] mule(s): {', '.join(names)}")
+        click.confirm("Proceed?", abort=True)
+    with console.status(f"Killing {len(names)} mule(s)..."):
+        try:
+            killed = kill_all_mules(client, remove=not keep)  # type: ignore[arg-type]
+        except RuntimeError as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            raise SystemExit(1)
+    for n in killed:
+        action = "killed" if keep else "killed and removed"
+        console.print(f"[red]✗[/red] {n} — {action}")
+    console.print(f"[bold]{len(killed)}[/bold] mule(s) killed.")
+
+
 @mule_group.command("kill")
 @click.argument("mule_name", required=False, default=None)
 @click.option("--all", "kill_all", is_flag=True, default=False, help="Kill every mule.")
@@ -247,24 +269,7 @@ def mule_kill(mule_name: str | None, kill_all: bool, keep: bool, yes: bool) -> N
     client = get_docker_client()
 
     if kill_all:
-        mules = list_mules(client)
-        if not mules:
-            console.print("[yellow]No mules to kill.[/yellow]")
-            return
-        names = [w.name for w in mules]
-        if not yes:
-            console.print(f"About to kill [bold]{len(names)}[/bold] mule(s): {', '.join(names)}")
-            click.confirm("Proceed?", abort=True)
-        with console.status(f"Killing {len(names)} mule(s)..."):
-            try:
-                killed = kill_all_mules(client, remove=not keep)
-            except RuntimeError as exc:
-                console.print(f"[red]Error:[/red] {exc}")
-                raise SystemExit(1)
-        for n in killed:
-            action = "killed" if keep else "killed and removed"
-            console.print(f"[red]✗[/red] {n} — {action}")
-        console.print(f"[bold]{len(killed)}[/bold] mule(s) killed.")
+        _kill_all_mules_cmd(client, yes, keep)
     else:
         with console.status(f"Killing [bold]{mule_name}[/bold]..."):
             try:
