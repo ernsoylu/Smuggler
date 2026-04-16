@@ -76,6 +76,23 @@ export interface Torrent {
   is_metadata?: boolean;
 }
 
+export interface Peer {
+  ip: string;
+  port: string;
+  download_speed: number;
+  upload_speed: number;
+  seeder: boolean;
+  progress: number;
+  am_choking: boolean;
+  peer_choking: boolean;
+}
+
+export interface TorrentOptions {
+  max_download_speed: number;
+  max_upload_speed: number;
+  max_connections: number;
+}
+
 export interface GlobalStats {
   download_speed: number;
   upload_speed: number;
@@ -83,6 +100,8 @@ export interface GlobalStats {
   num_waiting: number;
   num_stopped: number;
   num_mules: number;
+  disk_free?: number | null;
+  disk_total?: number | null;
 }
 
 export interface VpnConfig {

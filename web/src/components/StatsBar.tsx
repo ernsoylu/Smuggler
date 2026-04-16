@@ -1,10 +1,17 @@
 import type { GlobalStats } from '../api/types';
-import { ArrowDownToLine, ArrowUpFromLine, Activity, Server, PauseCircle, Clock } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpFromLine, Activity, Server, PauseCircle, Clock, HardDrive } from 'lucide-react';
 
 function formatSpeed(bytesPerSec: number): string {
   if (bytesPerSec >= 1_048_576) return `${(bytesPerSec / 1_048_576).toFixed(1)} MB/s`;
   if (bytesPerSec >= 1_024) return `${(bytesPerSec / 1_024).toFixed(0)} KB/s`;
   return `${bytesPerSec} B/s`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(1)} GB`;
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(0)} MB`;
+  if (bytes >= 1_024) return `${(bytes / 1_024).toFixed(0)} KB`;
+  return `${bytes} B`;
 }
 
 interface Props {
@@ -64,6 +71,22 @@ export function StatsBar({ stats }: Props) {
              <p className="text-neutral-100 font-mono font-medium text-base mt-0.5">{stats.num_mules} <span className="text-neutral-500 text-sm">active</span></p>
           </div>
         </div>
+
+        {stats.disk_free != null && stats.disk_total != null && (
+          <div className="flex items-center gap-3 relative">
+            <div className="absolute -left-3 top-1/2 -translate-y-1/2 w-px h-8 bg-white/5"></div>
+            <div className="p-2 bg-amber-500/10 rounded-lg text-amber-400">
+              <HardDrive size={16} />
+            </div>
+            <div>
+              <p className="text-neutral-500 text-xs font-semibold uppercase tracking-wider">Disk Free</p>
+              <p className="text-neutral-100 font-mono font-medium text-base mt-0.5">
+                {formatBytes(stats.disk_free)}
+                <span className="text-neutral-500 text-xs ml-1">/ {formatBytes(stats.disk_total)}</span>
+              </p>
+            </div>
+          </div>
+        )}
 
       </div>
     </div>

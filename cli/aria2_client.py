@@ -139,6 +139,21 @@ class Aria2Client:
         log.debug("get_version: url=%s", self.url)
         return self._call("aria2.getVersion")
 
+    def get_peers(self, gid: str) -> list[dict[str, Any]]:
+        """Return active peers for a BitTorrent download."""
+        log.debug("get_peers: gid=%s", gid)
+        return self._call("aria2.getPeers", [gid])
+
+    def get_option(self, gid: str) -> dict[str, str]:
+        """Return per-download options."""
+        log.debug("get_option: gid=%s", gid)
+        return self._call("aria2.getOption", [gid])
+
+    def change_option(self, gid: str, options: dict[str, str]) -> str:
+        """Change per-download options. Returns 'OK'."""
+        log.info("change_option: gid=%s options=%s", gid, options)
+        return self._call("aria2.changeOption", [gid, options])
+
     def change_global_option(self, options: dict[str, str]) -> str:
         """Change global options (e.g. speed limits). Returns 'OK'."""
         log.info("change_global_option: options=%s", options)

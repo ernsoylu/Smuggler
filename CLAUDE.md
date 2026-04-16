@@ -108,6 +108,27 @@ You are assisting in building **Smuggler**, a containerized Torrent Downloader. 
 
 All tests run without real Docker or WireGuard configs. Use `DVD_LOGGING=false` to suppress log files in test runs.
 
+## SonarQube Integration
+
+Project key: `smuggler` (see `sonar-project.properties`).
+
+### Pre-push code analysis (mandatory)
+Before every `git push`, run a SonarQube analysis on all modified files and resolve blocking findings:
+
+1. **Resolve project key** — always read `sonar-project.properties` first; fall back to `search_my_sonarqube_projects` if missing.
+2. **Analyze changed files** — use `mcp__sonarqube__analyze_code_snippet` on any file modified in the current branch/commit set.
+3. **Check quality gate** — call `mcp__sonarqube__get_project_quality_gate_status` and confirm status is `OK` before pushing.
+4. **Fix blocking issues** — use `mcp__sonarqube__search_sonar_issues_in_projects` filtered to `severities=BLOCKER,CRITICAL`. Fix all BLOCKER issues; evaluate and fix CRITICAL issues unless there is a documented reason to accept them.
+5. **Security hotspots** — call `mcp__sonarqube__search_security_hotspots` and review any `TO_REVIEW` hotspots before pushing.
+6. **Do not push** if the quality gate is `ERROR` or there are unresolved BLOCKER issues.
+
+### Ongoing analysis rules
+- After editing any Python file run `mcp__sonarqube__analyze_code_snippet` on the changed snippet before writing the final version.
+- After editing any TypeScript/TSX file do the same.
+- Use `mcp__sonarqube__get_component_measures` to track coverage, duplication, and complexity trends; flag regressions to the user.
+- Use `mcp__sonarqube__get_duplications` when adding new helpers or utilities to avoid introducing duplicate blocks.
+- Use `mcp__sonarqube__show_rule` to explain any unfamiliar rule before suppressing or accepting it.
+
 ## Rules & Coding Standards
 - **Naming:** Always use "mule" instead of "worker". The project is "Smuggler".
 - **VPN First:** Never start aria2 without a verified VPN connection (WireGuard `wg0` or OpenVPN `tun0`).

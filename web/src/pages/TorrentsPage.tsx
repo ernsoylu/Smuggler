@@ -116,8 +116,10 @@ export function TorrentsPage() {
                   <th className="px-6 py-4 font-semibold tracking-wider">Name</th>
                   <th className="px-4 py-4 font-semibold tracking-wider">Status</th>
                   <th className="px-4 py-4 font-semibold tracking-wider">Progress</th>
+                  <th className="px-4 py-4 font-semibold tracking-wider text-right">ETA</th>
                   <th className="px-4 py-4 font-semibold tracking-wider text-right">Speed</th>
-                  <th className="px-4 py-4 font-semibold tracking-wider text-center">Peers</th>
+                  <th className="px-4 py-4 font-semibold tracking-wider text-center">Seeds / Peers</th>
+                  <th className="px-4 py-4 font-semibold tracking-wider text-right">Ratio</th>
                   <th className="px-4 py-4 font-semibold tracking-wider">Mule</th>
                   <th className="px-6 py-4 font-semibold tracking-wider text-right">Actions</th>
                 </tr>
@@ -125,7 +127,7 @@ export function TorrentsPage() {
               <tbody className="divide-y divide-white/5 bg-neutral-950/20">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-8 text-center text-neutral-500">
+                    <td colSpan={9} className="px-6 py-8 text-center text-neutral-500">
                       <div className="flex items-center justify-center gap-3">
                          <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
                          Loading torrents...
@@ -134,7 +136,7 @@ export function TorrentsPage() {
                   </tr>
                 ) : filtered.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center">
+                    <td colSpan={9} className="px-6 py-12 text-center">
                        <p className="text-neutral-400 font-medium">
                          {filter === 'all' ? 'No torrents are currently added.' : `No ${filter} torrents found.`}
                        </p>

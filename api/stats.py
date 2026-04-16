@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import shutil
+
 from flask import Blueprint, jsonify
 
 from cli.log import get_logger
 from cli.docker_client import get_docker_client, list_mules
 from cli.aria2_client import Aria2Client, Aria2Error
+from api.database import get_setting
 
 log = get_logger(__name__)
 stats_bp = Blueprint("stats", __name__, url_prefix="/api/stats")
@@ -37,6 +40,17 @@ def global_stats():
         except Aria2Error as exc:
             log.warning("GET /api/stats/: skipping mule=%s — %s", w.name, exc)
 
+    # Disk space for configured download directory
+    disk_free: int | None = None
+    disk_total: int | None = None
+    try:
+        download_dir = get_setting("download_dir")
+        usage = shutil.disk_usage(download_dir)
+        disk_free = usage.free
+        disk_total = usage.total
+    except Exception as exc:
+        log.debug("GET /api/stats/: disk_usage unavailable — %s", exc)
+
     result = {
         "download_speed": total_down,
         "upload_speed": total_up,
@@ -44,6 +58,8 @@ def global_stats():
         "num_waiting": num_waiting,
         "num_stopped": num_stopped,
         "num_mules": len(mules),
+        "disk_free": disk_free,
+        "disk_total": disk_total,
     }
     log.debug("GET /api/stats/: %s", result)
     return jsonify(result)

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Mule, Torrent, GlobalStats, IpInfo, VpnConfig, MuleHealth, WatchdogStatus } from './types';
+import type { Mule, Torrent, GlobalStats, IpInfo, VpnConfig, MuleHealth, WatchdogStatus, Peer, TorrentOptions } from './types';
 
 const api = axios.create({ baseURL: '/api' });
 
@@ -52,6 +52,18 @@ export const pauseTorrent = (mule: string, gid: string): Promise<void> =>
 
 export const resumeTorrent = (mule: string, gid: string): Promise<void> =>
   api.post(`/torrents/${mule}/${gid}/resume`).then(() => undefined);
+
+export const getTorrentPeers = (mule: string, gid: string): Promise<Peer[]> =>
+  api.get<Peer[]>(`/torrents/${mule}/${gid}/peers`).then(r => r.data);
+
+export const getTorrentOptions = (mule: string, gid: string): Promise<TorrentOptions> =>
+  api.get<TorrentOptions>(`/torrents/${mule}/${gid}/options`).then(r => r.data);
+
+export const setTorrentOptions = (mule: string, gid: string, opts: Partial<TorrentOptions>): Promise<void> =>
+  api.patch(`/torrents/${mule}/${gid}/options`, opts).then(() => undefined);
+
+export const setFileSelection = (mule: string, gid: string, selectedIndices: number[]): Promise<void> =>
+  api.patch(`/torrents/${mule}/${gid}/files`, { selected_indices: selectedIndices }).then(() => undefined);
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 

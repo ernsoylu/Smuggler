@@ -292,3 +292,103 @@ def resume(mule_name: str, gid: str):
     except Aria2Error as exc:
         log.error("POST /api/torrents/%s/%s/resume: aria2 error — %s", mule_name, gid, exc)
         return jsonify({"error": str(exc)}), 502
+
+
+# ─── GET /api/torrents/<mule>/<gid>/peers ──────────────────────────────────
+
+@torrents_bp.get("/<mule_name>/<gid>/peers")
+def get_peers(mule_name: str, gid: str):
+    log.info("GET /api/torrents/%s/%s/peers", mule_name, gid)
+    try:
+        aria2 = _aria2_for(mule_name)
+        raw = aria2.get_peers(gid)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Aria2Error as exc:
+        log.warning("GET /api/torrents/%s/%s/peers: aria2 error — %s", mule_name, gid, exc)
+        return jsonify([])
+
+    peers = []
+    for p in raw:
+        peers.append({
+            "ip": p.get("ip", ""),
+            "port": p.get("port", ""),
+            "download_speed": int(p.get("downloadSpeed", 0)),
+            "upload_speed": int(p.get("uploadSpeed", 0)),
+            "seeder": p.get("seeder", False),
+            "progress": round(p.get("progress", 0) / 100.0, 3) if "progress" in p else 0.0,
+            "am_choking": p.get("amChoking", False),
+            "peer_choking": p.get("peerChoking", False),
+        })
+    return jsonify(peers)
+
+
+# ─── GET /api/torrents/<mule>/<gid>/options ────────────────────────────────
+
+@torrents_bp.get("/<mule_name>/<gid>/options")
+def get_options(mule_name: str, gid: str):
+    log.info("GET /api/torrents/%s/%s/options", mule_name, gid)
+    try:
+        aria2 = _aria2_for(mule_name)
+        opts = aria2.get_option(gid)
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Aria2Error as exc:
+        log.error("GET /api/torrents/%s/%s/options: aria2 error — %s", mule_name, gid, exc)
+        return jsonify({"error": str(exc)}), 502
+
+    return jsonify({
+        "max_download_speed": int(opts.get("max-download-limit", 0)),
+        "max_upload_speed": int(opts.get("max-upload-limit", 0)),
+        "max_connections": int(opts.get("max-connection-per-server", 1)),
+    })
+
+
+# ─── PATCH /api/torrents/<mule>/<gid>/options ─────────────────────────────
+
+@torrents_bp.patch("/<mule_name>/<gid>/options")
+def set_options(mule_name: str, gid: str):
+    log.info("PATCH /api/torrents/%s/%s/options", mule_name, gid)
+    data = request.get_json(silent=True) or {}
+    aria2_opts: dict[str, str] = {}
+    if "max_download_speed" in data:
+        aria2_opts["max-download-limit"] = str(int(data["max_download_speed"]))
+    if "max_upload_speed" in data:
+        aria2_opts["max-upload-limit"] = str(int(data["max_upload_speed"]))
+    if "max_connections" in data:
+        aria2_opts["max-connection-per-server"] = str(int(data["max_connections"]))
+    if not aria2_opts:
+        return jsonify({"error": "No valid options provided"}), 400
+    try:
+        aria2 = _aria2_for(mule_name)
+        aria2.change_option(gid, aria2_opts)
+        log.info("PATCH /api/torrents/%s/%s/options: updated %s", mule_name, gid, aria2_opts)
+        return jsonify({"ok": True})
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Aria2Error as exc:
+        log.error("PATCH /api/torrents/%s/%s/options: aria2 error — %s", mule_name, gid, exc)
+        return jsonify({"error": str(exc)}), 502
+
+
+# ─── PATCH /api/torrents/<mule>/<gid>/files ───────────────────────────────
+
+@torrents_bp.patch("/<mule_name>/<gid>/files")
+def set_file_selection(mule_name: str, gid: str):
+    """Set which file indices (1-based) are selected for download."""
+    log.info("PATCH /api/torrents/%s/%s/files", mule_name, gid)
+    data = request.get_json(silent=True) or {}
+    selected: list[int] = data.get("selected_indices", [])
+    if not isinstance(selected, list):
+        return jsonify({"error": "selected_indices must be a list of integers"}), 400
+    select_str = ",".join(str(i) for i in sorted(selected)) if selected else ""
+    try:
+        aria2 = _aria2_for(mule_name)
+        aria2.change_option(gid, {"select-file": select_str})
+        log.info("PATCH /api/torrents/%s/%s/files: select-file=%s", mule_name, gid, select_str)
+        return jsonify({"ok": True})
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except Aria2Error as exc:
+        log.error("PATCH /api/torrents/%s/%s/files: aria2 error — %s", mule_name, gid, exc)
+        return jsonify({"error": str(exc)}), 502
