@@ -19,6 +19,8 @@ from cli.docker_client import (
     kill_mule,
     exec_in_mule,
     wait_for_vpn,
+    check_mule_vpn,
+    evacuate_mule,
     MuleInfo,
 )
 
@@ -200,6 +202,40 @@ def force_kill(mule_name: str):
         return jsonify({"error": str(exc)}), 404
     log.info("POST /api/mules/%s/kill: done", mule_name)
     return jsonify({"ok": True})
+
+
+# ─── GET /api/mules/<name>/health ───────────────────────────────────────────
+
+@mules_bp.get("/<mule_name>/health")
+def vpn_health(mule_name: str):
+    """Return live VPN health for a mule (runs check inside container)."""
+    log.info("GET /api/mules/%s/health", mule_name)
+    client = get_docker_client()
+    result = check_mule_vpn(client, mule_name)
+    status_code = 200 if result["healthy"] else 503
+    return jsonify(result), status_code
+
+
+# ─── POST /api/mules/<name>/evacuate ────────────────────────────────────────
+
+@mules_bp.post("/<mule_name>/evacuate")
+def evacuate(mule_name: str):
+    """
+    Migrate all active/waiting torrents from *mule_name* to healthy mules,
+    then kill and remove the evacuated mule.
+
+    Query params:
+      ?kill=false  — migrate but do not remove the source mule
+    """
+    kill_after = request.args.get("kill", "true").lower() != "false"
+    log.info("POST /api/mules/%s/evacuate kill_after=%s", mule_name, kill_after)
+    client = get_docker_client()
+    try:
+        report = evacuate_mule(client, mule_name, kill_after=kill_after)
+    except RuntimeError as exc:
+        log.error("POST /api/mules/%s/evacuate: error — %s", mule_name, exc)
+        return jsonify({"error": str(exc)}), 500
+    return jsonify(report)
 
 
 # ─── GET /api/mules/<name>/ip ────────────────────────────────────────────────

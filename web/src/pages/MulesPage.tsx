@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { getMules } from '../api/client';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { getMules, getWatchdogStatus, triggerWatchdogSweep, evacuateMule } from '../api/client';
+import type { WatchdogStatus } from '../api/types';
 import { WorkerCard } from '../components/MuleCard';
 import { DeployMuleModal } from '../components/DeployMuleModal';
-import { ShieldCheck, Rocket } from 'lucide-react';
+import { ShieldCheck, Rocket, Shield, ShieldAlert, ShieldOff, RefreshCw, LogOut } from 'lucide-react';
 
 type DeployStage = 'STARTING' | 'CONFIGURING' | 'CONNECTING' | 'DEPLOYED';
 
@@ -29,6 +30,109 @@ const STAGE_COLORS: Record<DeployStage, { bg: string; text: string; ring: string
   DEPLOYED:     { bg: 'bg-emerald-500/10', text: 'text-emerald-400', ring: 'ring-emerald-500/20' },
 };
 
+function WatchdogPanel({ watchdog }: { watchdog: WatchdogStatus | undefined }) {
+  const qc = useQueryClient();
+
+  const sweep = useMutation({
+    mutationFn: triggerWatchdogSweep,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['watchdog'] }),
+  });
+
+  const evac = useMutation({
+    mutationFn: (name: string) => evacuateMule(name, true),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['watchdog'] });
+      qc.invalidateQueries({ queryKey: ['workers'] });
+    },
+  });
+
+  if (!watchdog) return null;
+
+  const unhealthy = watchdog.mules.filter(m => !m.healthy);
+  const healthy   = watchdog.mules.filter(m => m.healthy);
+  const allHealthy = unhealthy.length === 0;
+
+  return (
+    <div className={`rounded-2xl border shadow-xl p-5 mb-8 ${
+      allHealthy
+        ? 'bg-emerald-500/5 border-emerald-500/15'
+        : 'bg-red-500/5 border-red-500/20'
+    }`}>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          {allHealthy
+            ? <Shield size={18} className="text-emerald-400" />
+            : <ShieldAlert size={18} className="text-red-400" />}
+          <div>
+            <h3 className={`text-sm font-bold ${allHealthy ? 'text-emerald-300' : 'text-red-300'}`}>
+              {allHealthy ? 'All VPN connections secure' : `${unhealthy.length} mule${unhealthy.length > 1 ? 's' : ''} compromised`}
+            </h3>
+            <p className="text-[11px] text-neutral-500 mt-0.5">
+              Watchdog · interval {watchdog.config.interval_seconds}s · {watchdog.stats.total_sweeps} sweeps · {watchdog.stats.total_evacuations} evacuations
+              {watchdog.stats.last_run_at && ` · last check ${new Date(watchdog.stats.last_run_at).toLocaleTimeString()}`}
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={() => sweep.mutate()}
+          disabled={sweep.isPending}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300 text-xs font-medium transition-colors"
+        >
+          <RefreshCw size={13} className={sweep.isPending ? 'animate-spin' : ''} />
+          Check now
+        </button>
+      </div>
+
+      {/* Unhealthy mules */}
+      {unhealthy.length > 0 && (
+        <div className="space-y-2 mb-3">
+          {unhealthy.map(m => (
+            <div key={m.name} className="flex items-center justify-between bg-red-500/10 rounded-xl px-4 py-3 border border-red-500/20 gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <ShieldOff size={14} className="text-red-400 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-red-300 truncate">{m.name}</p>
+                  <p className="text-[11px] text-red-400/70 truncate">{m.reason}</p>
+                </div>
+                {(m.consecutive_failures ?? 0) > 0 && (
+                  <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-300">
+                    {m.consecutive_failures} fail{(m.consecutive_failures ?? 0) > 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+              {!m.evacuated && (
+                <button
+                  onClick={() => evac.mutate(m.name)}
+                  disabled={evac.isPending}
+                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-xs font-semibold transition-colors"
+                >
+                  <LogOut size={12} /> Evacuate
+                </button>
+              )}
+              {m.evacuated && (
+                <span className="shrink-0 text-[11px] font-bold px-2.5 py-1 rounded bg-neutral-700 text-neutral-400">Evacuated</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Healthy mule mini-list */}
+      {healthy.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {healthy.map(m => (
+            <div key={m.name} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/15 text-xs text-emerald-400">
+              <Shield size={11} />
+              <span className="font-mono font-medium">{m.name}</span>
+              {m.ip && <span className="text-emerald-500/60 font-mono">{m.ip}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function WorkersPage() {
   const [showModal, setShowModal] = useState(false);
   const [deployingMules, setDeployingMules] = useState<DeployingMule[]>([]);
@@ -37,6 +141,12 @@ export function WorkersPage() {
     queryKey: ['workers'],
     queryFn: getMules,
     refetchInterval: 3_000,
+  });
+
+  const { data: watchdog } = useQuery({
+    queryKey: ['watchdog'],
+    queryFn: getWatchdogStatus,
+    refetchInterval: 15_000,
   });
 
   // Progress deploying mules through stages based on elapsed time
@@ -182,6 +292,9 @@ export function WorkersPage() {
           })}
         </div>
       )}
+
+      {/* Watchdog security panel */}
+      {watchdog && watchdog.mules.length > 0 && <WatchdogPanel watchdog={watchdog} />}
 
       {/* Active deployments */}
       <div className="flex items-center gap-3 mb-6">
