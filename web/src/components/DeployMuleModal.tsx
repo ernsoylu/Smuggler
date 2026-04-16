@@ -40,9 +40,12 @@ export function DeployMuleModal({ onClose, onDeployStart }: Readonly<Props>) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+      <button
+        type="button"
+        aria-label="Close modal"
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm border-0 p-0 cursor-default"
         onClick={deployingId ? undefined : onClose}
+        disabled={!!deployingId}
       />
 
       {/* Modal */}
