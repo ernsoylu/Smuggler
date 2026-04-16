@@ -1,3 +1,24 @@
+export interface MuleHealth {
+  name: string;
+  healthy: boolean;
+  ip: string | null;
+  reason: string;
+  checked_at?: string;
+  consecutive_failures?: number;
+  evacuated?: boolean;
+}
+
+export interface WatchdogStatus {
+  config: { interval_seconds: number; failure_threshold: number };
+  stats: {
+    started_at: string | null;
+    last_run_at: string | null;
+    total_sweeps: number;
+    total_evacuations: number;
+  };
+  mules: MuleHealth[];
+}
+
 export interface Mule {
   name: string;
   id: string;

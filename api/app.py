@@ -11,6 +11,7 @@ from api.torrents import torrents_bp
 from api.stats import stats_bp
 from api.settings import settings_bp
 from api.configs import configs_bp
+from api.watchdog import watchdog_bp, start_watchdog
 from api.database import init_db
 
 log = get_logger(__name__)
@@ -34,6 +35,7 @@ def create_app() -> Flask:
     app.register_blueprint(stats_bp)
     app.register_blueprint(settings_bp)
     app.register_blueprint(configs_bp)
+    app.register_blueprint(watchdog_bp)
 
     @app.errorhandler(404)
     def not_found(e):
@@ -45,5 +47,12 @@ def create_app() -> Flask:
         log.error("500: %s", e)
         return {"error": str(e)}, 500
 
-    log.info("create_app: blueprints registered — mules, torrents, stats, settings, configs")
+    log.info("create_app: blueprints registered — mules, torrents, stats, settings, configs, watchdog")
+
+    # Start the background VPN watchdog (daemon thread — survives app context)
+    import os as _os
+    # Skip in Werkzeug reloader child processes to avoid double-starting
+    if _os.environ.get("WERKZEUG_RUN_MAIN") != "true" or not app.debug:
+        start_watchdog()
+
     return app

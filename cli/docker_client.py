@@ -398,6 +398,190 @@ def exec_in_mule(client: docker.DockerClient, name_or_id: str, cmd: str) -> str:
     return output.decode().strip()
 
 
+def check_mule_vpn(client: docker.DockerClient, name_or_id: str) -> dict:
+    """
+    Verify that a running mule's traffic is still exiting through the VPN.
+
+    Runs ``curl --interface <vpn_iface>`` inside the container and checks that:
+      - ipinfo.io responds
+      - The returned IP is not a private/Docker address
+
+    Returns a dict::
+
+        {
+          "name":    str,
+          "healthy": bool,
+          "ip":      str | None,   # current external IP (or None on failure)
+          "reason":  str,          # human-readable status
+        }
+    """
+    log.debug("check_mule_vpn: mule=%s", name_or_id)
+    try:
+        mule = get_mule(client, name_or_id)
+    except RuntimeError as exc:
+        return {"name": name_or_id, "healthy": False, "ip": None, "reason": str(exc)}
+
+    if mule.status != "running":
+        return {
+            "name": mule.name,
+            "healthy": False,
+            "ip": None,
+            "reason": f"container not running (status={mule.status})",
+        }
+
+    vpn_iface = "tun0" if mule.vpn_type == "openvpn" else "wg0"
+
+    try:
+        exit_code, output = mule.container.exec_run(
+            f"curl -sf --interface {vpn_iface} --max-time 8 https://ipinfo.io/json",
+            demux=False,
+        )
+    except docker.errors.APIError as exc:
+        return {"name": mule.name, "healthy": False, "ip": None, "reason": f"exec error: {exc}"}
+
+    if exit_code != 0 or not output:
+        return {
+            "name": mule.name,
+            "healthy": False,
+            "ip": None,
+            "reason": f"curl failed (exit={exit_code}) — no connectivity through {vpn_iface}",
+        }
+
+    try:
+        info = json.loads(output.decode().strip())
+    except (json.JSONDecodeError, ValueError) as exc:
+        return {"name": mule.name, "healthy": False, "ip": None, "reason": f"bad JSON from ipinfo: {exc}"}
+
+    import re as _re
+    ip = info.get("ip", "")
+    # Private / Docker CIDR ranges
+    private_pattern = _re.compile(
+        r"^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|127\.)"
+    )
+    if not ip or private_pattern.match(ip):
+        return {
+            "name": mule.name,
+            "healthy": False,
+            "ip": ip or None,
+            "reason": f"IP leak — external IP '{ip}' is a private/Docker address",
+        }
+
+    log.info("check_mule_vpn: mule=%s ip=%s country=%s — healthy", mule.name, ip, info.get("country"))
+    return {
+        "name": mule.name,
+        "healthy": True,
+        "ip": ip,
+        "reason": f"VPN OK — {ip} ({info.get('country', '?')})",
+    }
+
+
+def evacuate_mule(
+    client: docker.DockerClient,
+    source_name: str,
+    kill_after: bool = True,
+) -> dict:
+    """
+    Migrate all active/waiting torrents from *source_name* to healthy mules.
+
+    For each torrent the function:
+      1. Reconstructs a magnet URI from ``magnetUri`` (aria2 field) or ``infoHash``.
+      2. Re-adds the magnet to a healthy target mule (round-robin).
+      3. Optionally kills and removes the source mule.
+
+    Returns a report dict::
+
+        {
+          "migrated":  [{"gid", "name", "target_mule", "new_gid"}, ...],
+          "skipped":   [{"gid", "name", "reason"}, ...],
+          "no_targets": bool,   # True if no healthy mules found
+          "killed":    bool,
+        }
+    """
+    import urllib.parse as _up
+    from cli.aria2_client import Aria2Client, Aria2Error
+
+    log.info("evacuate_mule: starting evacuation source=%s kill_after=%s", source_name, kill_after)
+
+    report: dict = {"migrated": [], "skipped": [], "no_targets": False, "killed": False}
+
+    # ── Find healthy target mules ────────────────────────────────────────────
+    all_mules = list_mules(client)
+    targets = [
+        m for m in all_mules
+        if m.name != source_name
+        and m.status == "running"
+        and check_mule_vpn(client, m.name)["healthy"]
+    ]
+
+    if not targets:
+        log.warning("evacuate_mule: no healthy target mules — cannot migrate from %s", source_name)
+        report["no_targets"] = True
+    else:
+        log.info("evacuate_mule: %d healthy target(s) available: %s",
+                 len(targets), [t.name for t in targets])
+
+        # ── Collect torrents from source mule ──────────────────────────────
+        try:
+            source = get_mule(client, source_name)
+            src_aria2 = Aria2Client("localhost", source.rpc_port, source.rpc_token, timeout=5)
+            downloads = src_aria2.tell_active() + src_aria2.tell_waiting()
+        except (RuntimeError, Aria2Error) as exc:
+            log.warning("evacuate_mule: cannot list torrents on source %s — %s", source_name, exc)
+            downloads = []
+
+        # ── Migrate each torrent ───────────────────────────────────────────
+        for idx, dl in enumerate(downloads):
+            gid = dl.get("gid", "?")
+            bt = dl.get("bittorrent", {})
+            name = bt.get("info", {}).get("name") or gid
+
+            # Build magnet URI
+            magnet = dl.get("magnetUri") or dl.get("infoHash") and (
+                "magnet:?xt=urn:btih:" + dl["infoHash"]
+                + ("&dn=" + _up.quote(name) if name and name != gid else "")
+            )
+
+            if not magnet:
+                log.warning("evacuate_mule: gid=%s has no magnet or infoHash — skipping", gid)
+                report["skipped"].append({"gid": gid, "name": name, "reason": "no magnet URI or infoHash"})
+                continue
+
+            target = targets[idx % len(targets)]
+            tgt_aria2 = Aria2Client("localhost", target.rpc_port, target.rpc_token, timeout=5)
+
+            try:
+                new_gid = tgt_aria2.add_magnet(magnet)
+                log.info(
+                    "evacuate_mule: migrated gid=%s → %s new_gid=%s",
+                    gid, target.name, new_gid,
+                )
+                report["migrated"].append({
+                    "gid": gid,
+                    "name": name,
+                    "target_mule": target.name,
+                    "new_gid": new_gid,
+                })
+            except Aria2Error as exc:
+                log.error("evacuate_mule: failed to re-add gid=%s to %s — %s", gid, target.name, exc)
+                report["skipped"].append({"gid": gid, "name": name, "reason": str(exc)})
+
+    # ── Kill the compromised mule ────────────────────────────────────────────
+    if kill_after:
+        try:
+            kill_mule(client, source_name, remove=True)
+            report["killed"] = True
+            log.info("evacuate_mule: source mule %s killed and removed", source_name)
+        except RuntimeError as exc:
+            log.error("evacuate_mule: failed to kill source mule %s — %s", source_name, exc)
+
+    log.info(
+        "evacuate_mule: done — migrated=%d skipped=%d no_targets=%s killed=%s",
+        len(report["migrated"]), len(report["skipped"]),
+        report["no_targets"], report["killed"],
+    )
+    return report
+
+
 def build_image(
     client: docker.DockerClient,
     context_path: str | Path,

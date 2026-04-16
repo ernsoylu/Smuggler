@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Mule, Torrent, GlobalStats, IpInfo, VpnConfig } from './types';
+import type { Mule, Torrent, GlobalStats, IpInfo, VpnConfig, MuleHealth, WatchdogStatus } from './types';
 
 const api = axios.create({ baseURL: '/api' });
 
@@ -99,3 +99,19 @@ export const deleteConfig = (id: number): Promise<void> =>
 
 export const deployMuleFromConfig = (configId: number, name?: string): Promise<Mule> =>
   api.post<Mule>(`/configs/${configId}/deploy`, { name }).then(r => r.data);
+
+// ── Watchdog ──────────────────────────────────────────────────────────────────
+
+export { type MuleHealth, type WatchdogStatus } from './types';
+
+export const getWatchdogStatus = (): Promise<WatchdogStatus> =>
+  api.get<WatchdogStatus>('/watchdog/').then(r => r.data);
+
+export const getMuleHealth = (name: string): Promise<MuleHealth> =>
+  api.get<MuleHealth>(`/mules/${name}/health`).then(r => r.data);
+
+export const evacuateMule = (name: string, kill = true): Promise<object> =>
+  api.post(`/mules/${name}/evacuate`, null, { params: { kill } }).then(r => r.data);
+
+export const triggerWatchdogSweep = (): Promise<{ swept: number; results: MuleHealth[] }> =>
+  api.post<{ swept: number; results: MuleHealth[] }>('/watchdog/run').then(r => r.data);
