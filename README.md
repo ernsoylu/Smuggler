@@ -1,14 +1,14 @@
 # Smuggler — Dockerized VPN Downloader
 
-Isolated torrent downloads inside per-mule Docker containers, each behind its own WireGuard VPN tunnel. No torrent process ever starts without a verified VPN connection.
+Isolated torrent downloads inside per-mule Docker containers, each behind its own VPN tunnel (WireGuard or OpenVPN). No torrent process ever starts without a verified VPN connection.
 
 ## How it works
 
-1. You supply a WireGuard `.conf` file and start a mule (CLI or Web UI).
-2. The mule container sets up `wg0` using raw `wg`/`ip` commands (no `wg-quick`), verifies the external IP through the tunnel, then starts the aria2 daemon.
+1. You supply a WireGuard `.conf` or OpenVPN `.ovpn` file and start a mule (CLI or Web UI).
+2. The mule container establishes the VPN (WireGuard via `wg`/`ip` commands, or OpenVPN via the `openvpn` process), verifies the external IP through the tunnel, then starts the aria2 daemon.
 3. `smg mule start` blocks until both VPN and aria2 are confirmed ready — it only returns once it has the mule's real external IP and country.
 4. Mules restart automatically (`unless-stopped`) if the container crashes.
-5. A kill-switch watchdog inside the container kills aria2 immediately if `wg0` disappears.
+5. A kill-switch watchdog inside the container kills aria2 immediately if the VPN interface (`wg0` or `tun0`) disappears.
 6. You add torrents to the mule via the CLI or Web UI. All downloads land in the shared `./downloads` folder on the host.
 
 ## Requirements
@@ -17,31 +17,38 @@ Isolated torrent downloads inside per-mule Docker containers, each behind its ow
 - Python 3.12+
 - [uv](https://github.com/astral-sh/uv)
 - Node.js 18+ (for the Web UI)
-- A WireGuard `.conf` file
+- A WireGuard `.conf` or OpenVPN `.ovpn` file
 
-## Installation
+## First-time setup
+
+Run the automated setup script — it installs all dependencies and builds both Docker images:
 
 ```bash
-git clone <repo>
-cd Smuggler
-uv sync
+./setup.sh
 ```
 
-This installs the `smg` CLI into the project's virtual environment.
-
-## Quick start
+Then start the app:
 
 ```bash
-# 1. Build the mule Docker image (one-time)
-smg build
+./start.sh
+```
 
-# 2. Start a mule — blocks until VPN is confirmed
+`start.sh` runs pre-flight checks on every launch and will prompt you to run `setup.sh` again if anything is missing.
+
+## Quick start (CLI)
+
+```bash
+# WireGuard mule
 smg mule start --config vpn_configs/my-vpn.conf
 
-# 3. Add a torrent
+# OpenVPN mule (credentials optional if config uses auth-user-pass)
+smg mule start --config vpn_configs/client.ovpn
+smg mule start --config vpn_configs/client.ovpn --username user --password pass
+
+# Add a torrent
 smg torrent add smuggler-mule-<name> --magnet "magnet:?xt=urn:btih:..."
 
-# 4. Monitor progress
+# Monitor progress
 smg torrent list
 ```
 
@@ -71,26 +78,30 @@ Open `http://localhost:5173` in your browser.
 
 | Page | Description |
 |---|---|
-| **Torrents** | Live dashboard — global speed stats, per-torrent progress, add/pause/remove |
+| **Torrents** | Live dashboard — global speed stats, per-torrent progress, add/pause/remove; transfer summary + status distribution chart at the bottom |
 | **Mules** | Manage mule containers — start from uploaded config, stop, kill, view external IP |
-| **Configs** | Upload WireGuard configs and deploy them as new mules in one click |
+| **Configs** | Upload WireGuard or OpenVPN configs (with optional credential storage); deploy as new mules in one click |
 | **Settings** | Configure download directory, max concurrent downloads, and speed limits |
 
 ## CLI reference
 
 ### `smg build`
 
-Builds the `smuggler-mule:latest` Docker image.
+Builds a mule Docker image.
 
 ```
-smg build [--context PATH] [--tag TAG]
+smg build [--vpn-type wireguard|openvpn] [--context PATH] [--tag TAG]
 ```
+
+Defaults to WireGuard (`smuggler-mule:latest`). Use `--vpn-type openvpn` to build `smuggler-mule-ovpn:latest`.
 
 ### `smg mule`
 
 | Command | Description |
 |---|---|
-| `smg mule start --config FILE` | Start a mule — blocks until VPN and aria2 are confirmed |
+| `smg mule start --config FILE` | Start a mule — auto-detects VPN type from file extension |
+| `smg mule start --config FILE --vpn-type wireguard\|openvpn` | Override VPN type |
+| `smg mule start --config FILE --username U --password P` | Supply OpenVPN credentials |
 | `smg mule start --config FILE --name NAME` | Start a mule with a custom name |
 | `smg mule list` | List all mules and their status |
 | `smg mule stop NAME` | Gracefully stop and remove a mule |
@@ -145,7 +156,7 @@ The Flask API runs on `http://localhost:5000`. All endpoints are prefixed with `
 | `GET` | `/api/stats/` | Global speed, counts, and mule total |
 | `GET/POST` | `/api/settings/` | Read and update download settings |
 | `GET` | `/api/configs/` | List stored VPN configs |
-| `POST` | `/api/configs/` | Upload a new VPN config |
+| `POST` | `/api/configs/` | Upload a new VPN config (WireGuard or OpenVPN) |
 | `DELETE` | `/api/configs/<id>` | Delete a stored VPN config |
 | `POST` | `/api/configs/<id>/deploy` | Deploy a config as a new mule |
 
@@ -153,41 +164,44 @@ The Flask API runs on `http://localhost:5000`. All endpoints are prefixed with `
 
 ```
 Smuggler/
-├── worker_image/        # Docker context for mule containers
+├── worker_image/            # WireGuard mule image (smuggler-mule:latest)
 │   ├── Dockerfile
-│   ├── entrypoint.sh    # WireGuard setup + aria2 start
-│   └── watchdog.sh      # Kill-switch watchdog
-├── api/                 # Flask REST API
-│   ├── app.py           # App factory
-│   ├── mules.py         # /api/mules blueprint
-│   ├── torrents.py      # /api/torrents blueprint
-│   ├── stats.py         # /api/stats blueprint
-│   ├── settings.py      # /api/settings blueprint
-│   ├── configs.py       # /api/configs blueprint
-│   ├── database.py      # SQLite layer
-│   └── settings_sync.py # Propagate settings to running mules
-├── cli/                 # Python CLI (smg)
-│   ├── main.py          # Entry point
-│   ├── mule_commands.py # smg mule subcommands
+│   └── startup.sh           # wg setup + aria2 start + kill-switch watchdog
+├── worker_image_ovpn/       # OpenVPN mule image (smuggler-mule-ovpn:latest)
+│   ├── Dockerfile
+│   └── startup.sh           # openvpn + tun0 wait + aria2 start + kill-switch
+├── api/                     # Flask REST API
+│   ├── app.py               # App factory
+│   ├── mules.py             # /api/mules blueprint
+│   ├── torrents.py          # /api/torrents blueprint
+│   ├── stats.py             # /api/stats blueprint
+│   ├── settings.py          # /api/settings blueprint
+│   ├── configs.py           # /api/configs blueprint (vpn type detection)
+│   ├── database.py          # SQLite layer (with migration support)
+│   └── settings_sync.py     # Propagate settings to running mules
+├── cli/                     # Python CLI (smg)
+│   ├── main.py              # Entry point
+│   ├── mule_commands.py     # smg mule subcommands
 │   ├── torrent_commands.py  # smg torrent subcommands
-│   ├── docker_client.py # Docker SDK wrapper
-│   ├── aria2_client.py  # aria2 JSON-RPC client
-│   └── log.py           # Shared logging setup
-├── web/                 # React/TypeScript Web UI
+│   ├── docker_client.py     # Docker SDK wrapper (WireGuard + OpenVPN)
+│   ├── aria2_client.py      # aria2 JSON-RPC client
+│   └── log.py               # Shared logging setup
+├── web/                     # React/TypeScript Web UI
 │   ├── src/
-│   │   ├── pages/       # TorrentsPage, MulesPage, ConfigsPage, SettingsPage
-│   │   ├── components/  # MuleCard, TorrentRow, StatsBar, SpeedGraph, modals
-│   │   └── api/         # Axios client + TypeScript types
+│   │   ├── pages/           # TorrentsPage, MulesPage, ConfigsPage, SettingsPage
+│   │   ├── components/      # MuleCard, TorrentRow, StatsBar, SpeedGraph, modals
+│   │   └── api/             # Axios client + TypeScript types
 │   └── package.json
-├── tests/               # 108 unit and integration tests
-├── downloads/           # Shared downloads volume (mounted into mules)
-├── logs/                # Dated log files (dvd_YYYY-MM-DD_HH-MM-SS.log)
+├── tests/                   # Unit and integration tests
+├── downloads/               # Shared downloads volume (mounted into mules)
+├── logs/                    # Dated log files
 ├── .github/
 │   └── workflows/
 │       ├── python-ci.yml    # Python test matrix (3.12, 3.13) + coverage
 │       └── frontend-ci.yml  # TypeScript type-check + Vite build
-├── start.sh             # Launch API + frontend together
-└── .env                 # DVD_LOGGING, DVD_LOG_LEVEL
+├── setup.sh                 # First-time setup (installs deps + builds images)
+├── start.sh                 # Launch API + frontend with pre-flight checks
+└── .env                     # DVD_LOGGING, DVD_LOG_LEVEL
 ```
 
 ## Configuration
@@ -201,10 +215,10 @@ DVD_LOG_LEVEL=INFO
 
 ## Security notes
 
-- Kill-switch is enforced at the process level: if `wg0` disappears, aria2 is killed with `SIGKILL` before any traffic leaks.
-- DNS is switched to the VPN nameserver only after connectivity is verified.
-- The VPN endpoint is pinned to avoid routing loops through the tunnel.
-- WireGuard private keys are never logged or returned through the API.
+- Kill-switch is enforced at the process level: if the VPN interface disappears, aria2 is killed with `SIGKILL` before any traffic leaks.
+- WireGuard: DNS is switched to the VPN nameserver only after connectivity is verified; private keys are never logged or returned through the API.
+- OpenVPN: Credentials are written to a `chmod 600` temp file and deleted from disk immediately after `tun0` comes up; `--auth-nocache` prevents in-memory caching.
+- The VPN server endpoint is pinned to the original gateway before routes change, preventing routing loops.
 - `vpn_configs/` and `downloads/` are gitignored — only `.gitkeep` placeholders are committed.
 
 ## Development
@@ -232,4 +246,4 @@ GitHub Actions runs automatically on every push and pull request to `main`.
 | **Python CI** | All pushes/PRs | Tests on Python 3.12 + 3.13 via `uv`; coverage report on 3.12 |
 | **Frontend CI** | Changes under `web/` | TypeScript type-check (`tsc --noEmit`) + Vite production build |
 
-All tests are fully mocked — no Docker daemon or real WireGuard `.conf` files required in CI.
+All tests are fully mocked — no Docker daemon or real VPN config files required in CI.
