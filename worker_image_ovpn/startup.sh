@@ -78,7 +78,6 @@ OVPN_ARGS=(
     --dev-type tun
     --script-security 2
     --log /proc/1/fd/1
-    --auth-nocache
 )
 
 if [[ -n "${CREDS_FILE}" ]]; then

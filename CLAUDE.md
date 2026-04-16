@@ -110,12 +110,12 @@ All tests run without real Docker or WireGuard configs. Use `DVD_LOGGING=false` 
 
 ## SonarQube Integration
 
-Project key: `smuggler` (see `sonar-project.properties`).
+Project key: `ernsoylu_Smuggler` (see `sonar-project.properties`). Organization: `ernsoylu`. Host: `https://sonarcloud.io`.
 
 ### Pre-push code analysis (mandatory)
 Before every `git push`, run a SonarQube analysis on all modified files and resolve blocking findings:
 
-1. **Resolve project key** — always read `sonar-project.properties` first; fall back to `search_my_sonarqube_projects` if missing.
+1. **Resolve project key** — always use `ernsoylu_Smuggler`; read `sonar-project.properties` to confirm.
 2. **Analyze changed files** — use `mcp__sonarqube__analyze_code_snippet` on any file modified in the current branch/commit set.
 3. **Check quality gate** — call `mcp__sonarqube__get_project_quality_gate_status` and confirm status is `OK` before pushing.
 4. **Fix blocking issues** — use `mcp__sonarqube__search_sonar_issues_in_projects` filtered to `severities=BLOCKER,CRITICAL`. Fix all BLOCKER issues; evaluate and fix CRITICAL issues unless there is a documented reason to accept them.

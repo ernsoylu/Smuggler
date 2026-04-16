@@ -44,7 +44,7 @@ watchdog_bp = Blueprint("watchdog", __name__, url_prefix="/api/watchdog")
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 WATCHDOG_INTERVAL = 30   # seconds between full sweeps
-FAILURE_THRESHOLD = 2    # consecutive check failures before evacuation
+FAILURE_THRESHOLD = 3    # consecutive check failures before evacuation
 
 # ── Shared state (protected by _lock) ────────────────────────────────────────
 _lock = threading.Lock()

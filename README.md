@@ -217,7 +217,7 @@ DVD_LOG_LEVEL=INFO
 
 - Kill-switch is enforced at the process level: if the VPN interface disappears, aria2 is killed with `SIGKILL` before any traffic leaks.
 - WireGuard: DNS is switched to the VPN nameserver only after connectivity is verified; private keys are never logged or returned through the API.
-- OpenVPN: Credentials are written to a `chmod 600` temp file and deleted from disk immediately after `tun0` comes up; `--auth-nocache` prevents in-memory caching.
+- OpenVPN: Credentials are written to a `chmod 600` temp file and deleted from disk immediately after `tun0` comes up. They are allowed to be cached in memory to support hourly TLS key renegotiation without requiring the file on disk.
 - The VPN server endpoint is pinned to the original gateway before routes change, preventing routing loops.
 - `vpn_configs/` and `downloads/` are gitignored — only `.gitkeep` placeholders are committed.
 
