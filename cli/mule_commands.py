@@ -24,6 +24,7 @@ from cli.docker_client import (
     stop_mule,
     wait_for_vpn,
     MULE_IMAGE,
+    MULE_IMAGE_OVPN,
 )
 
 console = Console()
@@ -40,27 +41,71 @@ def mule_group() -> None:
     "-c",
     required=True,
     type=click.Path(exists=True, dir_okay=False, readable=True),
-    help="Path to the WireGuard .conf file.",
+    help="Path to a WireGuard .conf or OpenVPN .ovpn file.",
 )
 @click.option("--name", "-n", default=None, help="Optional mule name (auto-generated if omitted).")
+@click.option(
+    "--vpn-type",
+    type=click.Choice(["wireguard", "openvpn", "auto"], case_sensitive=False),
+    default="auto",
+    show_default=True,
+    help="VPN type. 'auto' detects from file extension (.conf=wireguard, .ovpn=openvpn).",
+)
+@click.option(
+    "--username",
+    default=None,
+    help="OpenVPN username (required when the .ovpn file uses auth-user-pass).",
+)
+@click.option(
+    "--password",
+    default=None,
+    help="OpenVPN password (required when the .ovpn file uses auth-user-pass).",
+)
 @click.option(
     "--downloads-dir",
     default=None,
     type=click.Path(file_okay=False),
     help="Host directory for downloads (default: ./downloads).",
 )
-def mule_start(config: str, name: str | None, downloads_dir: str | None) -> None:
-    """Start a new mule container with the given VPN config."""
+def mule_start(
+    config: str,
+    name: str | None,
+    vpn_type: str,
+    username: str | None,
+    password: str | None,
+    downloads_dir: str | None,
+) -> None:
+    """Start a new mule container with the given VPN config.
+
+    \b
+    Examples:
+      smg mule start --config wg.conf                    # WireGuard (auto)
+      smg mule start --config client.ovpn                # OpenVPN (auto)
+      smg mule start --config client.ovpn --username u --password p
+    """
+    # Auto-detect VPN type from extension
+    if vpn_type == "auto":
+        vpn_type = "openvpn" if Path(config).suffix.lower() == ".ovpn" else "wireguard"
+
+    # Validate required image exists (warn early rather than after container start)
+    required_image = MULE_IMAGE_OVPN if vpn_type == "openvpn" else MULE_IMAGE
+
     client = get_docker_client()
 
     # ── Step 1: create the container ────────────────────────────────────────
-    with console.status(f"Creating mule with [bold]{Path(config).name}[/bold]..."):
+    type_label = "[violet]OpenVPN[/violet]" if vpn_type == "openvpn" else "[cyan]WireGuard[/cyan]"
+    with console.status(
+        f"Creating {type_label} mule with [bold]{Path(config).name}[/bold]..."
+    ):
         try:
             mule = start_mule(
                 client,
                 vpn_config_path=config,
                 name=name,
                 downloads_dir=downloads_dir,
+                vpn_type=vpn_type,
+                ovpn_username=username,
+                ovpn_password=password,
             )
         except RuntimeError as exc:
             console.print(f"[red]Error:[/red] {exc}")
@@ -68,10 +113,12 @@ def mule_start(config: str, name: str | None, downloads_dir: str | None) -> None
 
     console.print(f"Container [bold]{mule.name}[/bold] created — waiting for VPN...")
 
-    # ── Step 2: block until WireGuard is up and VPN IP is confirmed ─────────
-    with console.status("Confirming WireGuard connection (up to 60s)..."):
+    # ── Step 2: block until VPN is up and IP is confirmed ───────────────────
+    vpn_label = "OpenVPN" if vpn_type == "openvpn" else "WireGuard"
+    timeout = 90 if vpn_type == "openvpn" else 60
+    with console.status(f"Confirming {vpn_label} connection (up to {timeout}s)..."):
         try:
-            ip_info = wait_for_vpn(client, mule.name, timeout=60)
+            ip_info = wait_for_vpn(client, mule.name, timeout=timeout)
         except RuntimeError as exc:
             console.print(f"\n[red]VPN failed to come up — stopping container.[/red]")
             console.print(f"[red]{exc}[/red]")
@@ -83,6 +130,7 @@ def mule_start(config: str, name: str | None, downloads_dir: str | None) -> None
 
     console.print(f"[green]Mule ready:[/green] [bold]{mule.name}[/bold]")
     console.print(f"  Container ID : {mule.id}")
+    console.print(f"  VPN type     : {vpn_type}")
     console.print(f"  aria2 RPC    : localhost:{mule.rpc_port}")
     console.print(f"  VPN config   : {mule.vpn_config}")
     console.print(f"  External IP  : [cyan]{ip_info.get('ip', '?')}[/cyan]"

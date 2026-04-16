@@ -68,10 +68,10 @@ export function TorrentRow({ torrent }: Props) {
 
   return (
     <React.Fragment>
-      <tr className="group hover:bg-white/[0.02] transition-colors relative">
-        <div className={`absolute left-0 top-0 bottom-0 w-1 ${v.line} opacity-0 group-hover:opacity-100 transition-opacity`}></div>
+      <tr className="group hover:bg-white/[0.02] transition-colors">
         {/* Name */}
-        <td className="px-6 py-4 max-w-[280px]">
+        <td className="px-6 py-4 max-w-[280px] relative">
+          <div className={`absolute left-0 top-0 bottom-0 w-1 ${v.line} opacity-0 group-hover:opacity-100 transition-opacity rounded-r-sm`}></div>
           <div className="flex items-start gap-2">
             {hasFiles ? (
               <button 

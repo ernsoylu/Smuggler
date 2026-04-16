@@ -1,13 +1,13 @@
 # Claude Custom Instructions for Smuggler (Mule VPN Downloader)
 
 ## Project Overview
-You are assisting in building **Smuggler**, a containerized Torrent Downloader. The application isolates torrent downloads inside distinct Docker containers called **mules**. Each mule establishes its own WireGuard VPN connection before starting the torrent client (aria2).
+You are assisting in building **Smuggler**, a containerized Torrent Downloader. The application isolates torrent downloads inside distinct Docker containers called **mules**. Each mule establishes its own VPN connection (WireGuard or OpenVPN) before starting the torrent client (aria2).
 
 ## Technology Stack
 - **Backend:** Python 3.12+, Flask, `uv`
 - **Frontend:** TypeScript, React 18, Vite, TanStack Query, Tailwind CSS, Recharts
 - **Containerization:** Docker, Docker SDK for Python
-- **Networking:** WireGuard (raw `wg`/`ip` commands)
+- **Networking:** WireGuard (raw `wg`/`ip` commands) **and** OpenVPN (`openvpn` process with `tun0`)
 - **Torrent Client:** aria2 (JSON-RPC)
 - **CLI Tool:** `smg` (Click-based)
 - **Database:** SQLite (WAL mode, via `sqlite3`) for settings and VPN config storage
@@ -34,6 +34,22 @@ You are assisting in building **Smuggler**, a containerized Torrent Downloader. 
   - **SettingsPage** — manage download directory and bandwidth limits.
   - Shared components: `MuleCard`, `AddTorrentModal`, `DeployMuleModal`, `SpeedGraph`, `StatsBar`.
 - **108 tests passing** across all modules.
+
+### Phase 3: OpenVPN Support & UI Polish — COMPLETE ✅
+- **Dual VPN type:** Each mule can run either WireGuard (`.conf`) or OpenVPN (`.ovpn`).
+  - WireGuard image: `smuggler-mule:latest` (`worker_image/`), uses `wg`/`ip`, `NET_ADMIN+SYS_MODULE`.
+  - OpenVPN image: `smuggler-mule-ovpn:latest` (`worker_image_ovpn/`), uses `openvpn` + `tun0`, `NET_ADMIN` only, `/dev/net/tun` device passthrough.
+  - VPN type auto-detected from file extension (`.ovpn` → openvpn, `.conf` → wireguard).
+- **OpenVPN startup hardening** (`worker_image_ovpn/startup.sh`):
+  - Writes credentials to a `chmod 600` temp file, removed immediately after `tun0` is up.
+  - Pins the VPN server endpoint to the original gateway before OpenVPN rewrites routes.
+  - Policy routing keeps eth0 reply traffic on the original gateway.
+  - Kill-switch watchdog kills aria2 if `tun0` disappears.
+- **CLI updates:** `smg mule start` gains `--vpn-type`, `--username`, `--password`; `smg build` gains `--vpn-type wireguard|openvpn`.
+- **API updates:** `vpn_configs` table gains `vpn_type`, `requires_auth`, `ovpn_username`, `ovpn_password`; SQLite migration applied at startup.
+- **ConfigsPage:** Configs categorised by type (WireGuard / OpenVPN). Upload form shows credential fields (with show/hide toggle) when `auth-user-pass` is detected in the `.ovpn` file.
+- **Setup & start scripts:** `setup.sh` installs all dependencies + builds both Docker images idempotently. `start.sh` runs 7 pre-flight checks and directs users to `setup.sh` if anything is missing.
+- **TorrentsPage:** Fixed table header misalignment (invalid `<div>` in `<tr>`). Added bottom analytics section: transfer summary (downloaded/uploaded/ratio) and a Recharts donut chart showing torrent status distribution.
 
 ## Module Map
 
@@ -64,9 +80,9 @@ You are assisting in building **Smuggler**, a containerized Torrent Downloader. 
 ### `web/src/`
 | Path | Purpose |
 |---|---|
-| `pages/TorrentsPage.tsx` | Main dashboard — torrent list + global stats |
+| `pages/TorrentsPage.tsx` | Main dashboard — torrent list, transfer summary, status distribution chart |
 | `pages/MulesPage.tsx` | Mule management with deploy pipeline UI |
-| `pages/ConfigsPage.tsx` | VPN config upload and one-click mule deployment |
+| `pages/ConfigsPage.tsx` | VPN config upload (WireGuard/OpenVPN) with credential fields; categorised list |
 | `pages/SettingsPage.tsx` | Settings form (download dir, speed limits, concurrency) |
 | `components/MuleCard.tsx` | Per-mule card with status, IP, country, stop/kill actions |
 | `components/TorrentRow.tsx` | Torrent table row with progress bar and actions |
@@ -76,6 +92,12 @@ You are assisting in building **Smuggler**, a containerized Torrent Downloader. 
 | `components/DeployMuleModal.tsx` | Modal for deploying a stored VPN config as a new mule |
 | `api/client.ts` | Axios API client — all `getMules`, `addMagnet`, `deployMule`, etc. |
 | `api/types.ts` | TypeScript interfaces — `Mule`, `Torrent`, `GlobalStats`, `VpnConfig`, etc. |
+
+### Docker images
+| Image | Context | VPN type | Capabilities |
+|---|---|---|---|
+| `smuggler-mule:latest` | `worker_image/` | WireGuard | `NET_ADMIN`, `SYS_MODULE` |
+| `smuggler-mule-ovpn:latest` | `worker_image_ovpn/` | OpenVPN | `NET_ADMIN`, `/dev/net/tun` device |
 
 ## CI
 
@@ -88,7 +110,7 @@ All tests run without real Docker or WireGuard configs. Use `DVD_LOGGING=false` 
 
 ## Rules & Coding Standards
 - **Naming:** Always use "mule" instead of "worker". The project is "Smuggler".
-- **VPN First:** Never start aria2 without a verified WireGuard connection.
+- **VPN First:** Never start aria2 without a verified VPN connection (WireGuard `wg0` or OpenVPN `tun0`).
 - **Labels:** Use `smuggler.*` namespace for Docker labels.
 - **No Duplicate Logic:** API must call `cli/docker_client.py` and `cli/aria2_client.py`.
 - **Private Key Safety:** Never expose `PrivateKey` in API responses or logs.

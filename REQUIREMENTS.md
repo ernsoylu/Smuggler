@@ -4,6 +4,7 @@
 - **L1.1 Isolated Downloads:** The system shall isolate torrent downloading tasks into independent environments to prevent IP leakage and manage network routing securely.
 - **L1.2 Multi-VPN Support:** The system shall allow simultaneous connections to different VPN servers by using distinct mule containers.
 - **L1.3 Centralized Management:** The system shall provide a unified interface (CLI and Web UI) to manage all mules and downloads seamlessly.
+- **L1.4 Dual VPN Protocol:** The system shall support both WireGuard (`.conf`) and OpenVPN (`.ovpn`) as VPN providers for mule containers.
 
 ## L2 Requirements (User Level)
 - **L2.1 Mule Management:**
@@ -22,7 +23,7 @@
     - Individual torrent progress bars.
     - A detailed property view for a selected torrent (peers, trackers, files, speed graphs).
 - **L2.3 File Access:** Users shall be able to access all completed downloads from a single, centralized `downloads` folder on the host machine.
-- **L2.4 VPN Config Management:** Users can upload, store, and deploy WireGuard configuration files from the Web UI without touching the filesystem directly.
+- **L2.4 VPN Config Management:** Users can upload, store, and deploy WireGuard (`.conf`) or OpenVPN (`.ovpn`) configuration files from the Web UI without touching the filesystem directly. When an OpenVPN config requires `auth-user-pass`, the user is prompted for credentials at upload time.
 - **L2.5 Settings:** Users can configure global download settings (download directory, speed limits, concurrency) via the Web UI. Settings are persisted and automatically applied to all running mules.
 
 ## L3 Requirements (Functional Level)
@@ -80,15 +81,16 @@
 | `/api/configs/<id>/deploy` | POST | Deploy a stored config as a new mule |
 
 #### React Web UI (`web/`)
-- **Torrents page** — live-polling torrent dashboard with StatsBar and per-torrent rows.
+- **Torrents page** — live-polling torrent dashboard with StatsBar, per-torrent rows, and a bottom analytics section (transfer summary + status distribution donut chart).
 - **Mules page** — mule list with start/stop/kill actions and per-mule IP + country display.
-- **Configs page** — upload WireGuard configs and deploy them as mules with stage progress.
+- **Configs page** — upload WireGuard or OpenVPN configs; categorised list by VPN type; optional credential fields for `auth-user-pass` configs.
 - **Settings page** — edit download directory, max concurrent downloads, and speed limits.
 
 #### SQLite Storage (`api/database.py`)
 - `settings` table — key/value pairs with defaults: `download_dir`, `max_concurrent_downloads`, `max_download_speed`, `max_upload_speed`.
-- `vpn_configs` table — stores uploaded config files as BLOBs with metadata.
+- `vpn_configs` table — stores uploaded config files as BLOBs with metadata (`vpn_type`, `requires_auth`, `ovpn_username`, `ovpn_password`).
 - WAL mode enabled for safe concurrent access.
+- Forward-compatible migration system: `_MIGRATIONS` list applies `ALTER TABLE` statements at startup, ignoring already-applied ones.
 
 #### Settings Sync (`api/settings_sync.py`)
 - `apply_settings_to_mule(mule_name, settings)` — pushes current settings to a specific mule via `aria2.change_global_option`.
@@ -100,6 +102,36 @@
 - Console handler at WARNING+; file handler at configured level.
 - All modules use `get_logger(__name__)` for structured `dvd.*` hierarchy.
 
+### L3.5 Phase 3 (OpenVPN & UI Polish) — COMPLETE ✅
+
+#### Dual VPN Support
+- `start_mule()` accepts `vpn_type: Literal["wireguard", "openvpn"]`, selecting the correct Docker image, capabilities, and bind-mounts.
+- WireGuard: `smuggler-mule:latest` image; `NET_ADMIN + SYS_MODULE`; `wg0` as VPN interface.
+- OpenVPN: `smuggler-mule-ovpn:latest` image; `NET_ADMIN` only; `/dev/net/tun` device passed via `devices`; `tun0` as VPN interface.
+- VPN type auto-detected from file extension in both CLI (`--vpn-type auto`) and API (`_detect_vpn_type(filename)`).
+
+#### OpenVPN Container Hardening (`worker_image_ovpn/startup.sh`)
+- Credentials written to `chmod 600` temp file, deleted from disk immediately after `tun0` appears.
+- VPN server endpoint pinned to original Docker gateway before OpenVPN rewrites the default route.
+- Policy routing table (`table 128`) ensures eth0 reply traffic stays on the original gateway.
+- Kill-switch watchdog kills aria2 with `SIGKILL` if `tun0` disappears.
+- External connectivity verified via `curl --interface tun0 ipinfo.io/json` before aria2 starts.
+
+#### OpenVPN Credential Handling
+- `api/configs.py` detects bare `auth-user-pass` directives in `.ovpn` files (`requires_auth=True`).
+- Credentials stored in `vpn_configs` table (`ovpn_username`, `ovpn_password`).
+- Deploy endpoint passes credentials to `start_mule()` as environment variables; returns 400 if credentials missing for an auth-required config.
+
+#### Setup & Operations
+- `setup.sh` — idempotent first-time setup: installs Docker, Python 3.12+, uv, Node.js 20, npm deps, builds both Docker images.
+- `start.sh` — pre-flight checks (7 items); directs users to `setup.sh` if anything is missing.
+
+#### UI Polish (TorrentsPage)
+- Fixed table header misalignment caused by an invalid `<div>` element placed directly inside a `<tr>` (moved inside the first `<td>`).
+- Bottom analytics section:
+  - **Transfer Summary** — total downloaded, uploaded, and average ratio across all torrents; live active/queued/stopped mini-counters.
+  - **Status Distribution** — Recharts donut chart with total count in centre; per-status horizontal progress bars showing counts and percentages.
+
 ## L4 Requirements (Non-Functional / Technical)
 - **L4.1 Tech Stack:**
   - Python 3.12+ managed with `uv`.
@@ -107,12 +139,13 @@
   - Frontend: React 18 + TypeScript + Vite + TanStack Query + Tailwind CSS + Recharts.
   - Database: SQLite with WAL mode.
 - **L4.2 Security & Privacy:**
-  - `vpn_configs/*.conf` is gitignored.
-  - Kill-switch: if `wg0` drops, aria2 is killed with SIGKILL immediately.
+  - `vpn_configs/` and `downloads/` are gitignored (`.gitkeep` placeholders committed).
+  - Kill-switch: if VPN interface (`wg0`/`tun0`) drops, aria2 is killed with SIGKILL immediately.
   - WireGuard private keys are never exposed through the API or logs.
+  - OpenVPN credentials are deleted from disk as soon as the tunnel is established; `--auth-nocache` prevents in-memory retention.
 - **L4.3 Testing:**
   - 108 tests covering CLI commands, Docker client, aria2 client, and all API endpoints.
-  - Tests use mocked Docker and aria2 (via `responses` library) — no real Docker or `.conf` files required.
+  - Tests use mocked Docker and aria2 (via `responses` library) — no real Docker or VPN config files required.
 - **L4.4 CI/CD:**
   - GitHub Actions runs on every push and pull request to `main`.
   - `python-ci.yml` — matrix over Python 3.12 and 3.13 using `uv`; coverage report on 3.12.

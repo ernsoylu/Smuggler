@@ -63,3 +63,12 @@ export interface GlobalStats {
   num_stopped: number;
   num_mules: number;
 }
+
+export interface VpnConfig {
+  id: number;
+  name: string;
+  filename: string;
+  created_at: string;
+  vpn_type: 'wireguard' | 'openvpn';
+  requires_auth: boolean;
+}
