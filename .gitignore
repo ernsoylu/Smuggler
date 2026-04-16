@@ -57,3 +57,7 @@ web/dist/
 
 # Temp VPN config uploads (private keys)
 /tmp/smuggler_*
+
+# Runtime data directory — SQLite DB + temp VPN configs with private keys.
+# NEVER commit: data/tmp/ holds uploaded WireGuard/OpenVPN configs in plaintext.
+data/

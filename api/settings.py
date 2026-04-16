@@ -38,7 +38,21 @@ def save_settings_endpoint():
         raw = str(data["download_dir"]).strip()
         if not _ABS_PATH_RE.match(raw) or ".." in raw.split("/"):
             return jsonify({"error": "Download directory must be an absolute path without traversal sequences"}), 400
-        data["download_dir"] = os.path.normpath(raw)
+        dl_dir = os.path.normpath(raw)
+        
+        # Verify directory can be created and is writable
+        try:
+            if not os.path.exists(dl_dir):
+                os.makedirs(dl_dir, exist_ok=True)
+        except OSError as exc:
+            log.warning("api_settings: failed to create download_dir %s — %s", dl_dir, exc)
+            return jsonify({"error": f"Cannot create download directory: {exc}"}), 403
+            
+        if not os.access(dl_dir, os.W_OK):
+            log.warning("api_settings: download_dir %s is not writable", dl_dir)
+            return jsonify({"error": f"The directory is not writable. Please check permissions for: {dl_dir}"}), 403
+            
+        data["download_dir"] = dl_dir
 
     result = update_settings(data)
     # Sync to running Mules

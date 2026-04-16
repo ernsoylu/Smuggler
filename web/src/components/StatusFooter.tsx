@@ -6,17 +6,18 @@
  */
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getStats } from '../api/client';
+import { getStats, getAllTorrents } from '../api/client';
 import { SpeedGraph } from './SpeedGraph';
 import type { DataPoint } from './SpeedGraph';
 import { ChevronUp, ChevronDown, Activity, Download, Upload, Server } from 'lucide-react';
 
 const MAX_POINTS = 60;
 
-function fmt(bps: number): string {
-  if (bps >= 1_048_576) return `${(bps / 1_048_576).toFixed(1)} MB/s`;
-  if (bps >= 1_024)     return `${(bps / 1_024).toFixed(0)} KB/s`;
-  return `${bps} B/s`;
+function formatBytes(bytes: number): string {
+  if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(2)} GB`;
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
+  if (bytes >= 1_024) return `${(bytes / 1_024).toFixed(0)} KB`;
+  return `${bytes} B`;
 }
 
 export function StatusFooter() {
@@ -26,6 +27,12 @@ export function StatusFooter() {
   const { data: stats } = useQuery({
     queryKey: ['stats'],
     queryFn: getStats,
+    refetchInterval: 2_000,
+  });
+
+  const { data: torrents = [] } = useQuery({
+    queryKey: ['torrents'],
+    queryFn: getAllTorrents,
     refetchInterval: 2_000,
   });
 
@@ -44,17 +51,84 @@ export function StatusFooter() {
   const waiting = stats?.num_waiting  ?? 0;
   const mules   = stats?.num_mules    ?? 0;
 
+  const totalDownloaded = torrents.reduce((sum, t) => sum + t.completed_length, 0);
+  const totalUploaded   = torrents.reduce((sum, t) => sum + t.uploaded_length, 0);
+  const avgRatio = torrents.length > 0
+    ? (torrents.reduce((sum, t) => sum + t.ratio, 0) / torrents.length)
+    : 0;
+
+  const counts = {
+    active: torrents.filter(t => t.status === 'active').length,
+    waiting: torrents.filter(t => t.status === 'waiting').length,
+    paused: torrents.filter(t => t.status === 'paused').length,
+    complete: torrents.filter(t => t.status === 'complete').length,
+    error: torrents.filter(t => t.status === 'error').length,
+  };
+
   const isActive = dl > 0 || ul > 0 || active > 0;
 
   return (
     <footer className="fixed bottom-0 left-0 right-0 z-50 bg-neutral-950/90 backdrop-blur-xl border-t border-white/8 shadow-2xl shadow-black/50">
       {/* Graph panel — slides open above the bar */}
       <div
-        className="overflow-hidden transition-all duration-300 ease-in-out"
-        style={{ maxHeight: expanded ? '200px' : '0px' }}
+        className="overflow-hidden transition-all duration-500 ease-in-out bg-neutral-900 border-b border-black/50"
+        style={{ maxHeight: expanded ? '240px' : '0px' }}
       >
-        <div className="px-6 pt-4 pb-1 max-w-7xl mx-auto">
-          <SpeedGraph data={history} height={140} />
+        <div className="px-6 py-4 max-w-7xl mx-auto flex flex-col md:flex-row items-center gap-10">
+          <div className="flex-1 w-full relative">
+            <p className="absolute -top-1 left-2 text-[10px] text-neutral-500 uppercase tracking-widest font-semibold z-10">Bandwidth History</p>
+            <div className="pt-4">
+              <SpeedGraph data={history} height={140} />
+            </div>
+          </div>
+          
+          <div className="w-px h-32 bg-white/10 hidden md:block shrink-0"></div>
+          
+          <div className="flex items-start gap-10 shrink-0">
+            <div className="space-y-3 min-w-[140px]">
+              <h4 className="text-[10px] font-semibold text-neutral-500 uppercase tracking-widest mb-4">Transfer Summary</h4>
+              <div className="flex justify-between gap-6 text-sm">
+                <span className="text-neutral-400">Downloaded</span>
+                <span className="text-neutral-200 font-mono font-medium">{formatBytes(totalDownloaded)}</span>
+              </div>
+              <div className="flex justify-between gap-6 text-sm">
+                <span className="text-neutral-400">Uploaded</span>
+                <span className="text-neutral-200 font-mono font-medium">{formatBytes(totalUploaded)}</span>
+              </div>
+              <div className="flex justify-between gap-6 text-sm">
+                <span className="text-neutral-400">Avg Ratio</span>
+                <span className="text-neutral-200 font-mono font-medium">{avgRatio.toFixed(3)}</span>
+              </div>
+            </div>
+
+            <div className="w-px h-32 bg-white/10 shrink-0"></div>
+
+            <div className="space-y-3 min-w-[180px]">
+              <h4 className="text-[10px] font-semibold text-neutral-500 uppercase tracking-widest mb-4">Distribution</h4>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span><span className="text-neutral-300">Active</span></div>
+                  <span className="text-emerald-400 font-mono font-medium">{counts.active}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-neutral-500"></span><span className="text-neutral-300">Complete</span></div>
+                  <span className="text-neutral-400 font-mono font-medium">{counts.complete}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span><span className="text-neutral-300">Queued</span></div>
+                  <span className="text-orange-400 font-mono font-medium">{counts.waiting}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-red-500"></span><span className="text-neutral-300">Error</span></div>
+                  <span className="text-red-400 font-mono font-medium">{counts.error}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span><span className="text-neutral-300">Paused</span></div>
+                  <span className="text-blue-400 font-mono font-medium">{counts.paused}</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -76,13 +150,13 @@ export function StatusFooter() {
         {/* Download speed */}
         <div className="flex items-center gap-2 min-w-[90px]">
           <Download size={13} className="text-emerald-400 shrink-0" />
-          <span className="font-mono text-xs font-semibold text-emerald-300">{fmt(dl)}</span>
+          <span className="font-mono text-xs font-semibold text-emerald-300">{formatBytes(dl)}/s</span>
         </div>
 
         {/* Upload speed */}
         <div className="flex items-center gap-2 min-w-[90px]">
           <Upload size={13} className="text-blue-400 shrink-0" />
-          <span className="font-mono text-xs font-semibold text-blue-300">{fmt(ul)}</span>
+          <span className="font-mono text-xs font-semibold text-blue-300">{formatBytes(ul)}/s</span>
         </div>
 
         {/* Divider */}

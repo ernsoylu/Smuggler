@@ -7,8 +7,9 @@ import {
 import type { Torrent, Peer, TorrentOptions } from '../api/types';
 import {
   Play, Pause, Trash2, ChevronDown, ChevronRight,
-  File as FileIcon, Users, Settings2, Info, HardDrive,
+  File as FileIcon, Users, Settings2, Info, HardDrive
 } from 'lucide-react';
+import { DeleteTorrentModal } from './DeleteTorrentModal';
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(2)} GB`;
@@ -196,8 +197,8 @@ function FilesTab({ torrent }: { torrent: Torrent }) {
       await setFileSelection(torrent.mule, torrent.gid, next);
       return { fileIndex, next };
     },
-    onMutate: ({ fileIndex }) => setPending(prev => new Set([...prev, fileIndex])),
-    onSettled: (_, __, { fileIndex }) =>
+    onMutate: (fileIndex) => setPending(prev => new Set([...prev, fileIndex])),
+    onSettled: (_data, _err, fileIndex) =>
       setPending(prev => { const s = new Set(prev); s.delete(fileIndex); return s; }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['torrents'] }),
   });
@@ -266,6 +267,36 @@ function FilesTab({ torrent }: { torrent: Torrent }) {
   );
 }
 
+function PeerFlag({ ip }: { ip: string }) {
+  const { data: flag } = useQuery({
+    queryKey: ['geo-ip', ip],
+    queryFn: async () => {
+      try {
+        // Handle basic IPv6 loopback or local IPs
+        if (ip.startsWith('127.') || ip === '::1' || ip.startsWith('10.') || ip.startsWith('192.168.')) {
+          return '🏠';
+        }
+        const res = await fetch(`https://get.geojs.io/v1/ip/country/${ip}`);
+        if (!res.ok) return '🏳️';
+        const code = (await res.text()).trim();
+        if (!code || code === 'nil' || code.length !== 2) return '🏳️';
+        
+        const codePoints = code
+          .toUpperCase()
+          .split('')
+          .map(char => 127397 + char.charCodeAt(0));
+        return String.fromCodePoint(...codePoints);
+      } catch (e) {
+        return '🏳️';
+      }
+    },
+    staleTime: Infinity,
+  });
+  
+  if (!flag) return <span className="inline-block w-4 h-4 bg-white/10 rounded animate-pulse mr-2 align-middle"></span>;
+  return <span className="mr-2 text-[14px] leading-none select-none align-middle" title="Location">{flag}</span>;
+}
+
 function PeersTab({ torrent, isVisible }: { torrent: Torrent; isVisible: boolean }) {
   const { data: peers = [], isLoading } = useQuery<Peer[]>({
     queryKey: ['peers', torrent.mule, torrent.gid],
@@ -302,7 +333,10 @@ function PeersTab({ torrent, isVisible }: { torrent: Torrent; isVisible: boolean
       <tbody className="divide-y divide-white/5">
         {peers.map((peer) => (
           <tr key={`${peer.ip}:${peer.port}`} className="hover:bg-white/[0.03] transition-colors">
-            <td className="py-2 font-mono text-neutral-300">{peer.ip}:{peer.port}</td>
+            <td className="py-2 font-mono text-neutral-300">
+              <PeerFlag ip={peer.ip} />
+              {peer.ip}:{peer.port}
+            </td>
             <td className="py-2 text-right text-emerald-400 font-mono">{formatSpeed(peer.download_speed)}</td>
             <td className="py-2 text-right text-blue-400 font-mono">{formatSpeed(peer.upload_speed)}</td>
             <td className="py-2 text-center">
@@ -451,13 +485,18 @@ export function TorrentRow({ torrent }: Readonly<Props>) {
   });
 
   const remove = useMutation({
-    mutationFn: () => removeTorrent(torrent.mule, torrent.gid),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['torrents'] }),
+    mutationFn: (deleteFiles: boolean) => removeTorrent(torrent.mule, torrent.gid, deleteFiles),
+    onSuccess: () => {
+      setShowConfirm(false);
+      qc.invalidateQueries({ queryKey: ['torrents'] });
+    },
   });
 
   const progress = Math.min(100, torrent.progress);
-  const canPause = torrent.status === 'active' || torrent.status === 'waiting';
-  const canResume = torrent.status === 'paused';
+  
+  const startDisabled = torrent.status === 'active' || torrent.status === 'waiting';
+  const stopDisabled = torrent.status === 'paused' || torrent.status === 'complete' || torrent.status === 'error' || torrent.status === 'removed';
+  
   const v = STATUS_VARIANTS[torrent.status] ?? STATUS_VARIANTS['removed'];
 
   return (
@@ -548,53 +587,31 @@ export function TorrentRow({ torrent }: Readonly<Props>) {
 
         {/* Actions */}
         <td className="px-6 py-4 whitespace-nowrap text-right">
-          {showConfirm ? (
-            <div className="flex justify-end gap-2 items-center">
-              <span className="text-xs font-medium text-red-500 bg-red-500/10 px-2 py-1 rounded">Delete?</span>
-              <button
-                className="text-xs px-2.5 py-1 rounded-md bg-red-600 hover:bg-red-500 text-white font-medium"
-                onClick={() => { remove.mutate(); setShowConfirm(false); }}
-              >
-                Yes
-              </button>
-              <button
-                className="text-xs px-2.5 py-1 rounded-md bg-neutral-700 hover:bg-neutral-600 text-white font-medium"
-                onClick={() => setShowConfirm(false)}
-              >
-                No
-              </button>
-            </div>
-          ) : (
-            <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-              {canPause && (
-                <button
-                  className="p-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 hover:text-white text-neutral-400 transition-colors"
-                  onClick={() => pause.mutate()}
-                  disabled={pause.isPending}
-                  title="Pause"
-                >
-                  <Pause size={16} />
-                </button>
-              )}
-              {canResume && (
-                <button
-                  className="p-1.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 transition-colors"
-                  onClick={() => resume.mutate()}
-                  disabled={resume.isPending}
-                  title="Resume"
-                >
-                  <Play size={16} />
-                </button>
-              )}
-              <button
-                className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors"
-                onClick={() => setShowConfirm(true)}
-                title="Remove"
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
-          )}
+          <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              className="p-1.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              onClick={() => resume.mutate()}
+              disabled={startDisabled || resume.isPending}
+              title="Start"
+            >
+              <Play size={16} />
+            </button>
+            <button
+              className="p-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              onClick={() => pause.mutate()}
+              disabled={stopDisabled || pause.isPending}
+              title="Stop"
+            >
+              <Pause size={16} />
+            </button>
+            <button
+              className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors"
+              onClick={() => setShowConfirm(true)}
+              title="Remove"
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
         </td>
       </tr>
 
@@ -631,6 +648,15 @@ export function TorrentRow({ torrent }: Readonly<Props>) {
           </td>
         </tr>
       )}
+
+      {/* Delete Confirmation Modal */}
+      <DeleteTorrentModal
+        isOpen={showConfirm}
+        onClose={() => setShowConfirm(false)}
+        onConfirm={(deleteFiles) => remove.mutate(deleteFiles)}
+        isPending={remove.isPending}
+        torrentName={torrent.name || torrent.gid}
+      />
     </React.Fragment>
   );
 }

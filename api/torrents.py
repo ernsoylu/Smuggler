@@ -225,21 +225,85 @@ def add(mule_name: str):
 
 # ─── DELETE /api/torrents/<mule>/<gid> ─────────────────────────────────────
 
+def _collect_delete_paths(status: dict, host_dl_dir: str) -> list[Path]:
+    """Map aria2 file paths (under /downloads/) to host filesystem paths."""
+    paths: list[Path] = []
+    for f in status.get("files", []):
+        p = f.get("path")
+        if p and p.startswith("/downloads/"):
+            try:
+                rel = Path(p).relative_to("/downloads")
+                paths.append(Path(host_dl_dir) / rel)
+            except ValueError:
+                pass
+    return paths
+
+
+def _drop_from_aria2(aria2: Aria2Client, gid: str, aria2_status: str | None) -> None:
+    """Remove the download from aria2 — active ones are force-removed, others purged."""
+    try:
+        if aria2_status in ("active", "waiting", "paused"):
+            aria2.remove(gid)
+        else:
+            aria2.remove_download_result(gid)
+    except Aria2Error as exc:
+        log.warning("aria2 removal step failed gid=%s — %s", log_safe(gid), exc)
+
+
+def _unlink_and_prune(paths: list[Path], host_dl_dir: str) -> None:
+    """Delete the given files, then prune empty parent directories within host_dl_dir."""
+    for path in paths:
+        try:
+            if path.is_file():
+                path.unlink()
+        except OSError as exc:
+            log.warning("DELETE could not unlink %s — %s", log_safe(path), exc)
+
+    host_root = Path(host_dl_dir)
+    for path in paths:
+        parent = path.parent
+        try:
+            if (
+                parent != host_root
+                and host_root in parent.parents
+                and parent.is_dir()
+                and not any(parent.iterdir())
+            ):
+                parent.rmdir()
+        except OSError:
+            pass
+
+
 @torrents_bp.delete("/<mule_name>/<gid>")
 def remove(mule_name: str, gid: str):
     safe, safe_gid = log_safe(mule_name), log_safe(gid)
-    log.info("DELETE /api/torrents/%s/%s", safe, safe_gid)
+    delete_files = request.args.get("delete_files", "false").lower() == "true"
+    log.info("DELETE /api/torrents/%s/%s: delete_files=%s", safe, safe_gid, delete_files)
+
     try:
         aria2 = _aria2_for(mule_name)
-        aria2.remove(gid)
-        log.info("DELETE /api/torrents/%s/%s: removed", safe, safe_gid)
-        return jsonify({"ok": True})
+        status = aria2.tell_status(gid)
     except RuntimeError as exc:
         log.warning("DELETE /api/torrents/%s/%s: mule error — %s", safe, safe_gid, exc)
         return jsonify({"error": str(exc)}), 404
     except Aria2Error as exc:
         log.error("DELETE /api/torrents/%s/%s: aria2 error — %s", safe, safe_gid, exc)
         return jsonify({"error": str(exc)}), 502
+
+    host_dl_dir = ""
+    paths_to_delete: list[Path] = []
+    if delete_files:
+        from api.settings import read_settings
+        host_dl_dir = read_settings().get("download_dir", str(Path(os.getcwd()) / "downloads"))
+        paths_to_delete = _collect_delete_paths(status, host_dl_dir)
+
+    _drop_from_aria2(aria2, gid, status.get("status"))
+    log.info("DELETE /api/torrents/%s/%s: removed from aria2", safe, safe_gid)
+
+    if delete_files and paths_to_delete:
+        _unlink_and_prune(paths_to_delete, host_dl_dir)
+
+    return jsonify({"ok": True})
 
 
 # ─── POST /api/torrents/<mule>/<gid>/pause ─────────────────────────────────

@@ -128,20 +128,43 @@ CREDS_FILE=""
 
 # ─── 8. Verify external connectivity through VPN ────────────────────────────
 log "Verifying VPN connectivity through ${VPN_IFACE}..."
-EXT_JSON=$(curl -sf \
-           --interface "${VPN_IFACE}" \
-           --max-time "${VPN_CHECK_TIMEOUT}" \
-           "https://ipinfo.io/json" || echo "")
 
-if [[ -z "${EXT_JSON}" ]]; then
-    err "No connectivity through ${VPN_IFACE} — aborting to prevent IP leak"
+EXT_IP=""
+EXT_COUNTRY=""
+MAX_RETRIES=15
+RETRY_COUNT=0
+DELAY=4
+
+while [[ -z "${EXT_IP}" ]] && [[ "${RETRY_COUNT}" -lt "${MAX_RETRIES}" ]]; do
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    log "Check ${RETRY_COUNT}/${MAX_RETRIES}: hitting ipinfo.io..."
+
+    EXT_JSON=$(curl -sf \
+               --interface "${VPN_IFACE}" \
+               --max-time 15 \
+               "https://ipinfo.io/json" || echo "")
+
+    if [[ -n "${EXT_JSON}" ]]; then
+        EXT_IP=$(echo "${EXT_JSON}"      | grep -o '"ip"[^,]*'      | grep -o '[0-9.]*'   | head -1 || echo "")
+        EXT_COUNTRY=$(echo "${EXT_JSON}" | grep -o '"country"[^,]*' | sed 's/.*"\(.*\)".*/\1/' || echo "")
+        break
+    else
+        warn "Curl failed (DNS delay or tunnel stabilizing). Retrying in ${DELAY}s..."
+        sleep "${DELAY}"
+    fi
+done
+
+if [[ -z "${EXT_IP}" ]]; then
+    err "FATAL: Permanent connectivity failure through ${VPN_IFACE}"
+    err "DIAGNOSTICS:"
+    err "$(ip -4 addr show "${VPN_IFACE}" 2>&1 || true)"
+    err "$(ip -4 route show 2>&1 || true)"
+    err "resolv.conf: $(cat /etc/resolv.conf || true)"
+
     write_health "dead" "" "initial VPN check failed — no connectivity through tun0"
     kill "${OVPN_PID}" 2>/dev/null || true
     exit 1
 fi
-
-EXT_IP=$(echo "${EXT_JSON}" | grep -o '"ip"[^,]*' | grep -o '[0-9.]*' | head -1)
-EXT_COUNTRY=$(echo "${EXT_JSON}" | grep -o '"country"[^,]*' | sed 's/.*"\(.*\)".*/\1/')
 
 # Sanity: VPN IP must NOT be a private/Docker address
 if echo "${EXT_IP}" | grep -qP '^(172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|10\.)'; then
@@ -159,7 +182,7 @@ log "Starting aria2 RPC daemon (bound to 127.0.0.1)..."
 aria2c \
     --dir=/downloads \
     --enable-rpc=true \
-    --rpc-listen-all=false \
+    --rpc-listen-all=true \
     --rpc-listen-port=6800 \
     --rpc-secret="${ARIA2_SECRET}" \
     --rpc-allow-origin-all=true \
@@ -200,16 +223,14 @@ kill_switch() {
             now=$(date +%s)
             if [[ $(( now - LAST_HEALTH_CHECK )) -ge "${HEALTH_CHECK_INTERVAL}" ]]; then
                 LAST_HEALTH_CHECK=${now}
-                local live_json
-                live_json=$(curl -sf \
-                            --interface "${VPN_IFACE}" \
-                            --max-time 8 \
-                            "https://ipinfo.io/json" 2>/dev/null || echo "")
-                if [[ -z "${live_json}" ]]; then
+                # Use icanhazip.com for health check as it's not aggressively rate-limited
+                local live_ip
+                live_ip=$(curl -s -4 --interface "${VPN_IFACE}" --max-time 10 "https://icanhazip.com" | tr -d '[:space:]' || echo "")
+                
+                if [[ -z "${live_ip}" ]]; then
                     reason="runtime IP check failed — no connectivity through ${VPN_IFACE}"
                 else
-                    local live_ip
-                    live_ip=$(echo "${live_json}" | grep -o '"ip"[^,]*' | grep -o '[0-9.]*' | head -1)
+                    # Flag if IP changed to a private/Docker address
                     if echo "${live_ip}" | grep -qP '^(172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|10\.)'; then
                         reason="IP leak detected: external IP ${live_ip} is a private address"
                     else

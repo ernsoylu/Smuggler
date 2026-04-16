@@ -51,13 +51,23 @@ You are assisting in building **Smuggler**, a containerized Torrent Downloader. 
 - **Setup & start scripts:** `setup.sh` installs all dependencies + builds both Docker images idempotently. `start.sh` runs 7 pre-flight checks and directs users to `setup.sh` if anything is missing.
 - **TorrentsPage:** Fixed table header misalignment (invalid `<div>` in `<tr>`). Added bottom analytics section: transfer summary (downloaded/uploaded/ratio) and a Recharts donut chart showing torrent status distribution.
 
+### Phase 4: Compose Stack & Watchdog Hardening — COMPLETE ✅
+- **Docker Compose stack** (`docker-compose.yml`, `docker/`): The app now ships as two service containers — `smuggler-api` (gunicorn `--timeout 180 --threads 8`, host network, Docker socket mounted in) and `smuggler-ui` (nginx serving the Vite build and reverse-proxying `/api/*` to the API over the host gateway). `start.sh` was rewritten as a lifecycle wrapper: `build | debug | stop | prune`.
+- **`SMG_HOST_ROOT` env var** — the API container uses it to resolve paths (`data/smuggler.db`, `data/tmp/<vpn-config>`, default downloads dir) to host-visible paths so Docker can mount them into spawned mule containers.
+- **Deploy reliability** — nginx `proxy_*_timeout` and gunicorn `--timeout` both set to 180s so `POST /api/configs/<id>/deploy` no longer returns a network error mid-VPN-handshake (the deploy's `wait_for_vpn` can take up to 90s).
+- **Host watchdog** (`api/watchdog.py`): background daemon, interval 15s, evacuates mules that fail 3 consecutive health checks. State is per-mule (`consecutive_failures`, `evacuated`) and cleaned up when a mule disappears from `list_mules`. Evacuation migrates active/waiting torrents to a healthy target mule before killing the compromised one.
+- **VPN health probe resilience** (`cli/docker_client.py`): `check_mule_vpn` now probes `icanhazip.com` first and falls back to `ipinfo.io`, matching the in-container startup scripts. This fixes false-positive evacuations when `ipinfo.io` returns HTTP 429 and curl exits 22.
+- **Torrent file deletion**: `DELETE /api/torrents/<mule>/<gid>?delete_files=true` unlinks the files from the shared downloads volume and prunes empty parents inside the download dir. aria2 client gains `remove_download_result` so completed/error torrents can be cleared. Frontend `DeleteTorrentModal` offers a keep-files vs. delete-files choice; `TorrentRow` splits start/stop disabled states per aria2 status.
+- **Settings safety**: `POST /api/settings/` validates the download directory is an absolute non-traversal path, creates it if missing, and rejects the change with 403 if the directory is not writable. Same check runs at app startup as a log warning.
+- **UI polish**: `StatusFooter` adds an expandable panel (bandwidth history + transfer summary + status distribution). `TorrentRow` peers tab renders country flag emojis via GeoJS (with a local-IP shortcut). `data/` is git-ignored (SQLite DB + tmp VPN uploads with private keys).
+
 ## Module Map
 
 ### `cli/`
 | File | Purpose |
 |---|---|
-| `docker_client.py` | All Docker operations — `start_mule`, `stop_mule`, `kill_mule`, `list_mules`, `get_mule`, `wait_for_vpn`, `exec_in_mule` |
-| `aria2_client.py` | aria2 JSON-RPC client — add, remove, pause, resume, stats, options |
+| `docker_client.py` | All Docker operations — `start_mule`, `stop_mule`, `kill_mule`, `list_mules`, `get_mule`, `wait_for_vpn`, `exec_in_mule`, `check_mule_vpn` (two-probe: icanhazip + ipinfo fallback), `evacuate_mule` |
+| `aria2_client.py` | aria2 JSON-RPC client — add, remove, `remove_download_result`, pause, resume, stats, options, peers, file selection |
 | `mule_commands.py` | Click group `mule` — start/list/stop/kill/ip commands |
 | `torrent_commands.py` | Click group `torrent` — add/list/remove/pause/resume commands |
 | `main.py` | `smg` CLI entry point; registers `mule_group` and `torrent_group` |
@@ -66,34 +76,43 @@ You are assisting in building **Smuggler**, a containerized Torrent Downloader. 
 ### `api/`
 | File | Purpose |
 |---|---|
-| `app.py` | Flask app factory; registers all blueprints and calls `init_db()` |
-| `mules.py` | Blueprint `/api/mules` — CRUD + VPN wait + IP lookup |
-| `torrents.py` | Blueprint `/api/torrents` — list, add, remove, pause, resume |
+| `app.py` | Flask app factory; registers all blueprints, calls `init_db()`, verifies `download_dir` writability |
+| `mules.py` | Blueprint `/api/mules` — CRUD + VPN wait + IP lookup + health + evacuation |
+| `torrents.py` | Blueprint `/api/torrents` — list, add, remove (optionally unlinks files from disk), pause, resume, peers, options, file selection |
 | `stats.py` | Blueprint `/api/stats` — aggregated speed/count across all mules |
-| `settings.py` | Blueprint `/api/settings` — get/set download settings backed by SQLite |
-| `configs.py` | Blueprint `/api/configs` — upload/list/delete VPN configs; deploy as mule |
-| `database.py` | SQLite layer — `settings` and `vpn_configs` tables, WAL mode |
+| `settings.py` | Blueprint `/api/settings` — get/set download settings backed by SQLite; validates absolute path, creates dir, rejects non-writable |
+| `configs.py` | Blueprint `/api/configs` — upload/list/delete VPN configs; deploy as mule (writes temp config under `${SMG_HOST_ROOT}/data/tmp`) |
+| `watchdog.py` | Blueprint `/api/watchdog` + daemon thread; 15s sweep, 3-strike evacuation, state cleanup when containers disappear |
+| `database.py` | SQLite layer — `settings` and `vpn_configs` tables, WAL mode, DB path resolved via `SMG_DB_PATH` (defaults under `SMG_HOST_ROOT/data`) |
 | `settings_sync.py` | `sync_all_mules()` — pushes settings to running mules via aria2 options |
 | `schemas.py` | Shared serialization helpers |
-| `run.py` | Dev-server entry point |
+| `run.py` | Legacy Flask dev-server entry point (prefer `main.py` under gunicorn) |
 
 ### `web/src/`
 | Path | Purpose |
 |---|---|
-| `pages/TorrentsPage.tsx` | Main dashboard — torrent list, transfer summary, status distribution chart |
-| `pages/MulesPage.tsx` | Mule management with deploy pipeline UI |
+| `pages/TorrentsPage.tsx` | Main dashboard — torrent list; bottom analytics moved into `StatusFooter` expandable panel |
+| `pages/MulesPage.tsx` | Mule management with deploy pipeline UI + watchdog panel (evacuate button) |
 | `pages/ConfigsPage.tsx` | VPN config upload (WireGuard/OpenVPN) with credential fields; categorised list |
 | `pages/SettingsPage.tsx` | Settings form (download dir, speed limits, concurrency) |
 | `components/MuleCard.tsx` | Per-mule card with status, IP, country, stop/kill actions |
-| `components/TorrentRow.tsx` | Torrent table row with progress bar and actions |
+| `components/TorrentRow.tsx` | Torrent row — progress, actions, expandable info/files/peers tabs; peers show country flags |
 | `components/StatsBar.tsx` | Global download/upload speed + active/queued/stopped counts |
+| `components/StatusFooter.tsx` | Persistent footer: live speeds + expandable bandwidth history, transfer summary, status distribution |
 | `components/SpeedGraph.tsx` | Recharts real-time speed graph |
 | `components/AddTorrentModal.tsx` | Modal for adding magnet/file to a selected mule |
 | `components/DeployMuleModal.tsx` | Modal for deploying a stored VPN config as a new mule |
-| `api/client.ts` | Axios API client — all `getMules`, `addMagnet`, `deployMule`, etc. |
-| `api/types.ts` | TypeScript interfaces — `Mule`, `Torrent`, `GlobalStats`, `VpnConfig`, etc. |
+| `components/DeleteTorrentModal.tsx` | Confirmation modal with keep-files vs. delete-files choice |
+| `api/client.ts` | Axios API client — all `getMules`, `addMagnet`, `deployMule`, `removeTorrent` (with `deleteFiles` flag), `getWatchdogStatus`, etc. |
+| `api/types.ts` | TypeScript interfaces — `Mule`, `Torrent`, `GlobalStats`, `VpnConfig`, `MuleHealth`, `WatchdogStatus`, `Peer`, etc. |
 
-### Docker images
+### Service containers (Docker Compose)
+| Container | Context | Role |
+|---|---|---|
+| `smuggler-api` | `docker/Dockerfile.api` | Python 3.11 + gunicorn (`--timeout 180 --threads 8`), host network, Docker socket mounted |
+| `smuggler-ui` | `docker/Dockerfile.web` | Vite build served by nginx; reverse-proxies `/api/*` to the API with 180s timeouts |
+
+### Mule images
 | Image | Context | VPN type | Capabilities |
 |---|---|---|---|
 | `smuggler-mule:latest` | `worker_image/` | WireGuard | `NET_ADMIN`, `SYS_MODULE` |

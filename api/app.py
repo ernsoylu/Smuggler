@@ -26,6 +26,19 @@ def create_app() -> Flask:
 
     # Initialise SQLite database
     init_db()
+    
+    # Verify the download directory permissions at startup
+    try:
+        from api.settings import read_settings
+        import os
+        dl_dir = read_settings().get("download_dir")
+        if dl_dir:
+            if not os.path.exists(dl_dir):
+                os.makedirs(dl_dir, exist_ok=True)
+            if not os.access(dl_dir, os.W_OK):
+                log.critical("SECURITY/CONFIG: Download directory %s is NOT WRITABLE. Please fix permissions.", dl_dir)
+    except Exception as exc:
+        log.error("Failed to verify download_dir at startup: %s", exc)
 
     app = Flask(__name__)
     CORS(app)

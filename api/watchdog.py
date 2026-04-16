@@ -43,7 +43,7 @@ log = get_logger(__name__)
 watchdog_bp = Blueprint("watchdog", __name__, url_prefix="/api/watchdog")
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-WATCHDOG_INTERVAL = 30   # seconds between full sweeps
+WATCHDOG_INTERVAL = 15   # seconds between full sweeps
 FAILURE_THRESHOLD = 3    # consecutive check failures before evacuation
 
 # ── Shared state (protected by _lock) ────────────────────────────────────────
@@ -67,36 +67,87 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _probe_mule(client, mule) -> dict:
+    """Return a health-check result for one mule, whether running or not."""
+    if mule.status == "running":
+        return check_mule_vpn(client, mule.name)
+    return {
+        "name": mule.name,
+        "healthy": False,
+        "ip": None,
+        "reason": f"container {mule.status}",
+    }
+
+
+def _record_result(mule_name: str, result: dict) -> tuple[int, bool]:
+    """Update _mule_states for this mule; return (consecutive_failures, already_evacuated)."""
+    with _lock:
+        prev = _mule_states.get(mule_name, {})
+        consecutive = 0 if result["healthy"] else prev.get("consecutive_failures", 0) + 1
+        already_evacuated = prev.get("evacuated", False)
+
+        _mule_states[mule_name] = {
+            **result,
+            "consecutive_failures": consecutive,
+            "evacuated": already_evacuated,
+        }
+    return consecutive, already_evacuated
+
+
+def _do_evacuation(client, mule_name: str, consecutive: int) -> None:
+    """Run evacuate_mule(), log the report, and mark the mule evacuated."""
+    log.error(
+        "watchdog: TRIGGERING EVACUATION for mule=%s (failures=%d)",
+        mule_name, consecutive,
+    )
+    try:
+        report = evacuate_mule(client, mule_name, kill_after=True)
+        log.info(
+            "watchdog: evacuation complete mule=%s migrated=%d skipped=%d killed=%s",
+            mule_name,
+            len(report.get("migrated", [])),
+            len(report.get("skipped", [])),
+            report.get("killed"),
+        )
+    except Exception as exc:
+        log.error("watchdog: evacuation error for mule=%s — %s", mule_name, exc)
+
+    with _lock:
+        if mule_name in _mule_states:
+            _mule_states[mule_name]["evacuated"] = True
+        _watchdog_stats["total_evacuations"] += 1
+
+
+def _finalise_sweep(all_names: set[str], checked_at: str) -> None:
+    """Drop stale mule states and update sweep counters."""
+    with _lock:
+        for name in list(_mule_states):
+            if name not in all_names:
+                del _mule_states[name]
+        _watchdog_stats["last_run_at"] = checked_at
+        _watchdog_stats["total_sweeps"] += 1
+
+
 def _run_sweep() -> list[dict]:
     """
     Check every running mule and trigger evacuation for any that exceed
     the failure threshold.  Returns a list of per-mule result dicts.
     """
-    results: list[dict] = []
-
     try:
         client = get_docker_client()
-        running_mules = [m for m in list_mules(client) if m.status == "running"]
+        all_mules = list_mules(client)
     except RuntimeError as exc:
         log.error("watchdog sweep: cannot connect to Docker — %s", exc)
         return []
 
     checked_at = _now_iso()
+    results: list[dict] = []
 
-    for mule in running_mules:
-        result = check_mule_vpn(client, mule.name)
+    for mule in all_mules:
+        result = _probe_mule(client, mule)
         result["checked_at"] = checked_at
 
-        with _lock:
-            prev = _mule_states.get(mule.name, {})
-            consecutive = 0 if result["healthy"] else prev.get("consecutive_failures", 0) + 1
-            already_evacuated = prev.get("evacuated", False)
-
-            _mule_states[mule.name] = {
-                **result,
-                "consecutive_failures": consecutive,
-                "evacuated": already_evacuated,
-            }
+        consecutive, already_evacuated = _record_result(mule.name, result)
 
         if not result["healthy"]:
             log.warning(
@@ -104,37 +155,12 @@ def _run_sweep() -> list[dict]:
                 mule.name, consecutive, FAILURE_THRESHOLD, result["reason"],
             )
 
-        # ── Trigger evacuation if threshold exceeded and not already done ──
         if not result["healthy"] and consecutive >= FAILURE_THRESHOLD and not already_evacuated:
-            log.error(
-                "watchdog: TRIGGERING EVACUATION for mule=%s (failures=%d)",
-                mule.name, consecutive,
-            )
-            try:
-                report = evacuate_mule(client, mule.name, kill_after=True)
-                log.info(
-                    "watchdog: evacuation complete mule=%s migrated=%d skipped=%d killed=%s",
-                    mule.name,
-                    len(report.get("migrated", [])),
-                    len(report.get("skipped", [])),
-                    report.get("killed"),
-                )
-            except Exception as exc:
-                log.error("watchdog: evacuation error for mule=%s — %s", mule.name, exc)
-
-            with _lock:
-                if mule.name in _mule_states:
-                    _mule_states[mule.name]["evacuated"] = True
-
-            with _lock:
-                _watchdog_stats["total_evacuations"] += 1
+            _do_evacuation(client, mule.name, consecutive)
 
         results.append(result)
 
-    with _lock:
-        _watchdog_stats["last_run_at"] = checked_at
-        _watchdog_stats["total_sweeps"] += 1
-
+    _finalise_sweep({m.name for m in all_mules}, checked_at)
     return results
 
 

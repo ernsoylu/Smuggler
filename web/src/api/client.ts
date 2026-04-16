@@ -44,8 +44,8 @@ export const addTorrentFile = (mule: string, file: File): Promise<{ gid: string 
   return api.post<{ gid: string }>(`/torrents/${mule}`, fd).then(r => r.data);
 };
 
-export const removeTorrent = (mule: string, gid: string): Promise<void> =>
-  api.delete(`/torrents/${mule}/${gid}`).then(() => undefined);
+export const removeTorrent = (mule: string, gid: string, deleteFiles: boolean = false): Promise<void> =>
+  api.delete(`/torrents/${mule}/${gid}`, { params: { delete_files: deleteFiles } }).then(() => undefined);
 
 export const pauseTorrent = (mule: string, gid: string): Promise<void> =>
   api.post(`/torrents/${mule}/${gid}/pause`).then(() => undefined);

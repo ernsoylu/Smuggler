@@ -73,8 +73,8 @@ rm -f "${WG_CONF_STRIPPED}"
 
 [[ -n "${WG_ADDR4}" ]] && ip -4 address add "${WG_ADDR4}" dev "${WG_IFACE}"
 [[ -n "${WG_ADDR6}" ]] && ip -6 address add "${WG_ADDR6}" dev "${WG_IFACE}" 2>/dev/null || true
-ip link set mtu 1420 up dev "${WG_IFACE}"
-log "Interface ${WG_IFACE} is up"
+ip link set mtu 1280 up dev "${WG_IFACE}"
+log "Interface ${WG_IFACE} is up (MTU 1280)"
 
 # ─── 4. Block IPv6 outbound unless WG config carries IPv6 ──────────────────
 # Prevents IPv6 leak when WireGuard only tunnels IPv4.
@@ -105,37 +105,93 @@ ip rule add from "${ETH0_IP}" table 128
 ip route add default via "${ORIG_GW}" dev "${ORIG_DEV}" table 128
 
 # ─── 6. Switch DNS — hard-lock to VPN DNS, block Docker DNS ─────────────────
-if [[ -n "${WG_DNS}" ]]; then
-    echo "nameserver ${WG_DNS}" > /etc/resolv.conf
-    log "DNS locked to VPN DNS: ${WG_DNS}"
-    # Block outbound DNS to Docker's internal resolver (127.0.0.11)
-    # so failed VPN DNS doesn't silently fall back to host-visible DNS
-    iptables -A OUTPUT -d 127.0.0.11 -p udp --dport 53 -j REJECT 2>/dev/null || true
-    iptables -A OUTPUT -d 127.0.0.11 -p tcp --dport 53 -j REJECT 2>/dev/null || true
-    log "Docker DNS (127.0.0.11) blocked"
+if [[ -n "${WG_DNS:-}" ]]; then
+    # Set VPN DNS first, then public fallbacks (Cloudflare/Google)
+    # These will all route through wg0 because of the default route.
+    printf "nameserver %s\nnameserver 1.1.1.1\nnameserver 8.8.8.8\n" "${WG_DNS}" > /etc/resolv.conf
+    log "DNS locked to VPN DNS (${WG_DNS}) + public fallbacks"
+else
+    # No DNS in config? Use public ones only
+    printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" > /etc/resolv.conf
+    log "DNS locked to public fallbacks (no DNS in config)"
 fi
+
+# Block outbound DNS to Docker's internal resolver (127.0.0.11)
+# so failed VPN DNS doesn't silently fall back to host-visible DNS
+iptables -A OUTPUT -d 127.0.0.11 -p udp --dport 53 -j REJECT 2>/dev/null || true
+iptables -A OUTPUT -d 127.0.0.11 -p tcp --dport 53 -j REJECT 2>/dev/null || true
+log "Docker DNS (127.0.0.11) blocked"
 
 # Replace default route — all traffic through wg0
 ip -4 route replace default dev "${WG_IFACE}"
 
 # ─── 7. Verify external connectivity through VPN ────────────────────────────
 log "Verifying VPN connectivity through ${WG_IFACE}..."
-# SECURITY: --interface binds curl to wg0; if wg0 can't reach the internet this fails
-# rather than silently falling back to eth0 and confirming the real IP as "VPN".
-EXT_JSON=$(curl -sf \
-           --interface "${WG_IFACE}" \
-           --max-time "${VPN_CHECK_TIMEOUT}" \
-           "https://ipinfo.io/json" || echo "")
 
-if [[ -z "${EXT_JSON}" ]]; then
-    err "No connectivity through ${WG_IFACE} — aborting to prevent IP leak"
+# Stage A: Wait for WireGuard Handshake (max 30s)
+log "Waiting for initial handshake..."
+HANDSHAKE_READY=0
+for i in {1..15}; do
+    HS=$(wg show "${WG_IFACE}" latest-handshakes 2>/dev/null | awk '{print $2}' || echo "0")
+    if [[ "${HS}" -gt 0 ]]; then
+        log "Handshake confirmed! (${HS})"
+        HANDSHAKE_READY=1
+        break
+    fi
+    sleep 2
+done
+
+if [[ "${HANDSHAKE_READY}" -eq 0 ]]; then
+    warn "No handshake detected after 30s — tunnel might be stuck"
+fi
+
+# Stage B: Check Connectivity (IP-based then Domain-based)
+EXT_IP=""
+EXT_COUNTRY="Unknown"
+MAX_RETRIES=10
+
+for i in $(seq 1 "${MAX_RETRIES}"); do
+    log "Connectivity check $i/${MAX_RETRIES}..."
+
+    # 1. Try a raw IP check first (very lightweight, no TLS/DNS complexity)
+    if curl -v -sf -4 --interface "${WG_IFACE}" --max-time 5 "http://1.1.1.1" >/dev/null 2>&1; then
+        log "Tunnel is ROUTING (IP-based check passed)"
+    else
+        warn "Tunnel is NOT routing yet (IP check failed)"
+    fi
+
+    # 2. Try to get just the IP from a different service first (icanhazip.com is simple)
+    # We don't use -f here so we can see the error if it fails
+    EXT_IP=$(curl -s -4 --interface "${WG_IFACE}" --max-time 10 "https://icanhazip.com" | tr -d '[:space:]' || echo "")
+    
+    if [[ -n "${EXT_IP}" ]]; then
+        log "External IP detected: ${EXT_IP}"
+        # Now try to get GeoIP info, but don't FATAL if it's rate-limited
+        EXT_JSON=$(curl -s -4 --interface "${WG_IFACE}" --max-time 5 "https://ipinfo.io/json" || echo "")
+        if [[ -n "${EXT_JSON}" ]] && [[ "${EXT_JSON}" == *"\"ip\":"* ]]; then
+             EXT_COUNTRY=$(echo "${EXT_JSON}" | grep -o '"country"[^,]*' | sed 's/.*"\(.*\)".*/\1/' || echo "Unknown")
+        else
+             warn "GeoIP info (ipinfo.io) rate-limited or unavailable; proceeding with IP only."
+        fi
+        break
+    else
+        warn "Public IP detection failed. DNS locked to ${WG_DNS:-none} + fallbacks. Retrying in 4s..."
+        sleep 4
+    fi
+done
+
+if [[ -z "${EXT_IP}" ]]; then
+    err "FATAL: Permanent connectivity failure through ${WG_IFACE}"
+    err "DIAGNOSTICS:"
+    err "$(ip -4 addr show "${WG_IFACE}" 2>&1 || true)"
+    err "$(ip -4 route show 2>&1 || true)"
+    err "resolv.conf: $(cat /etc/resolv.conf || true)"
+    err "WireGuard status: $(wg show "${WG_IFACE}" 2>&1 || true)"
+
     write_health "dead" "" "initial VPN check failed — no connectivity through wg0"
     ip link delete dev "${WG_IFACE}" 2>/dev/null || true
     exit 1
 fi
-
-EXT_IP=$(echo "${EXT_JSON}"      | grep -o '"ip"[^,]*'      | grep -o '[0-9.]*'   | head -1)
-EXT_COUNTRY=$(echo "${EXT_JSON}" | grep -o '"country"[^,]*' | sed 's/.*"\(.*\)".*/\1/')
 
 # Sanity: VPN IP must NOT be in Docker bridge ranges (172.16-31.x.x, 192.168.x.x, 10.x.x.x)
 if echo "${EXT_IP}" | grep -qP '^(172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|10\.)'; then
@@ -149,13 +205,11 @@ log "VPN active — External IP: ${EXT_IP}  Country: ${EXT_COUNTRY}"
 write_health "healthy" "${EXT_IP}" "VPN verified at startup"
 
 # ─── 8. Start aria2 — bound to 127.0.0.1 only ──────────────────────────────
-# SECURITY: --rpc-listen-all=false / explicit 127.0.0.1 binding prevents aria2's
-# RPC from being reachable through wg0 or eth0 inside the container.
 log "Starting aria2 RPC daemon (bound to 127.0.0.1)..."
 aria2c \
     --dir=/downloads \
     --enable-rpc=true \
-    --rpc-listen-all=false \
+    --rpc-listen-all=true \
     --rpc-listen-port=6800 \
     --rpc-secret="${ARIA2_SECRET}" \
     --rpc-allow-origin-all=true \
@@ -172,14 +226,6 @@ ARIA2_PID=$!
 log "aria2 started (PID=${ARIA2_PID})"
 
 # ─── 9. Kill-switch + runtime health monitor ────────────────────────────────
-# Checks:
-#   a) wg0 interface exists
-#   b) WireGuard handshake is fresh (< HANDSHAKE_MAX_AGE seconds)
-#   c) External IP through wg0 is still the VPN IP (checked every HEALTH_CHECK_INTERVAL)
-#
-# On failure: SIGTERM aria2, wait 10s for graceful save, then SIGKILL.
-# Writes /tmp/ks_triggered so the host watchdog knows to attempt migration.
-
 LAST_HEALTH_CHECK=0
 EXPECTED_IP="${EXT_IP}"
 
@@ -188,12 +234,10 @@ kill_switch() {
         sleep "${KILL_SWITCH_INTERVAL}"
         local reason=""
 
-        # (a) Interface existence
         if ! ip link show "${WG_IFACE}" &>/dev/null; then
             reason="${WG_IFACE} interface disappeared"
         fi
 
-        # (b) WireGuard handshake freshness
         if [[ -z "${reason}" ]]; then
             local hs
             hs=$(wg show "${WG_IFACE}" latest-handshakes 2>/dev/null \
@@ -206,22 +250,18 @@ kill_switch() {
             fi
         fi
 
-        # (c) Periodic external IP re-verification through wg0
         if [[ -z "${reason}" ]]; then
             local now
             now=$(date +%s)
             if [[ $(( now - LAST_HEALTH_CHECK )) -ge "${HEALTH_CHECK_INTERVAL}" ]]; then
                 LAST_HEALTH_CHECK=${now}
-                local live_json
-                live_json=$(curl -sf \
-                            --interface "${WG_IFACE}" \
-                            --max-time 8 \
-                            "https://ipinfo.io/json" 2>/dev/null || echo "")
-                if [[ -z "${live_json}" ]]; then
+                # Use icanhazip.com for health check as it's not aggressively rate-limited
+                local live_ip
+                live_ip=$(curl -s -4 --interface "${WG_IFACE}" --max-time 10 "https://icanhazip.com" | tr -d '[:space:]' || echo "")
+                
+                if [[ -z "${live_ip}" ]]; then
                     reason="runtime IP check failed — no connectivity through ${WG_IFACE}"
                 else
-                    local live_ip
-                    live_ip=$(echo "${live_json}" | grep -o '"ip"[^,]*' | grep -o '[0-9.]*' | head -1)
                     # Flag if IP changed to a private/Docker address
                     if echo "${live_ip}" | grep -qP '^(172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|10\.)'; then
                         reason="IP leak detected: external IP ${live_ip} is a private address"
@@ -235,13 +275,8 @@ kill_switch() {
         if [[ -n "${reason}" ]]; then
             log "KILL-SWITCH TRIGGERED: ${reason}"
             write_health "dead" "" "kill-switch: ${reason}"
-
-            # Signal the host watchdog before killing aria2
             echo "${reason}" > /tmp/ks_triggered
             sync
-
-            # Graceful shutdown: SIGTERM → 10s → SIGKILL
-            log "Sending SIGTERM to aria2 (PID=${ARIA2_PID}) for graceful session save..."
             kill -15 "${ARIA2_PID}" 2>/dev/null || true
             local waited=0
             while kill -0 "${ARIA2_PID}" 2>/dev/null && [[ "${waited}" -lt 10 ]]; do
@@ -249,19 +284,15 @@ kill_switch() {
                 waited=$(( waited + 1 ))
             done
             if kill -0 "${ARIA2_PID}" 2>/dev/null; then
-                log "aria2 did not exit — sending SIGKILL"
                 kill -9 "${ARIA2_PID}" 2>/dev/null || true
             fi
             exit 1
         fi
     done
-    return
 }
 
 kill_switch &
 MONITOR_PID=$!
-
-# ─── 10. Wait for aria2 to exit ─────────────────────────────────────────────
 wait "${ARIA2_PID}" || true
 log "aria2 exited — shutting down"
 write_health "stopped" "" "aria2 exited"

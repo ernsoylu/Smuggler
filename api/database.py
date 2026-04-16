@@ -42,7 +42,7 @@ _MIGRATIONS = [
 
 # Default settings
 _DEFAULTS: dict[str, str] = {
-    "download_dir": str(Path(os.getcwd()) / "downloads"),
+    "download_dir": str(Path(os.environ.get("SMG_HOST_ROOT", os.getcwd())) / "downloads"),
     "max_concurrent_downloads": "5",
     "max_download_speed": "0",
     "max_upload_speed": "0",
@@ -59,6 +59,7 @@ def _get_conn() -> sqlite3.Connection:
 
 def init_db() -> None:
     """Create tables if they don't exist, run migrations, and seed defaults."""
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     log.info("init_db: initialising database at %s", DB_PATH)
     conn = _get_conn()
     conn.executescript(_SCHEMA)

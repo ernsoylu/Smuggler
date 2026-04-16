@@ -13,27 +13,36 @@ Isolated torrent downloads inside per-mule Docker containers, each behind its ow
 
 ## Requirements
 
-- Docker
-- Python 3.12+
-- [uv](https://github.com/astral-sh/uv)
-- Node.js 18+ (for the Web UI)
+- Docker + Docker Compose (for the default stack)
 - A WireGuard `.conf` or OpenVPN `.ovpn` file
 
-## First-time setup
+Optional (only needed for the local dev / CLI workflow):
+- Python 3.12+ and [uv](https://github.com/astral-sh/uv)
+- Node.js 18+
 
-Run the automated setup script — it installs all dependencies and builds both Docker images:
+## Quick start — Docker Compose (recommended)
 
-```bash
-./setup.sh
-```
-
-Then start the app:
+The default way to run Smuggler is the Docker Compose stack: a gunicorn-backed API container and an nginx-served React UI.
 
 ```bash
-./start.sh
+./start.sh build    # build both images and start the stack
+./start.sh stop     # stop the stack
+./start.sh prune    # tear down the stack and remove volumes + every lingering mule
 ```
 
-`start.sh` runs pre-flight checks on every launch and will prompt you to run `setup.sh` again if anything is missing.
+Once the stack is up, open <http://localhost:8887>. The UI proxies `/api/*` to the API container over the host network, so mule RPC ports on `localhost` are reachable from the API the same way they are when running bare-metal.
+
+### First-time build
+
+`./start.sh build` will also build the two mule worker images (`smuggler-mule:latest` and `smuggler-mule-ovpn:latest`) on first use via the CLI. To build them up front you can run `./setup.sh`, which installs Python/Node dependencies and builds all four images idempotently — useful when you also want the local CLI (`smg`) workflow.
+
+### Local dev mode
+
+```bash
+./start.sh debug    # starts Vite dev server + python3 main.py concurrently
+```
+
+Use this when iterating on the API or frontend without rebuilding containers.
 
 ## Quick start (CLI)
 
@@ -56,32 +65,35 @@ Downloaded files appear in `./downloads/` on your host machine.
 
 ## Web UI
 
-Start the API and frontend together:
+With the Docker Compose stack: <http://localhost:8887>.
+
+For local development (Vite dev server + Flask dev server):
 
 ```bash
-./start.sh
+./start.sh debug
 ```
 
 Or separately:
 
 ```bash
-# API (port 5000)
+# API (port 5050 via gunicorn)
+python3 main.py
+# or, for the legacy Flask dev server:
 uv run python -m api.run
 
 # Frontend (port 5173)
 cd web && npm install && npm run dev
 ```
 
-Open `http://localhost:5173` in your browser.
-
 ### Web UI pages
 
 | Page | Description |
 |---|---|
-| **Torrents** | Live dashboard — global speed stats, per-torrent progress, add/pause/remove; transfer summary + status distribution chart at the bottom |
-| **Mules** | Manage mule containers — start from uploaded config, stop, kill, view external IP |
+| **Torrents** | Live dashboard — global speed stats, per-torrent progress, add/pause/remove (with optional physical file deletion), peer lists with country flags |
+| **Mules** | Manage mule containers — start from uploaded config, stop, kill, view external IP. Watchdog panel shows compromised mules with one-click evacuation |
 | **Configs** | Upload WireGuard or OpenVPN configs (with optional credential storage); deploy as new mules in one click |
-| **Settings** | Configure download directory, max concurrent downloads, and speed limits |
+| **Settings** | Configure download directory (validated + writability check), max concurrent downloads, and speed limits |
+| **StatusFooter** | Persistent footer: live download/upload speeds, active mule count, expandable panel showing bandwidth history chart + transfer summary (downloaded/uploaded/ratio) + status distribution counts |
 
 ## CLI reference
 
@@ -145,9 +157,21 @@ The Flask API runs on `http://localhost:5000`. All endpoints are prefixed with `
 | `GET` | `/api/torrents/` | List all torrents (all mules) |
 | `GET` | `/api/torrents/<mule>` | List torrents for one mule |
 | `POST` | `/api/torrents/<mule>` | Add magnet or `.torrent` file |
-| `DELETE` | `/api/torrents/<mule>/<gid>` | Remove a torrent |
+| `DELETE` | `/api/torrents/<mule>/<gid>` | Remove a torrent (append `?delete_files=true` to also delete the downloaded files from disk) |
 | `POST` | `/api/torrents/<mule>/<gid>/pause` | Pause a torrent |
 | `POST` | `/api/torrents/<mule>/<gid>/resume` | Resume a torrent |
+| `GET` | `/api/torrents/<mule>/<gid>/peers` | List peers for a torrent (UI adds country flags via GeoJS) |
+| `GET`/`PATCH` | `/api/torrents/<mule>/<gid>/options` | Read/update per-torrent aria2 options |
+| `PATCH` | `/api/torrents/<mule>/<gid>/files` | Update file selection in a multi-file torrent |
+
+### Watchdog
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/watchdog/` | Health of all mules + watchdog stats (interval, sweeps, evacuations) |
+| `GET` | `/api/watchdog/<mule>` | Last known health of a specific mule |
+| `POST` | `/api/watchdog/run` | Trigger an immediate full sweep |
+| `POST` | `/api/watchdog/<mule>/evacuate` | Migrate torrents to healthy mules and kill this one |
 
 ### Stats / Settings / Configs
 
@@ -164,6 +188,13 @@ The Flask API runs on `http://localhost:5000`. All endpoints are prefixed with `
 
 ```
 Smuggler/
+├── docker-compose.yml       # Primary stack: smuggler-api + smuggler-ui
+├── docker/                  # Dockerfiles + nginx config for the stack
+│   ├── Dockerfile.api       # Python 3.11 + gunicorn (--timeout 180 to cover VPN handshake)
+│   ├── Dockerfile.web       # Vite build → nginx static serve + /api reverse proxy
+│   └── nginx.conf           # proxy_*_timeout synced with gunicorn timeout
+├── main.py                  # gunicorn WSGI entry point (imports api.app.create_app)
+├── requirements.txt         # API container deps
 ├── worker_image/            # WireGuard mule image (smuggler-mule:latest)
 │   ├── Dockerfile
 │   └── startup.sh           # wg setup + aria2 start + kill-switch watchdog
@@ -171,37 +202,39 @@ Smuggler/
 │   ├── Dockerfile
 │   └── startup.sh           # openvpn + tun0 wait + aria2 start + kill-switch
 ├── api/                     # Flask REST API
-│   ├── app.py               # App factory
+│   ├── app.py               # App factory; verifies download_dir writability at startup
 │   ├── mules.py             # /api/mules blueprint
-│   ├── torrents.py          # /api/torrents blueprint
+│   ├── torrents.py          # /api/torrents blueprint (incl. optional file deletion)
 │   ├── stats.py             # /api/stats blueprint
-│   ├── settings.py          # /api/settings blueprint
+│   ├── settings.py          # /api/settings blueprint (writability check)
 │   ├── configs.py           # /api/configs blueprint (vpn type detection)
+│   ├── watchdog.py          # /api/watchdog blueprint + background sweep thread
 │   ├── database.py          # SQLite layer (with migration support)
 │   └── settings_sync.py     # Propagate settings to running mules
 ├── cli/                     # Python CLI (smg)
 │   ├── main.py              # Entry point
 │   ├── mule_commands.py     # smg mule subcommands
 │   ├── torrent_commands.py  # smg torrent subcommands
-│   ├── docker_client.py     # Docker SDK wrapper (WireGuard + OpenVPN)
-│   ├── aria2_client.py      # aria2 JSON-RPC client
+│   ├── docker_client.py     # Docker SDK wrapper — mules, VPN probes (icanhazip + ipinfo), evacuation
+│   ├── aria2_client.py      # aria2 JSON-RPC client (incl. remove_download_result)
 │   └── log.py               # Shared logging setup
 ├── web/                     # React/TypeScript Web UI
 │   ├── src/
 │   │   ├── pages/           # TorrentsPage, MulesPage, ConfigsPage, SettingsPage
-│   │   ├── components/      # MuleCard, TorrentRow, StatsBar, SpeedGraph, modals
+│   │   ├── components/      # MuleCard, TorrentRow, StatsBar, SpeedGraph, StatusFooter, DeleteTorrentModal, modals
 │   │   └── api/             # Axios client + TypeScript types
 │   └── package.json
 ├── tests/                   # Unit and integration tests
 ├── downloads/               # Shared downloads volume (mounted into mules)
+├── data/                    # Runtime state — SQLite DB + tmp VPN configs (gitignored; contains private keys)
 ├── logs/                    # Dated log files
 ├── .github/
 │   └── workflows/
 │       ├── python-ci.yml    # Python test matrix (3.12, 3.13) + coverage
 │       └── frontend-ci.yml  # TypeScript type-check + Vite build
-├── setup.sh                 # First-time setup (installs deps + builds images)
-├── start.sh                 # Launch API + frontend with pre-flight checks
-└── .env                     # DVD_LOGGING, DVD_LOG_LEVEL
+├── setup.sh                 # Install deps + build all four Docker images
+├── start.sh                 # docker-compose lifecycle: build | debug | stop | prune
+└── .env                     # DVD_LOGGING, DVD_LOG_LEVEL, SMG_HOST_ROOT
 ```
 
 ## Configuration
@@ -213,13 +246,16 @@ DVD_LOGGING=true
 DVD_LOG_LEVEL=INFO
 ```
 
+When running in Docker Compose, the API container sees the host's project root through `SMG_HOST_ROOT` (wired automatically in `docker-compose.yml`). That is how it resolves the SQLite path (`data/smuggler.db`), downloads directory, and temp VPN config directory to paths that Docker can mount into mule containers.
+
 ## Security notes
 
 - Kill-switch is enforced at the process level: if the VPN interface disappears, aria2 is killed with `SIGKILL` before any traffic leaks.
+- **Host watchdog** (`api/watchdog.py`) sweeps every running mule on an interval (15s) and evacuates any mule that fails three consecutive health checks — migrating its torrents to a healthy mule before killing the compromised one. Health checks probe the external IP through the VPN interface via `icanhazip.com` (primary) with `ipinfo.io` as a fallback, so transient rate limits on one endpoint do not produce false positives.
 - WireGuard: DNS is switched to the VPN nameserver only after connectivity is verified; private keys are never logged or returned through the API.
 - OpenVPN: Credentials are written to a `chmod 600` temp file and deleted from disk immediately after `tun0` comes up. They are allowed to be cached in memory to support hourly TLS key renegotiation without requiring the file on disk.
 - The VPN server endpoint is pinned to the original gateway before routes change, preventing routing loops.
-- `vpn_configs/` and `downloads/` are gitignored — only `.gitkeep` placeholders are committed.
+- `vpn_configs/`, `downloads/`, and `data/` are gitignored — `data/tmp/` contains uploaded VPN configs in plaintext while they are being deployed.
 
 ## Development
 

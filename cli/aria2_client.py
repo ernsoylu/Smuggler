@@ -96,6 +96,14 @@ class Aria2Client:
         log.info("remove: done gid=%s", safe_gid)
         return result
 
+    def remove_download_result(self, gid: str) -> str:
+        """Remove a completed/error/removed download from memory."""
+        safe_gid = log_safe(gid)
+        log.info("remove_download_result: gid=%s", safe_gid)
+        result = self._call("aria2.removeDownloadResult", [gid])
+        log.info("remove_download_result: done gid=%s", safe_gid)
+        return result
+
     def pause(self, gid: str) -> str:
         safe_gid = log_safe(gid)
         log.info("pause: gid=%s", safe_gid)

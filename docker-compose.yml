@@ -1,0 +1,29 @@
+services:
+  smuggler-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: smuggler-api
+    # Use host networking so the API can reach mule RPC ports on localhost
+    # exactly as it did when running bare-metal.
+    network_mode: host
+    environment:
+      - SMG_HOST_ROOT=${PWD}
+      - SMG_DB_PATH=${PWD}/data/smuggler.db
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${PWD}:${PWD}
+    working_dir: ${PWD}
+    restart: unless-stopped
+
+  smuggler-ui:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    container_name: smuggler-ui
+    ports:
+      - "8887:80"
+    # Use extra_hosts so nginx can resolve smuggler-api to the host
+    extra_hosts:
+      - "smuggler-api:host-gateway"
+    restart: unless-stopped

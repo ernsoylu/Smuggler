@@ -140,14 +140,17 @@ def deploy_mule(config_id: int):
     vpn_type = config.get("vpn_type", "wireguard")
     suffix = ".ovpn" if vpn_type == "openvpn" else ".conf"
 
-    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    smg_tmp_dir = Path(os.environ.get("SMG_HOST_ROOT", os.getcwd())) / "data" / "tmp"
+    smg_tmp_dir.mkdir(parents=True, exist_ok=True)
+
+    tmp = tempfile.NamedTemporaryFile(suffix=suffix, dir=smg_tmp_dir, delete=False)
     try:
         tmp.write(config["content"])
         tmp.close()
 
         client = get_docker_client()
         settings = read_settings()
-        downloads_dir = Path(settings.get("download_dir", str(Path(os.getcwd()) / "downloads")))
+        downloads_dir = Path(settings.get("download_dir", str(Path(os.environ.get("SMG_HOST_ROOT", os.getcwd())) / "downloads")))
         downloads_dir.mkdir(parents=True, exist_ok=True)
 
         mule = start_mule(

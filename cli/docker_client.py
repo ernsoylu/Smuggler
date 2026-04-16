@@ -402,13 +402,91 @@ def exec_in_mule(client: docker.DockerClient, name_or_id: str, cmd: str) -> str:
     return output.decode().strip()
 
 
+_PRIVATE_IP_PATTERN = re.compile(
+    r"^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.)"
+)
+_IPV4_PATTERN = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
+
+
+def _probe_icanhazip(container, vpn_iface: str) -> tuple[str | None, str]:
+    """Probe icanhazip.com; return ``(ip, reason_on_failure)``."""
+    try:
+        exit_code, output = container.exec_run(
+            f"curl -sf --interface {vpn_iface} --max-time 8 https://icanhazip.com",
+            demux=False,
+        )
+    except docker.errors.APIError as exc:
+        return None, f"exec error on icanhazip: {exc}"
+
+    if exit_code != 0 or not output:
+        return None, f"icanhazip failed (exit={exit_code})"
+
+    lines = output.decode(errors="replace").strip().splitlines()
+    ip = lines[-1].strip() if lines else ""
+    if _IPV4_PATTERN.match(ip):
+        return ip, ""
+    return None, "icanhazip returned unexpected body"
+
+
+def _probe_ipinfo(container, vpn_iface: str) -> tuple[str | None, str | None, str]:
+    """Probe ipinfo.io; return ``(ip, country, reason_on_failure)``."""
+    try:
+        exit_code, output = container.exec_run(
+            f"curl -sf --interface {vpn_iface} --max-time 8 https://ipinfo.io/json",
+            demux=False,
+        )
+    except docker.errors.APIError as exc:
+        return None, None, f"exec error on ipinfo: {exc}"
+
+    if exit_code != 0 or not output:
+        return None, None, f"ipinfo failed (exit={exit_code})"
+
+    try:
+        info = json.loads(output.decode(errors="replace").strip())
+    except ValueError as exc:
+        return None, None, f"bad JSON from ipinfo: {exc}"
+
+    ip = info.get("ip") or ""
+    if not ip:
+        return None, None, "ipinfo.io returned no IP field"
+    return ip, info.get("country") or None, ""
+
+
+def _probe_vpn_ip(container, vpn_iface: str) -> tuple[str | None, str | None, str]:
+    """
+    Probe the external IP through *vpn_iface*.
+
+    Tries icanhazip.com first (plain text, rarely rate-limited) and only
+    falls back to ipinfo.io for the richer JSON metadata. Either success
+    proves the tunnel is routing traffic.
+
+    Returns ``(ip, country, reason)``. ``ip`` is ``None`` when both probes
+    fail; ``country`` is populated only when ipinfo.io responded.
+    """
+    ip, first_reason = _probe_icanhazip(container, vpn_iface)
+    if ip:
+        return ip, None, f"VPN OK — {ip}"
+
+    ip, country, second_reason = _probe_ipinfo(container, vpn_iface)
+    if not ip:
+        return (
+            None,
+            None,
+            f"{first_reason}; {second_reason} — no connectivity through {vpn_iface}",
+        )
+
+    reason = f"VPN OK — {ip}" + (f" ({country})" if country else "")
+    return ip, country, reason
+
+
 def check_mule_vpn(client: docker.DockerClient, name_or_id: str) -> dict:
     """
     Verify that a running mule's traffic is still exiting through the VPN.
 
-    Runs ``curl --interface <vpn_iface>`` inside the container and checks that:
-      - ipinfo.io responds
-      - The returned IP is not a private/Docker address
+    Runs two probes bound to the VPN interface (icanhazip.com primary,
+    ipinfo.io fallback) and checks that:
+      - at least one probe succeeds
+      - the returned IP is not a private/Docker address
 
     Returns a dict::
 
@@ -434,48 +512,21 @@ def check_mule_vpn(client: docker.DockerClient, name_or_id: str) -> dict:
         }
 
     vpn_iface = "tun0" if mule.vpn_type == "openvpn" else "wg0"
+    ip, country, reason = _probe_vpn_ip(mule.container, vpn_iface)
 
-    try:
-        exit_code, output = mule.container.exec_run(
-            f"curl -sf --interface {vpn_iface} --max-time 8 https://ipinfo.io/json",
-            demux=False,
-        )
-    except docker.errors.APIError as exc:
-        return {"name": mule.name, "healthy": False, "ip": None, "reason": f"exec error: {exc}"}
+    if not ip:
+        return {"name": mule.name, "healthy": False, "ip": None, "reason": reason}
 
-    if exit_code != 0 or not output:
+    if _PRIVATE_IP_PATTERN.match(ip):
         return {
             "name": mule.name,
             "healthy": False,
-            "ip": None,
-            "reason": f"curl failed (exit={exit_code}) — no connectivity through {vpn_iface}",
-        }
-
-    try:
-        info = json.loads(output.decode().strip())
-    except ValueError as exc:
-        return {"name": mule.name, "healthy": False, "ip": None, "reason": f"bad JSON from ipinfo: {exc}"}
-
-    ip = info.get("ip", "")
-    # Private / Docker CIDR ranges
-    private_pattern = re.compile(
-        r"^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.)"
-    )
-    if not ip or private_pattern.match(ip):
-        return {
-            "name": mule.name,
-            "healthy": False,
-            "ip": ip or None,
+            "ip": ip,
             "reason": f"IP leak — external IP '{ip}' is a private/Docker address",
         }
 
-    log.info("check_mule_vpn: mule=%s ip=%s country=%s — healthy", mule.name, ip, info.get("country"))
-    return {
-        "name": mule.name,
-        "healthy": True,
-        "ip": ip,
-        "reason": f"VPN OK — {ip} ({info.get('country', '?')})",
-    }
+    log.info("check_mule_vpn: mule=%s ip=%s country=%s — healthy", mule.name, ip, country or "?")
+    return {"name": mule.name, "healthy": True, "ip": ip, "reason": reason}
 
 
 def _collect_source_downloads(client: docker.DockerClient, source_name: str) -> list[dict]:
