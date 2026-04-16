@@ -41,8 +41,10 @@ export function DeployMuleModal({ onClose, onDeployStart }: Props) {
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
       <div
+        role="presentation"
         className="absolute inset-0 bg-black/60 backdrop-blur-sm"
         onClick={deployingId ? undefined : onClose}
+        onKeyDown={e => !deployingId && e.key === 'Escape' && onClose()}
       />
 
       {/* Modal */}

@@ -30,7 +30,7 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from cli.log import get_logger
+from cli.log import get_logger, log_safe
 from cli.docker_client import (
     get_docker_client,
     list_mules,
@@ -215,8 +215,9 @@ def watchdog_evacuate(mule_name: str):
       ?kill=true   (default) — kill and remove the mule after migration
       ?kill=false  — migrate only, leave container running
     """
+    safe = log_safe(mule_name)
     kill_after = request.args.get("kill", "true").lower() != "false"
-    log.info("POST /api/watchdog/%s/evacuate kill_after=%s", mule_name, kill_after)
+    log.info("POST /api/watchdog/%s/evacuate kill_after=%s", safe, kill_after)
 
     try:
         client = get_docker_client()
@@ -226,7 +227,7 @@ def watchdog_evacuate(mule_name: str):
     try:
         report = evacuate_mule(client, mule_name, kill_after=kill_after)
     except RuntimeError as exc:
-        log.error("POST /api/watchdog/%s/evacuate: error — %s", mule_name, exc)
+        log.error("POST /api/watchdog/%s/evacuate: error — %s", safe, exc)
         return jsonify({"error": str(exc)}), 500
 
     with _lock:

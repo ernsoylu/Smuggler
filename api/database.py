@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from cli.log import get_logger
+from cli.log import get_logger, log_safe
 
 log = get_logger(__name__)
 
@@ -180,7 +180,7 @@ def add_vpn_config(
     conn.commit()
     config_id = cur.lastrowid
     conn.close()
-    log.info("add_vpn_config: id=%d name=%s filename=%s vpn_type=%s", config_id, name, filename, vpn_type)
+    log.info("add_vpn_config: id=%d name=%s filename=%s vpn_type=%s", config_id, log_safe(name), log_safe(filename), vpn_type)
     return config_id
 
 

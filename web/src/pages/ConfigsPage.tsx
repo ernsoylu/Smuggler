@@ -329,15 +329,19 @@ export function ConfigsPage() {
         {/* Row 1: file + name + upload */}
         <div className="flex flex-col sm:flex-row gap-4 items-end">
           <div className="flex-1 w-full group">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">Config File</label>
+            <label htmlFor="config-file-input" className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">Config File</label>
             <div
+              role="button"
+              tabIndex={0}
               className="w-full flex items-center gap-3 bg-neutral-950 hover:bg-neutral-900 border border-white/10 hover:border-emerald-500/50 transition-all rounded-xl px-4 py-3 cursor-pointer ring-4 ring-transparent focus-within:ring-emerald-500/10"
               onClick={() => fileRef.current?.click()}
+              onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && fileRef.current?.click()}
             >
               <div className={`w-8 h-8 rounded-md bg-white/5 flex items-center justify-center transition-colors ${file ? (vpnType === 'openvpn' ? 'text-violet-400' : 'text-emerald-400') : 'text-neutral-400 group-hover:text-emerald-400'}`}>
                 <FileUp size={16} />
               </div>
               <input
+                id="config-file-input"
                 ref={fileRef}
                 type="file"
                 accept=".conf,.ovpn"
@@ -358,10 +362,11 @@ export function ConfigsPage() {
           </div>
 
           <div className="flex-[0.6] w-full">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">
+            <label htmlFor="config-name-input" className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">
               Name <span className="text-neutral-600 font-normal normal-case">(Optional)</span>
             </label>
             <input
+              id="config-name-input"
               type="text"
               placeholder="e.g. US West"
               className="w-full bg-neutral-950 border border-white/10 rounded-xl text-sm text-white px-4 py-3.5 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder:text-neutral-600"
@@ -389,8 +394,9 @@ export function ConfigsPage() {
             </p>
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="flex-1">
-                <label className="block text-xs font-medium text-neutral-400 mb-1.5">Username</label>
+                <label htmlFor="config-ovpn-username" className="block text-xs font-medium text-neutral-400 mb-1.5">Username</label>
                 <input
+                  id="config-ovpn-username"
                   type="text"
                   placeholder="VPN username"
                   autoComplete="off"
@@ -400,9 +406,10 @@ export function ConfigsPage() {
                 />
               </div>
               <div className="flex-1">
-                <label className="block text-xs font-medium text-neutral-400 mb-1.5">Password</label>
+                <label htmlFor="config-ovpn-password" className="block text-xs font-medium text-neutral-400 mb-1.5">Password</label>
                 <div className="relative">
                   <input
+                    id="config-ovpn-password"
                     type={showPassword ? 'text' : 'password'}
                     placeholder="VPN password"
                     autoComplete="new-password"

@@ -80,7 +80,7 @@ class TestListAllTorrents:
         assert len(data) == 1
         assert data[0]["gid"] == "abc123"
         assert data[0]["name"] == "MyMovie.mkv"
-        assert data[0]["progress"] == 50.0
+        assert abs(data[0]["progress"] - 50.0) < 1e-9
 
     def test_returns_empty_when_no_workers(self, client):
         with patch("api.torrents.get_docker_client"), \

@@ -8,7 +8,7 @@ from typing import Any
 
 import requests
 
-from cli.log import get_logger
+from cli.log import get_logger, log_safe
 
 log = get_logger(__name__)
 
@@ -76,7 +76,7 @@ class Aria2Client:
     def add_torrent_file(self, torrent_path: str | Path, options: dict | None = None) -> str:
         """Add a .torrent file; returns the GID."""
         torrent_path = Path(torrent_path)
-        log.info("add_torrent_file: path=%s size=%d bytes options=%s", torrent_path, torrent_path.stat().st_size, options)
+        log.info("add_torrent_file: path=%s size=%d bytes options=%s", log_safe(torrent_path), torrent_path.stat().st_size, options)
         data = torrent_path.read_bytes()
         encoded = base64.b64encode(data).decode()
         params: list[Any] = [encoded]
@@ -90,21 +90,24 @@ class Aria2Client:
 
     def remove(self, gid: str) -> str:
         """Forcefully remove a download (active or waiting)."""
-        log.info("remove: gid=%s", gid)
+        safe_gid = log_safe(gid)
+        log.info("remove: gid=%s", safe_gid)
         result = self._call("aria2.forceRemove", [gid])
-        log.info("remove: done gid=%s", gid)
+        log.info("remove: done gid=%s", safe_gid)
         return result
 
     def pause(self, gid: str) -> str:
-        log.info("pause: gid=%s", gid)
+        safe_gid = log_safe(gid)
+        log.info("pause: gid=%s", safe_gid)
         result = self._call("aria2.pause", [gid])
-        log.info("pause: done gid=%s", gid)
+        log.info("pause: done gid=%s", safe_gid)
         return result
 
     def resume(self, gid: str) -> str:
-        log.info("resume: gid=%s", gid)
+        safe_gid = log_safe(gid)
+        log.info("resume: gid=%s", safe_gid)
         result = self._call("aria2.unpause", [gid])
-        log.info("resume: done gid=%s", gid)
+        log.info("resume: done gid=%s", safe_gid)
         return result
 
     # ─── Status queries ──────────────────────────────────────────────────
@@ -151,7 +154,7 @@ class Aria2Client:
 
     def change_option(self, gid: str, options: dict[str, str]) -> str:
         """Change per-download options. Returns 'OK'."""
-        log.info("change_option: gid=%s options=%s", gid, options)
+        log.info("change_option: gid=%s options=%s", log_safe(gid), options)
         return self._call("aria2.changeOption", [gid, options])
 
     def change_global_option(self, options: dict[str, str]) -> str:

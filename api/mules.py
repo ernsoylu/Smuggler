@@ -9,7 +9,7 @@ from pathlib import Path
 
 from flask import Blueprint, request, jsonify
 
-from cli.log import get_logger
+from cli.log import get_logger, log_safe
 from cli.docker_client import (
     get_docker_client,
     start_mule,
@@ -99,7 +99,7 @@ def create():
 
     file = request.files["vpn_config"]
     name = request.form.get("name") or None
-    log.info("POST /api/mules/: filename=%s name=%s", file.filename, name)
+    log.info("POST /api/mules/: filename=%s name=%s", log_safe(file.filename), log_safe(name))
 
     suffix = Path(file.filename or "wg.conf").suffix or ".conf"
     tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
@@ -118,19 +118,20 @@ def create():
 
         mule = start_mule(client, vpn_config_path=tmp.name, name=name,
                               downloads_dir=downloads_dir)
-        log.info("POST /api/mules/: container started name=%s", mule.name)
+        safe_mname = log_safe(mule.name)
+        log.info("POST /api/mules/: container started name=%s", safe_mname)
 
         # Block until VPN is confirmed
         try:
             ip_info = wait_for_vpn(client, mule.name, timeout=90)
             log.info(
                 "POST /api/mules/: VPN confirmed name=%s ip=%s",
-                mule.name, ip_info.get("ip"),
+                safe_mname, ip_info.get("ip"),
             )
         except RuntimeError as exc:
             log.error(
                 "POST /api/mules/: VPN failed for name=%s — %s",
-                mule.name, exc,
+                safe_mname, exc,
             )
             # Best-effort cleanup
             try:
@@ -138,7 +139,7 @@ def create():
             except RuntimeError as cleanup_exc:
                 log.warning(
                     "POST /api/mules/: cleanup error for name=%s — %s",
-                    mule.name, cleanup_exc,
+                    safe_mname, cleanup_exc,
                 )
             return jsonify({"error": str(exc)}), 502
 
@@ -161,12 +162,13 @@ def create():
 
 @mules_bp.get("/<mule_name>")
 def get_one(mule_name: str):
-    log.info("GET /api/mules/%s", mule_name)
+    safe = log_safe(mule_name)
+    log.info("GET /api/mules/%s", safe)
     client = get_docker_client()
     try:
         w = get_mule(client, mule_name)
     except RuntimeError as exc:
-        log.warning("GET /api/mules/%s: not found — %s", mule_name, exc)
+        log.warning("GET /api/mules/%s: not found — %s", safe, exc)
         return jsonify({"error": str(exc)}), 404
     ip_info = _fetch_ip_info(client, w.name) if w.status == "running" else None
     return jsonify(_serialize(w, ip_info))
@@ -176,15 +178,16 @@ def get_one(mule_name: str):
 
 @mules_bp.delete("/<mule_name>")
 def remove(mule_name: str):
+    safe = log_safe(mule_name)
     keep = request.args.get("keep", "false").lower() == "true"
-    log.info("DELETE /api/mules/%s keep=%s", mule_name, keep)
+    log.info("DELETE /api/mules/%s keep=%s", safe, keep)
     client = get_docker_client()
     try:
         stop_mule(client, mule_name, remove=not keep)
     except RuntimeError as exc:
-        log.warning("DELETE /api/mules/%s: error — %s", mule_name, exc)
+        log.warning("DELETE /api/mules/%s: error — %s", safe, exc)
         return jsonify({"error": str(exc)}), 404
-    log.info("DELETE /api/mules/%s: done", mule_name)
+    log.info("DELETE /api/mules/%s: done", safe)
     return jsonify({"ok": True})
 
 
@@ -192,15 +195,16 @@ def remove(mule_name: str):
 
 @mules_bp.post("/<mule_name>/kill")
 def force_kill(mule_name: str):
+    safe = log_safe(mule_name)
     keep = request.args.get("keep", "false").lower() == "true"
-    log.info("POST /api/mules/%s/kill keep=%s", mule_name, keep)
+    log.info("POST /api/mules/%s/kill keep=%s", safe, keep)
     client = get_docker_client()
     try:
         kill_mule(client, mule_name, remove=not keep)
     except RuntimeError as exc:
-        log.warning("POST /api/mules/%s/kill: error — %s", mule_name, exc)
+        log.warning("POST /api/mules/%s/kill: error — %s", safe, exc)
         return jsonify({"error": str(exc)}), 404
-    log.info("POST /api/mules/%s/kill: done", mule_name)
+    log.info("POST /api/mules/%s/kill: done", safe)
     return jsonify({"ok": True})
 
 
@@ -209,7 +213,7 @@ def force_kill(mule_name: str):
 @mules_bp.get("/<mule_name>/health")
 def vpn_health(mule_name: str):
     """Return live VPN health for a mule (runs check inside container)."""
-    log.info("GET /api/mules/%s/health", mule_name)
+    log.info("GET /api/mules/%s/health", log_safe(mule_name))
     client = get_docker_client()
     result = check_mule_vpn(client, mule_name)
     status_code = 200 if result["healthy"] else 503
@@ -227,13 +231,14 @@ def evacuate(mule_name: str):
     Query params:
       ?kill=false  — migrate but do not remove the source mule
     """
+    safe = log_safe(mule_name)
     kill_after = request.args.get("kill", "true").lower() != "false"
-    log.info("POST /api/mules/%s/evacuate kill_after=%s", mule_name, kill_after)
+    log.info("POST /api/mules/%s/evacuate kill_after=%s", safe, kill_after)
     client = get_docker_client()
     try:
         report = evacuate_mule(client, mule_name, kill_after=kill_after)
     except RuntimeError as exc:
-        log.error("POST /api/mules/%s/evacuate: error — %s", mule_name, exc)
+        log.error("POST /api/mules/%s/evacuate: error — %s", safe, exc)
         return jsonify({"error": str(exc)}), 500
     return jsonify(report)
 
@@ -242,20 +247,21 @@ def evacuate(mule_name: str):
 
 @mules_bp.get("/<mule_name>/ip")
 def get_ip(mule_name: str):
-    log.info("GET /api/mules/%s/ip", mule_name)
+    safe = log_safe(mule_name)
+    log.info("GET /api/mules/%s/ip", safe)
     client = get_docker_client()
     try:
         raw = exec_in_mule(client, mule_name,
                              "curl -sf --max-time 8 https://ipinfo.io/json")
     except RuntimeError as exc:
-        log.error("GET /api/mules/%s/ip: exec error — %s", mule_name, exc)
+        log.error("GET /api/mules/%s/ip: exec error — %s", safe, exc)
         return jsonify({"error": str(exc)}), 400
 
     try:
         info = json.loads(raw)
         info.pop("readme", None)
-        log.info("GET /api/mules/%s/ip: ip=%s", mule_name, info.get("ip"))
+        log.info("GET /api/mules/%s/ip: ip=%s", safe, info.get("ip"))
         return jsonify(info)
     except (json.JSONDecodeError, ValueError):
-        log.error("GET /api/mules/%s/ip: unexpected response — %r", mule_name, raw)
+        log.error("GET /api/mules/%s/ip: unexpected response — %r", safe, raw)
         return jsonify({"error": "Unexpected response from ipinfo.io", "raw": raw}), 502

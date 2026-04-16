@@ -82,3 +82,8 @@ def get_logger(name: str) -> logging.Logger:
 def log_file_path() -> Path | None:
     """Return the active log file path, or None if logging is disabled."""
     return _LOG_FILE if _ENABLED else None
+
+
+def log_safe(value: object) -> str:
+    """Strip CR/LF from a value before logging to prevent log injection (S5145)."""
+    return str(value).replace('\r', '').replace('\n', '')

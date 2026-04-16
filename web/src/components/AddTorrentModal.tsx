@@ -45,9 +45,11 @@ export function AddTorrentModal({ onClose }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
-      <div 
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity" 
+      <div
+        role="presentation"
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
         onClick={onClose}
+        onKeyDown={e => e.key === 'Escape' && onClose()}
       />
       
       {/* Modal */}
@@ -84,8 +86,9 @@ export function AddTorrentModal({ onClose }: Props) {
         <div className="flex flex-col gap-2">
           {mode === 'magnet' ? (
             <>
-              <label className="text-sm font-medium text-neutral-400">Magnet URI</label>
+              <label htmlFor="add-torrent-magnet" className="text-sm font-medium text-neutral-400">Magnet URI</label>
               <textarea
+                id="add-torrent-magnet"
                 className="w-full bg-neutral-950 border border-white/10 rounded-xl text-sm text-neutral-200 p-4 font-mono resize-none focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-neutral-600"
                 rows={4}
                 placeholder="magnet:?xt=urn:btih:..."
@@ -95,15 +98,19 @@ export function AddTorrentModal({ onClose }: Props) {
             </>
           ) : (
             <>
-              <label className="text-sm font-medium text-neutral-400">Torrent File</label>
+              <label htmlFor="add-torrent-file" className="text-sm font-medium text-neutral-400">Torrent File</label>
               <div
+                role="button"
+                tabIndex={0}
                 className="w-full border-2 border-dashed border-white/10 hover:border-blue-500/50 hover:bg-blue-500/5 bg-neutral-950/50 rounded-xl p-8 text-center cursor-pointer transition-all flex flex-col items-center gap-3"
                 onClick={() => fileRef.current?.click()}
+                onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && fileRef.current?.click()}
               >
                 <div className="w-12 h-12 rounded-full bg-neutral-900 border border-white/5 flex items-center justify-center text-neutral-400">
                    <UploadCloud size={24} />
                 </div>
                 <input
+                  id="add-torrent-file"
                   ref={fileRef}
                   type="file"
                   accept=".torrent"
@@ -122,9 +129,10 @@ export function AddTorrentModal({ onClose }: Props) {
 
         {/* Worker selector */}
         <div className="flex flex-col gap-2">
-          <label className="text-sm font-medium text-neutral-400">Routing Mule</label>
+          <label htmlFor="add-torrent-mule" className="text-sm font-medium text-neutral-400">Routing Mule</label>
           <div className="relative">
             <select
+              id="add-torrent-mule"
               className="w-full appearance-none bg-neutral-950 border border-white/10 rounded-xl text-sm text-neutral-200 p-3.5 pr-10 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-medium"
               value={worker}
               onChange={e => { setWorker(e.target.value); setError(''); }}

@@ -9,7 +9,7 @@ from pathlib import Path
 from flask import Blueprint, request, jsonify
 
 from api.database import list_vpn_configs, get_vpn_config, add_vpn_config, delete_vpn_config
-from cli.log import get_logger
+from cli.log import get_logger, log_safe
 from cli.docker_client import (
     get_docker_client,
     start_mule,
@@ -92,7 +92,7 @@ def upload_config():
     )
     log.info(
         "POST /api/configs/: created id=%d name=%s vpn_type=%s requires_auth=%s",
-        config_id, name, vpn_type, requires_auth,
+        config_id, log_safe(name), vpn_type, requires_auth,
     )
 
     return jsonify({

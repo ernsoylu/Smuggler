@@ -73,9 +73,10 @@ export function SettingsPage() {
           ) : (
             <div className="space-y-5">
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">Download Directory</label>
+                <label htmlFor="setting-dl-dir" className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">Download Directory</label>
                 <p className="text-xs text-neutral-500 mb-2">Absolute path where torrents are saved. Each torrent gets its own subfolder.</p>
                 <input
+                  id="setting-dl-dir"
                   type="text"
                   placeholder="/path/to/downloads"
                   className="w-full bg-neutral-950 border border-white/10 rounded-xl text-sm text-white px-4 py-3 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-all placeholder:text-neutral-600 font-mono"
@@ -84,11 +85,12 @@ export function SettingsPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">
+                <label htmlFor="setting-max-concurrent" className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">
                   <span className="flex items-center gap-1.5"><Gauge size={12} /> Max Simultaneous Downloads</span>
                 </label>
                 <p className="text-xs text-neutral-500 mb-2">Maximum number of active torrents downloading at once per mule.</p>
                 <input
+                  id="setting-max-concurrent"
                   type="number"
                   min="1"
                   max="100"
@@ -111,12 +113,13 @@ export function SettingsPage() {
           {!isLoading && (
             <div className="space-y-5">
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">
+                <label htmlFor="setting-max-dl-speed" className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">
                   <span className="flex items-center gap-1.5"><ArrowDownToLine size={12} /> Max Download Speed</span>
                 </label>
                 <p className="text-xs text-neutral-500 mb-2">Global download rate limit in bytes/sec. Set to <code className="text-neutral-400 bg-neutral-800 px-1 py-0.5 rounded">0</code> for unlimited.</p>
                 <div className="flex items-center gap-3">
                   <input
+                    id="setting-max-dl-speed"
                     type="number"
                     min="0"
                     className="flex-1 bg-neutral-950 border border-white/10 rounded-xl text-sm text-white px-4 py-3 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono"
@@ -127,12 +130,13 @@ export function SettingsPage() {
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">
+                <label htmlFor="setting-max-ul-speed" className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">
                   <span className="flex items-center gap-1.5"><ArrowUpFromLine size={12} /> Max Upload Speed</span>
                 </label>
                 <p className="text-xs text-neutral-500 mb-2">Global upload rate limit in bytes/sec. Set to <code className="text-neutral-400 bg-neutral-800 px-1 py-0.5 rounded">0</code> for unlimited.</p>
                 <div className="flex items-center gap-3">
                   <input
+                    id="setting-max-ul-speed"
                     type="number"
                     min="0"
                     className="flex-1 bg-neutral-950 border border-white/10 rounded-xl text-sm text-white px-4 py-3 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono"

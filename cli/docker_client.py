@@ -14,7 +14,7 @@ import docker
 import docker.errors
 import docker.models.containers
 
-from cli.log import get_logger
+from cli.log import get_logger, log_safe
 
 log = get_logger(__name__)
 
@@ -91,7 +91,7 @@ def start_mule(
       - Only requires NET_ADMIN capability
     """
     vpn_config_path = Path(vpn_config_path).resolve()
-    log.info("start_mule: vpn_config=%s name=%s vpn_type=%s", vpn_config_path, name, vpn_type)
+    log.info("start_mule: vpn_config=%s name=%s vpn_type=%s", vpn_config_path, log_safe(name), vpn_type)
 
     if not vpn_config_path.exists():
         log.error("start_mule: VPN config not found: %s", vpn_config_path)
@@ -106,7 +106,7 @@ def start_mule(
     host_port = _find_free_port()
     worker_name = name or f"smuggler-mule-{secrets.token_hex(4)}"
 
-    log.info("start_mule: launching container name=%s host_port=%d", worker_name, host_port)
+    log.info("start_mule: launching container name=%s host_port=%d", log_safe(worker_name), host_port)
 
     if vpn_type == "openvpn":
         image = MULE_IMAGE_OVPN
@@ -167,7 +167,7 @@ def start_mule(
         log.error("start_mule: Docker API error — %s", exc)
         raise RuntimeError(f"Docker API error while starting mule: {exc}") from exc
 
-    log.info("start_mule: container started id=%s name=%s", container.short_id, worker_name)
+    log.info("start_mule: container started id=%s name=%s", container.short_id, log_safe(worker_name))
     return MuleInfo(container)
 
 
@@ -296,46 +296,49 @@ def list_mules(client: docker.DockerClient) -> list[MuleInfo]:
 
 def get_mule(client: docker.DockerClient, name_or_id: str) -> MuleInfo:
     """Fetch a single mule by name or ID; raises RuntimeError if not found."""
-    log.debug("get_mule: looking up mule=%s", name_or_id)
+    safe = log_safe(name_or_id)
+    log.debug("get_mule: looking up mule=%s", safe)
     try:
         container = client.containers.get(name_or_id)
     except docker.errors.NotFound:
-        log.warning("get_mule: not found — %s", name_or_id)
+        log.warning("get_mule: not found — %s", safe)
         raise RuntimeError(f"Mule not found: '{name_or_id}'")
     if MULE_LABEL not in (container.labels or {}):
-        log.warning("get_mule: container '%s' is not a smuggler mule", name_or_id)
+        log.warning("get_mule: container '%s' is not a smuggler mule", safe)
         raise RuntimeError(f"Container '{name_or_id}' is not a smuggler mule")
     return MuleInfo(container)
 
 
 def stop_mule(client: docker.DockerClient, name_or_id: str, remove: bool = True) -> None:
     """Gracefully stop (SIGTERM + wait) and optionally remove a mule container."""
-    log.info("stop_mule: mule=%s remove=%s", name_or_id, remove)
+    safe = log_safe(name_or_id)
+    log.info("stop_mule: mule=%s remove=%s", safe, remove)
     mule = get_mule(client, name_or_id)
     try:
         mule.container.stop(timeout=10)
-        log.info("stop_mule: stopped mule=%s", name_or_id)
+        log.info("stop_mule: stopped mule=%s", safe)
         if remove:
             mule.container.remove()
-            log.info("stop_mule: removed mule=%s", name_or_id)
+            log.info("stop_mule: removed mule=%s", safe)
     except docker.errors.APIError as exc:
-        log.error("stop_mule: failed for mule=%s — %s", name_or_id, exc)
+        log.error("stop_mule: failed for mule=%s — %s", safe, exc)
         raise RuntimeError(f"Failed to stop mule '{name_or_id}': {exc}") from exc
 
 
 def kill_mule(client: docker.DockerClient, name_or_id: str, remove: bool = True) -> None:
     """Immediately kill (SIGKILL) and optionally remove a mule container."""
-    log.info("kill_mule: mule=%s remove=%s", name_or_id, remove)
+    safe = log_safe(name_or_id)
+    log.info("kill_mule: mule=%s remove=%s", safe, remove)
     mule = get_mule(client, name_or_id)
     try:
         if mule.container.status == "running":
             mule.container.kill()
-            log.info("kill_mule: killed mule=%s", name_or_id)
+            log.info("kill_mule: killed mule=%s", safe)
         if remove:
             mule.container.remove()
-            log.info("kill_mule: removed mule=%s", name_or_id)
+            log.info("kill_mule: removed mule=%s", safe)
     except docker.errors.APIError as exc:
-        log.error("kill_mule: failed for mule=%s — %s", name_or_id, exc)
+        log.error("kill_mule: failed for mule=%s — %s", safe, exc)
         raise RuntimeError(f"Failed to kill mule '{name_or_id}': {exc}") from exc
 
 
@@ -382,7 +385,7 @@ def exec_in_mule(client: docker.DockerClient, name_or_id: str, cmd: str) -> str:
     try:
         exit_code, output = mule.container.exec_run(cmd, demux=False)
     except docker.errors.APIError as exc:
-        log.error("exec_in_mule: API error — mule=%s cmd=%r exc=%s", name_or_id, cmd, exc)
+        log.error("exec_in_mule: API error — mule=%s cmd=%r exc=%s", log_safe(name_or_id), cmd, exc)
         raise RuntimeError(f"exec failed in '{name_or_id}': {exc}") from exc
     if exit_code != 0:
         decoded = output.decode() if output else ""
@@ -543,7 +546,7 @@ def evacuate_mule(
           "killed":    bool,
         }
     """
-    log.info("evacuate_mule: starting evacuation source=%s kill_after=%s", source_name, kill_after)
+    log.info("evacuate_mule: starting evacuation source=%s kill_after=%s", log_safe(source_name), kill_after)
 
     report: dict = {"migrated": [], "skipped": [], "no_targets": False, "killed": False}
 
