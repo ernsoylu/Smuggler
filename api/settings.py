@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import os
+import re
 from flask import Blueprint, request, jsonify
 
 from api.database import get_all_settings, update_settings, get_setting
@@ -11,6 +12,9 @@ from cli.log import get_logger, log_safe
 
 log = get_logger(__name__)
 settings_bp = Blueprint("settings", __name__, url_prefix="/api/settings")
+
+# Validates an absolute Unix path with no null bytes (used for S6549 path sanitization)
+_ABS_PATH_RE = re.compile(r'^/[^\x00]*$')
 
 
 def read_settings() -> dict:
@@ -29,12 +33,12 @@ def save_settings_endpoint():
     data = request.get_json(silent=True) or {}
     log.info("POST /api/settings/ keys=%s", list(data.keys()))
 
-    # Resolve download_dir to clean absolute path; reject null bytes first (S6549)
+    # Validate and normalize download_dir (S6549: prevent path traversal)
     if "download_dir" in data and data["download_dir"]:
-        raw = str(data["download_dir"])
-        if "\x00" in raw:
-            return jsonify({"error": "Invalid path"}), 400
-        data["download_dir"] = str(Path(raw).resolve())
+        raw = str(data["download_dir"]).strip()
+        if not _ABS_PATH_RE.match(raw) or ".." in raw.split("/"):
+            return jsonify({"error": "Download directory must be an absolute path without traversal sequences"}), 400
+        data["download_dir"] = os.path.normpath(raw)
 
     result = update_settings(data)
     # Sync to running Mules

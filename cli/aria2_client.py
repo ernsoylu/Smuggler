@@ -76,7 +76,7 @@ class Aria2Client:
     def add_torrent_file(self, torrent_path: str | Path, options: dict | None = None) -> str:
         """Add a .torrent file; returns the GID."""
         torrent_path = Path(torrent_path)
-        log.info("add_torrent_file: path=%s size=%d bytes options=%s", log_safe(torrent_path), torrent_path.stat().st_size, options)
+        log.info("add_torrent_file: path=%s size=%d bytes options=%s", log_safe(torrent_path), torrent_path.stat().st_size, log_safe(options))
         data = torrent_path.read_bytes()
         encoded = base64.b64encode(data).decode()
         params: list[Any] = [encoded]
