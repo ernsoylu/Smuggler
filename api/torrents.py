@@ -25,11 +25,36 @@ def _aria2_for(mule_name: str) -> Aria2Client:
     return Aria2Client(host="localhost", port=w.rpc_port, token=w.rpc_token)
 
 
+def _serialize_files(dl: dict) -> list[dict]:
+    files = []
+    for f in dl.get("files", []):
+        f_path = f.get("path", "")
+        f_total = int(f.get("length", 0))
+        f_comp = int(f.get("completedLength", 0))
+        files.append({
+            "index": int(f.get("index", 1)),
+            "path": f_path,
+            "name": Path(f_path).name if f_path else "—",
+            "total_length": f_total,
+            "completed_length": f_comp,
+            "progress": round(f_comp / f_total * 100, 1) if f_total > 0 else 0.0,
+            "selected": f.get("selected", "true") == "true",
+        })
+    return files
+
+
+def _extract_tracker(bt: dict) -> str:
+    announce_list = bt.get("announceList", [])
+    if not announce_list or not announce_list[0]:
+        return ""
+    first = announce_list[0]
+    return first[0] if isinstance(first, list) else str(first)
+
+
 def _serialize_download(dl: dict, mule_name: str) -> dict:
     completed = int(dl.get("completedLength", 0))
     total = int(dl.get("totalLength", 0))
     uploaded = int(dl.get("uploadLength", 0))
-    progress = round(completed / total * 100, 1) if total > 0 else 0.0
     dl_speed = int(dl.get("downloadSpeed", 0))
     bt = dl.get("bittorrent", {})
     name = (
@@ -37,38 +62,9 @@ def _serialize_download(dl: dict, mule_name: str) -> dict:
         or (dl.get("files") or [{}])[0].get("path", "")
     )
 
-    # ETA calculation (seconds remaining)
-    eta = -1
     remaining = total - completed
-    if dl_speed > 0 and remaining > 0:
-        eta = int(remaining / dl_speed)
-
-    # Ratio
+    eta = int(remaining / dl_speed) if dl_speed > 0 and remaining > 0 else -1
     ratio = round(uploaded / completed, 3) if completed > 0 else 0.0
-
-    # Tracker — first announce URL
-    announce_list = bt.get("announceList", [])
-    tracker = ""
-    if announce_list and announce_list[0]:
-        tracker = announce_list[0][0] if isinstance(announce_list[0], list) else str(announce_list[0])
-    
-    files = []
-    for f in dl.get("files", []):
-        f_path = f.get("path", "")
-        # Remove base directory prefix if it exists to make names cleaner
-        file_name = Path(f_path).name if f_path else "—"
-        f_total = int(f.get("length", 0))
-        f_comp = int(f.get("completedLength", 0))
-        
-        files.append({
-            "index": int(f.get("index", 1)),
-            "path": f_path,
-            "name": file_name,
-            "total_length": f_total,
-            "completed_length": f_comp,
-            "progress": round(f_comp / f_total * 100, 1) if f_total > 0 else 0.0,
-            "selected": f.get("selected", "true") == "true"
-        })
 
     return {
         "gid": dl.get("gid", ""),
@@ -80,7 +76,7 @@ def _serialize_download(dl: dict, mule_name: str) -> dict:
         "uploaded_length": uploaded,
         "download_speed": dl_speed,
         "upload_speed": int(dl.get("uploadSpeed", 0)),
-        "progress": progress,
+        "progress": round(completed / total * 100, 1) if total > 0 else 0.0,
         "num_seeders": int(dl.get("numSeeders", 0)),
         "connections": int(dl.get("connections", 0)),
         "info_hash": dl.get("infoHash", ""),
@@ -90,14 +86,14 @@ def _serialize_download(dl: dict, mule_name: str) -> dict:
         "num_pieces": int(dl.get("numPieces", 0)),
         "eta": eta,
         "ratio": ratio,
-        "tracker": tracker,
+        "tracker": _extract_tracker(bt),
         "comment": bt.get("comment", ""),
         "creation_date": int(bt.get("creationDate", 0)),
         "mode": bt.get("mode", ""),
         "error_code": dl.get("errorCode", ""),
         "error_message": dl.get("errorMessage", ""),
-        "files": files,
-        "is_metadata": dl.get("followedBy") is not None or "[METADATA]" in str(name)
+        "files": _serialize_files(dl),
+        "is_metadata": dl.get("followedBy") is not None or "[METADATA]" in str(name),
     }
 
 
@@ -152,16 +148,61 @@ def list_for_mule(mule_name: str):
         return jsonify({"error": str(exc)}), 502
 
 
+def _add_magnet(aria2: Aria2Client, mule_name: str):
+    import urllib.parse as _up
+    data = request.get_json(silent=True) or {}
+    magnet = data.get("magnet", "").strip()
+    if not magnet:
+        log.warning("POST /api/torrents/%s: missing magnet field", mule_name)
+        return jsonify({"error": "magnet URI is required in JSON body"}), 400
+    options: dict = {}
+    try:
+        qs = _up.parse_qs(_up.urlparse(magnet).query)
+        dn = (qs.get("dn", [None])[0] or "").strip()
+    except Exception:
+        dn = ""
+    if dn:
+        options["dir"] = f"/downloads/{dn.replace('/', '_')}"
+    log.info("POST /api/torrents/%s: adding magnet uri=%s", mule_name, magnet[:80])
+    try:
+        gid = aria2.add_magnet(magnet, options=options or None)
+        log.info("POST /api/torrents/%s: magnet added gid=%s", mule_name, gid)
+        return jsonify({"gid": gid}), 201
+    except Aria2Error as exc:
+        log.error("POST /api/torrents/%s: aria2 error adding magnet — %s", mule_name, exc)
+        return jsonify({"error": str(exc)}), 502
+
+
+def _add_torrent_file(aria2: Aria2Client, mule_name: str):
+    file = request.files["torrent_file"]
+    log.info("POST /api/torrents/%s: adding torrent file=%s", mule_name, file.filename)
+    tmp = tempfile.NamedTemporaryFile(suffix=".torrent", delete=False)
+    tmp.close()
+    try:
+        file.save(tmp.name)
+        options: dict = {}
+        if file.filename:
+            base_name = Path(file.filename).stem.strip().replace("/", "_")
+            if base_name:
+                options["dir"] = f"/downloads/{base_name}"
+        gid = aria2.add_torrent_file(tmp.name, options=options or None)
+        log.info("POST /api/torrents/%s: torrent file added gid=%s", mule_name, gid)
+        return jsonify({"gid": gid}), 201
+    except Aria2Error as exc:
+        log.error("POST /api/torrents/%s: aria2 error adding torrent file — %s", mule_name, exc)
+        return jsonify({"error": str(exc)}), 502
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+
 # ─── POST /api/torrents/<mule> ─────────────────────────────────────────────
 
 @torrents_bp.post("/<mule_name>")
 def add(mule_name: str):
-    """
-    Add a torrent to a mule.
-
-    JSON body:    { "magnet": "magnet:?xt=..." }
-    Multipart:    torrent_file (file field)
-    """
+    """Add a torrent to a mule. JSON body: { "magnet": "..." } or multipart torrent_file."""
     log.info("POST /api/torrents/%s content_type=%s", mule_name, request.content_type)
     try:
         aria2 = _aria2_for(mule_name)
@@ -169,72 +210,10 @@ def add(mule_name: str):
         log.warning("POST /api/torrents/%s: mule error — %s", mule_name, exc)
         return jsonify({"error": str(exc)}), 404
 
-    # ── magnet via JSON ───────────────────────────────────────────────────────
     if request.is_json:
-        data = request.get_json(silent=True) or {}
-        magnet = data.get("magnet", "").strip()
-        if not magnet:
-            log.warning("POST /api/torrents/%s: missing magnet field", mule_name)
-            return jsonify({"error": "magnet URI is required in JSON body"}), 400
-
-        # Parse magnet URI to extract display name (dn=) for per-torrent subdir
-        import urllib.parse as _up
-        options: dict = {}
-        try:
-            qs = _up.parse_qs(_up.urlparse(magnet).query)
-            dn_vals = qs.get("dn", [])
-            dn = dn_vals[0].strip() if dn_vals else ""
-        except Exception:
-            dn = ""
-        if dn:
-            safe_name = dn.replace("/", "_")
-            options["dir"] = f"/downloads/{safe_name}"
-            log.info("POST /api/torrents/%s: magnet dir=%s", mule_name, options["dir"])
-
-        log.info("POST /api/torrents/%s: adding magnet uri=%s", mule_name, magnet[:80])
-        try:
-            gid = aria2.add_magnet(magnet, options=options or None)
-            log.info("POST /api/torrents/%s: magnet added gid=%s", mule_name, gid)
-            return jsonify({"gid": gid}), 201
-        except Aria2Error as exc:
-            log.error("POST /api/torrents/%s: aria2 error adding magnet — %s", mule_name, exc)
-            return jsonify({"error": str(exc)}), 502
-
-    # ── .torrent file upload ──────────────────────────────────────────────────
+        return _add_magnet(aria2, mule_name)
     if "torrent_file" in request.files:
-        file = request.files["torrent_file"]
-        log.info("POST /api/torrents/%s: adding torrent file=%s", mule_name, file.filename)
-        tmp = tempfile.NamedTemporaryFile(suffix=".torrent", delete=False)
-        tmp.close()  # close handle so file.save() can write to the path cleanly
-        try:
-            file.save(tmp.name)
-            log.debug(
-                "POST /api/torrents/%s: saved torrent file to tmp=%s size=%d",
-                mule_name, tmp.name, Path(tmp.name).stat().st_size,
-            )
-
-            # Derive folder name from the uploaded filename
-            options = {}
-            if file.filename:
-                base_name = Path(file.filename).stem.strip().replace("/", "_")
-                if base_name:
-                    options["dir"] = f"/downloads/{base_name}"
-                    log.info("POST /api/torrents/%s: torrent file dir=%s", mule_name, options["dir"])
-
-            gid = aria2.add_torrent_file(tmp.name, options=options or None)
-            log.info("POST /api/torrents/%s: torrent file added gid=%s", mule_name, gid)
-            return jsonify({"gid": gid}), 201
-        except Aria2Error as exc:
-            log.error(
-                "POST /api/torrents/%s: aria2 error adding torrent file — %s",
-                mule_name, exc,
-            )
-            return jsonify({"error": str(exc)}), 502
-        finally:
-            try:
-                os.unlink(tmp.name)
-            except OSError:
-                pass
+        return _add_torrent_file(aria2, mule_name)
 
     log.warning("POST /api/torrents/%s: no magnet or torrent_file provided", mule_name)
     return jsonify({"error": "Provide a JSON body with 'magnet' or a 'torrent_file' upload"}), 400
