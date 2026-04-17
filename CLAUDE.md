@@ -20,6 +20,7 @@
 - **Dev:** `./start.sh debug`
 - **Test:** `uv run pytest tests/`
 - **CLI:** `uv run smg`
+- **Push:** Following the [Git & Quality Workflow](SKILLS.md#git--quality-workflow)
 
 ## Directory Structure
 - `api/`: Flask blueprints, database, watchdog logic.

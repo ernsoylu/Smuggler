@@ -81,3 +81,26 @@ Run via `uv`:
 uv run smg --help
 ```
 Commands are defined in `cli/mule_commands.py` and `cli/torrent_commands.py`.
+
+---
+
+## Git & Quality Workflow
+
+### Commit, Analyze, and Push
+All changes must pass local tests and SonarQube analysis before being pushed to the remote repository.
+
+1.  **Stage all changes:**
+    ```bash
+    git add .
+    ```
+2.  **Commit with a descriptive message:**
+    ```bash
+    git commit -m "Your description of changes"
+    ```
+3.  **Run Quality Analysis:**
+    *   **Local Tests:** `uv run pytest tests/`
+    *   **SonarQube Scan:** Run the SonarQube scanner (e.g., via the SonarQube MCP `sonar_scanner` tool or local `sonar-scanner` command). Ensure there are no **BLOCKERS**.
+4.  **Push to remote:**
+    ```bash
+    git push origin main
+    ```
