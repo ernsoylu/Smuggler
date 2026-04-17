@@ -1,9 +1,10 @@
-import { useState, useEffect, type ReactNode } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getMules, getWatchdogStatus, triggerWatchdogSweep, evacuateMule } from '../api/client';
 import type { WatchdogStatus } from '../api/types';
 import { WorkerCard } from '../components/MuleCard';
 import { DeployMuleModal } from '../components/DeployMuleModal';
+import { useNotifications } from '../context/NotificationContext';
 import { ShieldCheck, Rocket, Shield, ShieldAlert, ShieldOff, RefreshCw, LogOut } from 'lucide-react';
 
 type DeployStage = 'STARTING' | 'CONFIGURING' | 'CONNECTING' | 'DEPLOYED';
@@ -13,6 +14,7 @@ interface DeployingMule {
   configName: string;
   stage: DeployStage;
   startedAt: number;
+  notificationId: string;
 }
 
 const STAGE_ORDER: DeployStage[] = ['STARTING', 'CONFIGURING', 'CONNECTING', 'DEPLOYED'];
@@ -23,11 +25,11 @@ const STAGE_TIMINGS: Record<DeployStage, number> = {
   DEPLOYED: 0, // set by API completion
 };
 
-const STAGE_COLORS: Record<DeployStage, { bg: string; text: string; ring: string }> = {
-  STARTING:     { bg: 'bg-amber-500/10',   text: 'text-amber-400',   ring: 'ring-amber-500/20' },
-  CONFIGURING:  { bg: 'bg-orange-500/10',  text: 'text-orange-400',  ring: 'ring-orange-500/20' },
-  CONNECTING:   { bg: 'bg-blue-500/10',    text: 'text-blue-400',    ring: 'ring-blue-500/20' },
-  DEPLOYED:     { bg: 'bg-emerald-500/10', text: 'text-emerald-400', ring: 'ring-emerald-500/20' },
+const STAGE_MESSAGES: Record<DeployStage, string> = {
+  STARTING:    'Starting VPN mule…',
+  CONFIGURING: 'Configuring VPN tunnel…',
+  CONNECTING:  'Establishing VPN connection…',
+  DEPLOYED:    'Mule is live and VPN is connected.',
 };
 
 function stepWorkersPageStages(prev: DeployingMule[]): DeployingMule[] {
@@ -149,6 +151,9 @@ function WatchdogPanel({ watchdog }: Readonly<{ watchdog: WatchdogStatus | undef
 export function WorkersPage() {
   const [showModal, setShowModal] = useState(false);
   const [deployingMules, setDeployingMules] = useState<DeployingMule[]>([]);
+  const { push: pushNotification, update: updateNotification } = useNotifications();
+  const prevUnhealthyRef = useRef<Set<string>>(new Set());
+  const prevDeployingRef = useRef<DeployingMule[]>([]);
 
   const { data: workers = [], isLoading } = useQuery({
     queryKey: ['workers'],
@@ -171,39 +176,49 @@ export function WorkersPage() {
     return () => clearInterval(timer);
   }, [deployingMules.length]);
 
-  // When actual workers appear, clean up deploying placeholders
+  // Update notification progress when a mule advances to a new stage
   useEffect(() => {
-    if (deployingMules.length === 0) return;
-    setDeployingMules(prev =>
-      prev.filter(m => {
-        if (m.stage === 'DEPLOYED') {
-          return Date.now() - m.startedAt < 95000;
-        }
-        return true;
-      })
-    );
-  }, [workers, deployingMules.length]);
+    const prev = prevDeployingRef.current;
+    for (const m of deployingMules) {
+      const prevMule = prev.find(p => p.id === m.id);
+      if (!prevMule || prevMule.stage !== m.stage) {
+        const stageIdx = STAGE_ORDER.indexOf(m.stage);
+        updateNotification(m.notificationId, {
+          message: STAGE_MESSAGES[m.stage],
+          progress: { current: stageIdx, total: STAGE_ORDER.length, label: m.stage },
+        });
+      }
+    }
+    prevDeployingRef.current = deployingMules;
+  }, [deployingMules, updateNotification]);
 
-  const handleDeployStart = (configName: string) => {
+  // Notify when watchdog detects newly compromised mules
+  useEffect(() => {
+    if (!watchdog) return;
+    const unhealthy = watchdog.mules.filter(m => !m.healthy);
+    const prev = prevUnhealthyRef.current;
+    for (const m of unhealthy) {
+      if (!prev.has(m.name)) {
+        pushNotification({ type: 'warning', title: `VPN compromised: ${m.name}`, message: m.reason ?? 'Watchdog detected an issue.' });
+      }
+    }
+    prevUnhealthyRef.current = new Set(unhealthy.map(m => m.name));
+  }, [watchdog, pushNotification]);
+
+  const handleDeployStart = (configName: string, notificationId: string) => {
     const newMule: DeployingMule = {
       id: `deploying-${Date.now()}`,
       configName,
       stage: 'STARTING',
       startedAt: Date.now(),
+      notificationId,
     };
     setDeployingMules(prev => [...prev, newMule]);
   };
 
   const handleModalClose = () => {
     setShowModal(false);
-    // Mark any remaining deploying mules as DEPLOYED when modal closes (API returned success)
-    setDeployingMules(prev =>
-      prev.map(m => m.stage === 'DEPLOYED' ? m : { ...m, stage: 'DEPLOYED' as DeployStage })
-    );
-    // Clean them up after 3 seconds
-    setTimeout(() => {
-      setDeployingMules([]);
-    }, 3000);
+    setDeployingMules([]);
   };
 
   return (
@@ -221,88 +236,6 @@ export function WorkersPage() {
         </button>
       </div>
 
-      {/* Deploying mules progress cards */}
-      {deployingMules.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-8">
-          {deployingMules.map(m => {
-            const sc = STAGE_COLORS[m.stage];
-            const stageIdx = STAGE_ORDER.indexOf(m.stage);
-            const progressPct = ((stageIdx + 1) / STAGE_ORDER.length) * 100;
-
-            return (
-              <div
-                key={m.id}
-                className="bg-neutral-900/40 backdrop-blur-sm border border-white/5 shadow-xl rounded-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-300"
-              >
-                {/* Header */}
-                <div className="p-5 border-b border-white/5 bg-neutral-900/50">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex gap-3 min-w-0">
-                      <div className="mt-1 w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse shrink-0" />
-                      <div className="min-w-0">
-                        <p className="font-semibold text-white tracking-tight truncate text-base">{m.configName}</p>
-                        <p className="text-xs text-neutral-500 font-mono tracking-tighter mt-0.5">deploying...</p>
-                      </div>
-                    </div>
-                    <span className={`text-xs px-2.5 py-1 rounded-md font-semibold ring-1 inset-ring shrink-0 ${sc.text} ${sc.bg} ${sc.ring}`}>
-                      {m.stage}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Deployment progress */}
-                <div className="p-5 flex flex-col gap-4">
-                  {/* Progress bar */}
-                  <div className="space-y-2">
-                    <div className="w-full h-1.5 bg-neutral-800 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-1000 ease-out"
-                        style={{ width: `${progressPct}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Stage indicators */}
-                  <div className="flex flex-col gap-1.5">
-                    {STAGE_ORDER.map((stage, i) => {
-                      const isActive = i === stageIdx;
-                      const isDone = i < stageIdx;
-                      const isPending = i > stageIdx;
-                      let stageTextColor: string;
-                      if (isActive) { stageTextColor = 'text-white'; }
-                      else if (isDone) { stageTextColor = 'text-neutral-400'; }
-                      else { stageTextColor = 'text-neutral-600'; }
-
-                      let stageIcon: ReactNode;
-                      if (isDone) {
-                        stageIcon = (
-                          <div className="w-4 h-4 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400"><polyline points="20 6 9 17 4 12" /></svg>
-                          </div>
-                        );
-                      } else if (isActive) {
-                        stageIcon = <div className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />;
-                      } else {
-                        stageIcon = <div className="w-4 h-4 rounded-full border border-neutral-700" />;
-                      }
-
-                      return (
-                        <div key={stage} className={`flex items-center gap-2.5 text-xs transition-all ${isPending ? 'opacity-30' : ''}`}>
-                          {stageIcon}
-                          <span className={`font-medium ${stageTextColor}`}>
-                            {stage.charAt(0) + stage.slice(1).toLowerCase()}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
       {/* Watchdog security panel */}
       {watchdog && watchdog.mules.length > 0 && <WatchdogPanel watchdog={watchdog} />}
 
@@ -318,13 +251,13 @@ export function WorkersPage() {
           <span className="font-medium text-sm">Querying active mules...</span>
         </div>
       )}
-      {!isLoading && workers.length === 0 && deployingMules.length === 0 && (
+      {!isLoading && workers.length === 0 && (
         <div className="border-2 border-dashed border-white/10 rounded-2xl p-16 text-center flex flex-col items-center justify-center">
           <ShieldCheck size={48} className="text-neutral-700 mx-auto mb-4" strokeWidth={1} />
           <p className="text-neutral-400 font-medium max-w-sm">No mules are currently running. Click "Deploy Mule" to get started.</p>
         </div>
       )}
-      {!isLoading && (workers.length > 0 || deployingMules.length > 0) && (
+      {!isLoading && workers.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {workers.map(w => (
             <WorkerCard key={w.name} worker={w} />

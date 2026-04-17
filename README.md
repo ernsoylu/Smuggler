@@ -8,6 +8,7 @@
 - **Strict Isolation**: One VPN tunnel per mule. No traffic leaks if the VPN drops.
 - **Dual Protocol**: Native support for WireGuard (`.conf`) and OpenVPN (`.ovpn`).
 - **Web & CLI**: Manage everything via a modern React UI or a powerful Python CLI (`smg`).
+- **Global Notifications**: Real-time deployment tracking, watchdog alerts, and system feedback via a centralized notification bell.
 - **Host Watchdog**: Background health checks that automatically evacuate and kill compromised mules.
 - **Unified Storage**: All downloads land in a single host folder, regardless of which mule handled them.
 

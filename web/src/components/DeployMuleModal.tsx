@@ -1,18 +1,21 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getConfigs, deployMuleFromConfig } from '../api/client';
 import type { VpnConfig } from '../api/client';
+import { useNotifications } from '../context/NotificationContext';
 import { X, Rocket, Shield, FileKey2 } from 'lucide-react';
 
 interface Props {
   onClose: () => void;
-  onDeployStart?: (configName: string) => void;
+  onDeployStart?: (configName: string, notificationId: string) => void;
 }
 
 export function DeployMuleModal({ onClose, onDeployStart }: Readonly<Props>) {
   const qc = useQueryClient();
   const [deployingId, setDeployingId] = useState<number | null>(null);
   const [error, setError] = useState('');
+  const { push: pushNotification, update: updateNotification } = useNotifications();
+  const deployingNotifIdRef = useRef<string | null>(null);
 
   const { data: configs = [], isLoading } = useQuery({
     queryKey: ['configs'],
@@ -23,16 +26,41 @@ export function DeployMuleModal({ onClose, onDeployStart }: Readonly<Props>) {
     mutationFn: (config: VpnConfig) => {
       setDeployingId(config.id);
       setError('');
-      onDeployStart?.(config.name);
+      const notifId = pushNotification({
+        type: 'info',
+        title: `Deploying "${config.name}"`,
+        message: 'Starting VPN mule…',
+        progress: { current: 0, total: 4, label: 'STARTING' },
+      });
+      deployingNotifIdRef.current = notifId;
+      onDeployStart?.(config.name, notifId);
       return deployMuleFromConfig(config.id);
     },
-    onSuccess: () => {
+    onSuccess: (_, config) => {
       qc.invalidateQueries({ queryKey: ['workers'] });
       qc.invalidateQueries({ queryKey: ['configs'] });
+      if (deployingNotifIdRef.current) {
+        updateNotification(deployingNotifIdRef.current, {
+          type: 'success',
+          title: `"${config.name}" deployed`,
+          message: 'Mule is live and VPN is connected.',
+          progress: undefined,
+        });
+        deployingNotifIdRef.current = null;
+      }
       setDeployingId(null);
       onClose();
     },
-    onError: (e: Error) => {
+    onError: (e: Error, config) => {
+      if (deployingNotifIdRef.current) {
+        updateNotification(deployingNotifIdRef.current, {
+          type: 'error',
+          title: `Failed to deploy "${config.name}"`,
+          message: e.message,
+          progress: undefined,
+        });
+        deployingNotifIdRef.current = null;
+      }
       setError(e.message);
       setDeployingId(null);
     },

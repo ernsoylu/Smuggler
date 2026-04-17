@@ -1,7 +1,8 @@
 import { useRef, useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getConfigs, uploadConfig, deleteConfig, deployMuleFromConfig } from '../api/client';
+import { getConfigs, getMules, uploadConfig, deleteConfig, deployMuleFromConfig } from '../api/client';
 import type { VpnConfig } from '../api/types';
+import { useNotifications } from '../context/NotificationContext';
 import {
   FileUp, Trash2, Rocket, Shield, Plus, FileKey2, Lock, KeyRound, Eye, EyeOff,
 } from 'lucide-react';
@@ -80,12 +81,14 @@ function ConfigCard({
   onDelete,
   isDeploying,
   isDeleting,
+  isInUse,
 }: Readonly<{
   cfg: VpnConfig;
   onDeploy: () => void;
   onDelete: () => void;
   isDeploying: boolean;
   isDeleting: boolean;
+  isInUse: boolean;
 }>) {
   const isOvpn = cfg.vpn_type === 'openvpn';
   const iconBg = isOvpn ? 'bg-violet-500/10 text-violet-400' : 'bg-emerald-500/10 text-emerald-400';
@@ -127,13 +130,16 @@ function ConfigCard({
         <button
           className="flex items-center justify-center gap-1.5 flex-1 text-sm font-semibold py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-500/10 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
           onClick={onDeploy}
-          disabled={isDeploying}
+          disabled={isDeploying || isInUse}
+          title={isInUse ? 'Config is already in use by an active mule' : undefined}
         >
           {isDeploying ? (
             <>
               <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               Deploying...
             </>
+          ) : isInUse ? (
+            <><Shield size={14} /> In Use</>
           ) : (
             <><Rocket size={14} /> Deploy Mule</>
           )}
@@ -155,6 +161,7 @@ function ConfigSection({
   title,
   configs,
   deployingMules,
+  inUseConfigIds,
   onDeploy,
   onDelete,
   deletingId,
@@ -162,6 +169,7 @@ function ConfigSection({
   title: string;
   configs: VpnConfig[];
   deployingMules: DeployingMule[];
+  inUseConfigIds: Set<number>;
   onDeploy: (id: number, name: string) => void;
   onDelete: (id: number) => void;
   deletingId: number | null;
@@ -181,6 +189,7 @@ function ConfigSection({
               m => m.configId === cfg.id && !m.error && m.stage !== 'DEPLOYED'
             )}
             isDeleting={deletingId === cfg.id}
+            isInUse={inUseConfigIds.has(cfg.id)}
           />
         ))}
       </div>
@@ -193,6 +202,7 @@ function ConfigSection({
 export function ConfigsPage() {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
+  const { push: pushNotification } = useNotifications();
 
   // Upload form state
   const [file, setFile] = useState<File | null>(null);
@@ -212,6 +222,16 @@ export function ConfigsPage() {
     queryKey: ['configs'],
     queryFn: getConfigs,
   });
+
+  const { data: mules = [] } = useQuery({
+    queryKey: ['mules'],
+    queryFn: getMules,
+    refetchInterval: 5000,
+  });
+
+  const inUseConfigIds = new Set(
+    mules.flatMap(m => m.config_id != null ? [m.config_id] : [])
+  );
 
   const wireguardConfigs = configs.filter(c => (c.vpn_type ?? 'wireguard') === 'wireguard');
   const openvpnConfigs   = configs.filter(c => c.vpn_type === 'openvpn');
@@ -248,6 +268,7 @@ export function ConfigsPage() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['configs'] });
+      pushNotification({ type: 'success', title: 'Config uploaded', message: name.trim() || file?.name || 'Configuration stored successfully.' });
       setFile(null);
       setName('');
       setVpnType('wireguard');
@@ -290,6 +311,7 @@ export function ConfigsPage() {
   const handleDeploy = async (configId: number, configName: string) => {
     const newMule: DeployingMule = { configId, configName, stage: 'STARTING', startedAt: Date.now() };
     setDeployingMules(prev => [...prev, newMule]);
+    pushNotification({ type: 'info', title: `Deploying "${configName}"`, message: 'Starting VPN mule…' });
     try {
       await deployMuleFromConfig(configId);
       qc.invalidateQueries({ queryKey: ['mules'] });
@@ -298,12 +320,15 @@ export function ConfigsPage() {
           ? { ...m, stage: 'DEPLOYED' as DeployStage } : m
         )
       );
+      pushNotification({ type: 'success', title: `"${configName}" deployed`, message: 'Mule is live and VPN is connected.' });
     } catch (e: any) {
+      const errMsg = e.response?.data?.error || e.message || 'Deploy failed';
       setDeployingMules(prev =>
         prev.map(m => m.configId === configId && m.startedAt === newMule.startedAt
-          ? { ...m, error: e.response?.data?.error || e.message || 'Deploy failed' } : m
+          ? { ...m, error: errMsg } : m
         )
       );
+      pushNotification({ type: 'error', title: `Failed to deploy "${configName}"`, message: errMsg });
     }
   };
 
@@ -533,6 +558,7 @@ export function ConfigsPage() {
             title="WireGuard"
             configs={wireguardConfigs}
             deployingMules={deployingMules}
+            inUseConfigIds={inUseConfigIds}
             onDeploy={handleDeploy}
             onDelete={id => remove.mutate(id)}
             deletingId={deletingId}
@@ -541,6 +567,7 @@ export function ConfigsPage() {
             title="OpenVPN"
             configs={openvpnConfigs}
             deployingMules={deployingMules}
+            inUseConfigIds={inUseConfigIds}
             onDeploy={handleDeploy}
             onDelete={id => remove.mutate(id)}
             deletingId={deletingId}

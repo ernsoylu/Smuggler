@@ -4,6 +4,8 @@ import { TorrentsPage } from './pages/TorrentsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ConfigsPage } from './pages/ConfigsPage';
 import { StatusFooter } from './components/StatusFooter';
+import { NotificationBell } from './components/NotificationBell';
+import { NotificationProvider } from './context/NotificationContext';
 import { LayoutDashboard, Server, Settings, FileKey2 } from 'lucide-react';
 
 type Page = 'torrents' | 'workers' | 'configs' | 'settings';
@@ -19,6 +21,7 @@ export default function App() {
   ];
 
   return (
+    <NotificationProvider>
     <div className="min-h-screen bg-neutral-950 text-neutral-200 flex flex-col font-sans selection:bg-blue-500/30">
       {/* Top Navbar */}
       <header className="sticky top-0 z-40 bg-neutral-950/80 backdrop-blur-xl border-b border-white/5">
@@ -47,6 +50,10 @@ export default function App() {
               </button>
             ))}
           </nav>
+
+          <div className="ml-auto">
+            <NotificationBell />
+          </div>
         </div>
       </header>
 
@@ -61,5 +68,6 @@ export default function App() {
       {/* Persistent status bar + graph footer */}
       <StatusFooter />
     </div>
+    </NotificationProvider>
   );
 }
