@@ -3,8 +3,22 @@ name: Python CI
 on:
   push:
     branches: [main, master]
+    paths:
+      - "api/**"
+      - "cli/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/python-ci.yml"
   pull_request:
     branches: [main, master]
+    paths:
+      - "api/**"
+      - "cli/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/python-ci.yml"
 
 jobs:
   test:
