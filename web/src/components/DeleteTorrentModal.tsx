@@ -48,19 +48,18 @@ export function DeleteTorrentModal({ isOpen, onClose, onConfirm, isPending, torr
         <div className="mb-6">
           <label
             htmlFor="delete-files-checkbox"
-            className="flex items-center gap-3 p-3 rounded-lg bg-red-500/5 border border-red-500/10 cursor-pointer hover:bg-red-500/10 transition-colors"
+            className="flex items-center gap-3 p-3 rounded-lg bg-red-500/5 border border-red-500/10 cursor-pointer hover:bg-red-500/10 transition-colors text-sm font-medium text-red-400"
           >
             <input
               id="delete-files-checkbox"
               type="checkbox"
+              aria-label="Delete downloaded files too"
               checked={deleteFiles}
               onChange={(e) => setDeleteFiles(e.target.checked)}
               className="w-4 h-4 text-red-500 bg-neutral-950 border-white/10 rounded focus:ring-red-500 focus:ring-offset-neutral-900"
             />
-            <div className="flex flex-col">
-              <span className="text-sm font-medium text-red-400">Delete downloaded files too</span>
-              <span className="text-xs text-neutral-500">This action cannot be undone.</span>
-            </div>
+            Delete downloaded files too
+            <span className="text-xs font-normal text-neutral-500 ml-auto">This action cannot be undone.</span>
           </label>
         </div>
 
