@@ -1,5 +1,6 @@
 # Ignore Git internals
 .git/
+.github/
 
 # Ignore Python artifacts
 __pycache__/
@@ -12,6 +13,12 @@ build/
 .venv/
 venv/
 env/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.tox/
+.nox/
+.hypothesis/
 
 # Ignore uv lock and cache
 .uv/
