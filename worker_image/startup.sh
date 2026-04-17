@@ -289,6 +289,7 @@ kill_switch() {
             exit 1
         fi
     done
+    return 0
 }
 
 kill_switch &

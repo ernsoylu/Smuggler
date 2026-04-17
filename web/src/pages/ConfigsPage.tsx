@@ -59,7 +59,7 @@ async function detectRequiresAuth(file: File): Promise<boolean> {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
-function VpnTypeBadge({ type }: { type: VpnType }) {
+function VpnTypeBadge({ type }: Readonly<{ type: VpnType }>) {
   if (type === 'openvpn') {
     return (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-violet-500/10 text-violet-400 text-xs font-bold uppercase tracking-wider">
@@ -80,13 +80,13 @@ function ConfigCard({
   onDelete,
   isDeploying,
   isDeleting,
-}: {
+}: Readonly<{
   cfg: VpnConfig;
   onDeploy: () => void;
   onDelete: () => void;
   isDeploying: boolean;
   isDeleting: boolean;
-}) {
+}>) {
   const isOvpn = cfg.vpn_type === 'openvpn';
   const iconBg = isOvpn ? 'bg-violet-500/10 text-violet-400' : 'bg-emerald-500/10 text-emerald-400';
 
@@ -158,14 +158,14 @@ function ConfigSection({
   onDeploy,
   onDelete,
   deletingId,
-}: {
+}: Readonly<{
   title: string;
   configs: VpnConfig[];
   deployingMules: DeployingMule[];
   onDeploy: (id: number, name: string) => void;
   onDelete: (id: number) => void;
   deletingId: number | null;
-}) {
+}>) {
   if (configs.length === 0) return null;
   return (
     <div className="mb-8">

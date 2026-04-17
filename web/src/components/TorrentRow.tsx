@@ -55,7 +55,7 @@ const TABS: { id: DetailTab; label: string; icon: React.ReactNode }[] = [
 
 // ── Sub-panels ────────────────────────────────────────────────────────────────
 
-function StatusTab({ torrent }: { torrent: Torrent }) {
+function StatusTab({ torrent }: Readonly<{ torrent: Torrent }>) {
   const v = STATUS_VARIANTS[torrent.status] ?? STATUS_VARIANTS['removed'];
   const progress = Math.min(100, torrent.progress);
   const remaining = torrent.total_length - torrent.completed_length;
@@ -132,7 +132,7 @@ function StatusTab({ torrent }: { torrent: Torrent }) {
   );
 }
 
-function DetailsTab({ torrent }: { torrent: Torrent }) {
+function DetailsTab({ torrent }: Readonly<{ torrent: Torrent }>) {
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
       <div className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5">
@@ -181,7 +181,7 @@ function DetailsTab({ torrent }: { torrent: Torrent }) {
   );
 }
 
-function FilesTab({ torrent }: { torrent: Torrent }) {
+function FilesTab({ torrent }: Readonly<{ torrent: Torrent }>) {
   const qc = useQueryClient();
   const [pending, setPending] = useState<Set<number>>(new Set());
 
@@ -267,7 +267,7 @@ function FilesTab({ torrent }: { torrent: Torrent }) {
   );
 }
 
-function PeerFlag({ ip }: { ip: string }) {
+function PeerFlag({ ip }: Readonly<{ ip: string }>) {
   const { data: flag } = useQuery({
     queryKey: ['geo-ip', ip],
     queryFn: async () => {
@@ -280,13 +280,13 @@ function PeerFlag({ ip }: { ip: string }) {
         if (!res.ok) return '🏳️';
         const code = (await res.text()).trim();
         if (!code || code === 'nil' || code.length !== 2) return '🏳️';
-        
+
         const codePoints = code
           .toUpperCase()
           .split('')
-          .map(char => 127397 + char.charCodeAt(0));
+          .map(char => 127397 + (char.codePointAt(0) ?? 0));
         return String.fromCodePoint(...codePoints);
-      } catch (e) {
+      } catch {
         return '🏳️';
       }
     },
@@ -297,7 +297,7 @@ function PeerFlag({ ip }: { ip: string }) {
   return <span className="mr-2 text-[14px] leading-none select-none align-middle" title="Location">{flag}</span>;
 }
 
-function PeersTab({ torrent, isVisible }: { torrent: Torrent; isVisible: boolean }) {
+function PeersTab({ torrent, isVisible }: Readonly<{ torrent: Torrent; isVisible: boolean }>) {
   const { data: peers = [], isLoading } = useQuery<Peer[]>({
     queryKey: ['peers', torrent.mule, torrent.gid],
     queryFn: () => getTorrentPeers(torrent.mule, torrent.gid),
@@ -366,7 +366,7 @@ function PeersTab({ torrent, isVisible }: { torrent: Torrent; isVisible: boolean
   );
 }
 
-function OptionsTab({ torrent, isVisible }: { torrent: Torrent; isVisible: boolean }) {
+function OptionsTab({ torrent, isVisible }: Readonly<{ torrent: Torrent; isVisible: boolean }>) {
   const qc = useQueryClient();
   const [localOpts, setLocalOpts] = useState<Partial<TorrentOptions>>({});
   const [saved, setSaved] = useState(false);

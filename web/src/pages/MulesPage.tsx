@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getMules, getWatchdogStatus, triggerWatchdogSweep, evacuateMule } from '../api/client';
 import type { WatchdogStatus } from '../api/types';
@@ -41,7 +41,7 @@ function stepWorkersPageStages(prev: DeployingMule[]): DeployingMule[] {
   });
 }
 
-function WatchdogPanel({ watchdog }: { watchdog: WatchdogStatus | undefined }) {
+function WatchdogPanel({ watchdog }: Readonly<{ watchdog: WatchdogStatus | undefined }>) {
   const qc = useQueryClient();
 
   const sweep = useMutation({
@@ -272,17 +272,23 @@ export function WorkersPage() {
                       if (isActive) { stageTextColor = 'text-white'; }
                       else if (isDone) { stageTextColor = 'text-neutral-400'; }
                       else { stageTextColor = 'text-neutral-600'; }
+
+                      let stageIcon: ReactNode;
+                      if (isDone) {
+                        stageIcon = (
+                          <div className="w-4 h-4 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400"><polyline points="20 6 9 17 4 12" /></svg>
+                          </div>
+                        );
+                      } else if (isActive) {
+                        stageIcon = <div className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />;
+                      } else {
+                        stageIcon = <div className="w-4 h-4 rounded-full border border-neutral-700" />;
+                      }
+
                       return (
                         <div key={stage} className={`flex items-center gap-2.5 text-xs transition-all ${isPending ? 'opacity-30' : ''}`}>
-                          {isDone ? (
-                            <div className="w-4 h-4 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400"><polyline points="20 6 9 17 4 12" /></svg>
-                            </div>
-                          ) : isActive ? (
-                            <div className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
-                          ) : (
-                            <div className="w-4 h-4 rounded-full border border-neutral-700" />
-                          )}
+                          {stageIcon}
                           <span className={`font-medium ${stageTextColor}`}>
                             {stage.charAt(0) + stage.slice(1).toLowerCase()}
                           </span>

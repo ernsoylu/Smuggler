@@ -134,13 +134,13 @@ export function TorrentsPage() {
                   Previous
                 </button>
                 <div className="flex items-center gap-1">
-                  {Array.from({ length: totalPages }).map((_, i) => (
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((pageNum) => (
                     <button
-                      key={i}
-                      onClick={() => setPage(i + 1)}
-                      className={`w-6 h-6 rounded flex items-center justify-center text-xs font-mono font-semibold transition-colors ${page === i + 1 ? 'bg-blue-600 text-white' : 'hover:bg-white/10 text-neutral-400'}`}
+                      key={`page-${pageNum}`}
+                      onClick={() => setPage(pageNum)}
+                      className={`w-6 h-6 rounded flex items-center justify-center text-xs font-mono font-semibold transition-colors ${page === pageNum ? 'bg-blue-600 text-white' : 'hover:bg-white/10 text-neutral-400'}`}
                     >
-                      {i + 1}
+                      {pageNum}
                     </button>
                   ))}
                 </div>

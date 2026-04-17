@@ -143,9 +143,9 @@ def _do_evacuation(client, mule_name: str, consecutive: int) -> None:
 def _finalise_sweep(all_names: set[str], checked_at: str) -> None:
     """Drop stale mule states and update sweep counters."""
     with _lock:
-        for name in list(_mule_states):
-            if name not in all_names:
-                del _mule_states[name]
+        stale = [name for name in _mule_states if name not in all_names]
+        for name in stale:
+            del _mule_states[name]
         _watchdog_stats["last_run_at"] = checked_at
         _watchdog_stats["total_sweeps"] += 1
 

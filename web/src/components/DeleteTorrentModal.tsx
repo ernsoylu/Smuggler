@@ -9,7 +9,7 @@ interface Props {
   torrentName: string;
 }
 
-export function DeleteTorrentModal({ isOpen, onClose, onConfirm, isPending, torrentName }: Props) {
+export function DeleteTorrentModal({ isOpen, onClose, onConfirm, isPending, torrentName }: Readonly<Props>) {
   const [deleteFiles, setDeleteFiles] = useState(false);
 
   // Reset state when opened
@@ -46,8 +46,12 @@ export function DeleteTorrentModal({ isOpen, onClose, onConfirm, isPending, torr
         </div>
 
         <div className="mb-6">
-          <label className="flex items-center gap-3 p-3 rounded-lg bg-red-500/5 border border-red-500/10 cursor-pointer hover:bg-red-500/10 transition-colors">
+          <label
+            htmlFor="delete-files-checkbox"
+            className="flex items-center gap-3 p-3 rounded-lg bg-red-500/5 border border-red-500/10 cursor-pointer hover:bg-red-500/10 transition-colors"
+          >
             <input
+              id="delete-files-checkbox"
               type="checkbox"
               checked={deleteFiles}
               onChange={(e) => setDeleteFiles(e.target.checked)}

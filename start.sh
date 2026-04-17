@@ -6,7 +6,7 @@ cd "$(dirname "$0")"
 
 cmd="$1"
 
-if [ -z "$cmd" ]; then
+if [[ -z "$cmd" ]]; then
     echo "Usage: ./start.sh [debug|build|stop|prune]"
     exit 1
 fi
@@ -43,7 +43,7 @@ case "$cmd" in
         
         echo "[+] Searching for lingering Smuggler mules..."
         mules=$(docker ps -a -q -f name=smuggler-mule)
-        if [ -n "$mules" ]; then
+        if [[ -n "$mules" ]]; then
             echo "[!] Forcibly removing active/stopped mules: $mules"
             # Disable set -e temporarily since docker rm might fail if strings are empty
             set +e

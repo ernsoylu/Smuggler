@@ -9,8 +9,8 @@ WORKDIR /app
 
 # Copy requirements if available
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt || true
-RUN pip install --no-cache-dir flask requests docker gunicorn flask-cors
+RUN pip install --no-cache-dir -r requirements.txt || true \
+ && pip install --no-cache-dir flask requests docker gunicorn flask-cors
 
 # We will mount the working directory via docker-compose, 
 # but copying the code makes the image self-contained if needed.
