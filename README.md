@@ -11,6 +11,50 @@ Isolated torrent downloads inside per-mule Docker containers, each behind its ow
 5. A kill-switch watchdog inside the container kills aria2 immediately if the VPN interface (`wg0` or `tun0`) disappears.
 6. You add torrents to the mule via the CLI or Web UI. All downloads land in the shared `./downloads` folder on the host.
 
+## Software Architecture
+
+### Runtime layers
+
+```
+Browser
+  └─ nginx  (smuggler-ui  :8887)          ← serves static Vite build
+       └─ proxy /api/* → :5050
+            └─ gunicorn (smuggler-api)    ← host network, Docker socket mounted
+                 ├─ Flask API  (6 blueprints: mules, torrents, stats,
+                 │              settings, configs, watchdog)
+                 │    ├─ cli/docker_client.py  ← Docker SDK wrapper
+                 │    └─ cli/aria2_client.py   ← aria2 JSON-RPC client
+                 ├─ SQLite WAL  (settings, vpn_configs)
+                 └─ Background watchdog thread  (15 s sweep)
+
+smuggler-mule-<name>  (one container per active VPN tunnel)
+  startup.sh → VPN up → external IP verified → aria2 (binds 127.0.0.1)
+                └─ in-container kill-switch  (polls wg0 / tun0 every 5 s)
+```
+
+### Key design decisions
+
+**Host network for the API container** — `smuggler-api` uses `network_mode: host` so it can reach each mule's aria2 JSON-RPC port on `localhost` without bridge NAT. This matches the bare-metal CLI topology exactly.
+
+**Shared CLI modules** — `cli/docker_client.py` and `cli/aria2_client.py` are imported directly by the Flask blueprints. No Docker or aria2 logic is duplicated between the CLI and the API.
+
+**`SMG_HOST_ROOT` path indirection** — the API runs inside a container, but file paths that Docker will later mount into mule containers (VPN configs under `data/tmp/`, downloads directory, SQLite DB) must be host-absolute paths. `SMG_HOST_ROOT` is set to `${PWD}` by Compose and every path is resolved relative to it at runtime.
+
+**Two-level kill-switch**
+- *In-container*: `startup.sh` polls the VPN interface (`wg0` or `tun0`) every 5 s; if it disappears, aria2 receives `SIGTERM` then `SIGKILL`.
+- *Host watchdog* (`api/watchdog.py`): sweeps all mules every 15 s, probing each mule's external IP via `icanhazip.com` (fallback: `ipinfo.io`). Failure thresholds are per failure kind — `ip_leak` → 1 strike, probe/container errors → 3 strikes, restart/exit states → 8–20 strikes. On breach the watchdog migrates live torrents to a healthy mule then kills the compromised one.
+
+**VPN-first invariant** — neither `smg mule start` nor the `/api/configs/<id>/deploy` endpoint returns until the VPN interface is up and handshaking, the mule's external IP is confirmed through the tunnel, and aria2 is listening on its RPC port.
+
+### Data stores
+
+| Store | Path | Content |
+|---|---|---|
+| SQLite DB | `data/smuggler.db` | `settings` and `vpn_configs` tables (WAL mode, migrated at startup) |
+| Temp VPN configs | `data/tmp/<uuid>` | Plaintext config written during deploy, deleted after the mule starts |
+| Downloads | `downloads/` | Shared volume mounted read-write into every mule container |
+| Logs | `logs/` | Dated log files (controlled by `DVD_LOGGING` / `DVD_LOG_LEVEL` in `.env`) |
+
 ## Requirements
 
 - Docker + Docker Compose (for the default stack)
