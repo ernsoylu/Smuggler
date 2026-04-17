@@ -28,6 +28,7 @@ export function DeployMuleModal({ onClose, onDeployStart }: Readonly<Props>) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['workers'] });
+      qc.invalidateQueries({ queryKey: ['configs'] });
       setDeployingId(null);
       onClose();
     },
@@ -81,13 +82,18 @@ export function DeployMuleModal({ onClose, onDeployStart }: Readonly<Props>) {
           )}
           {!isLoading && configs.length > 0 && (
             <div className="space-y-2">
-              {configs.map(cfg => (
+              {configs.map(cfg => {
+                const inUse = !!cfg.in_use_by_mule;
+                const disabled = !!deployingId || inUse;
+                return (
                 <div
                   key={cfg.id}
                   className={`flex items-center justify-between gap-4 p-4 rounded-xl border transition-all ${
                     deployingId === cfg.id
                       ? 'bg-blue-500/5 border-blue-500/20'
-                      : 'bg-neutral-950/50 border-white/5 hover:border-white/10'
+                      : inUse
+                        ? 'bg-neutral-950/30 border-white/5 opacity-60'
+                        : 'bg-neutral-950/50 border-white/5 hover:border-white/10'
                   }`}
                 >
                   <div className="flex items-center gap-3 min-w-0">
@@ -97,19 +103,27 @@ export function DeployMuleModal({ onClose, onDeployStart }: Readonly<Props>) {
                     <div className="min-w-0">
                       <p className="text-sm font-semibold text-white truncate">{cfg.name}</p>
                       <p className="text-xs text-neutral-500 font-mono truncate">{cfg.filename}</p>
+                      {inUse && (
+                        <p className="text-[11px] text-amber-400/80 mt-0.5 truncate">
+                          In use by mule <span className="font-mono">{cfg.in_use_by_mule}</span>
+                        </p>
+                      )}
                     </div>
                   </div>
 
                   <button
                     className="shrink-0 py-2 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-xs text-white font-bold shadow-lg shadow-blue-500/15 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center gap-1.5"
                     onClick={() => deploy.mutate(cfg)}
-                    disabled={!!deployingId}
+                    disabled={disabled}
+                    title={inUse ? `Already deployed as ${cfg.in_use_by_mule}` : undefined}
                   >
                     {deployingId === cfg.id ? (
                       <>
                         <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                         Deploying...
                       </>
+                    ) : inUse ? (
+                      <>In use</>
                     ) : (
                       <>
                         <Rocket size={13} /> Deploy
@@ -117,7 +131,8 @@ export function DeployMuleModal({ onClose, onDeployStart }: Readonly<Props>) {
                     )}
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
 

@@ -35,6 +35,7 @@ def _serialize(w: MuleInfo, ip_info: dict | None = None) -> dict:
         "status": w.status,
         "rpc_port": w.rpc_port,
         "vpn_config": w.vpn_config,
+        "config_id": w.config_id,
     }
     if ip_info:
         result["ip_info"] = {

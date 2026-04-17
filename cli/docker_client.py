@@ -38,6 +38,11 @@ class MuleInfo:
         self.rpc_port: int = int(labels.get("smuggler.rpc_port", "0"))
         self.vpn_config: str = labels.get("smuggler.vpn_config", "")
         self.vpn_type: str = labels.get("smuggler.vpn_type", "wireguard")
+        cfg_id = labels.get("smuggler.config_id", "")
+        try:
+            self.config_id: int | None = int(cfg_id) if cfg_id else None
+        except ValueError:
+            self.config_id = None
 
     @property
     def rpc_url(self) -> str:
@@ -76,6 +81,7 @@ def start_mule(
     vpn_type: str = "wireguard",
     ovpn_username: Optional[str] = None,
     ovpn_password: Optional[str] = None,
+    config_id: Optional[int] = None,
 ) -> MuleInfo:
     """
     Spin up a new mule container.
@@ -141,6 +147,8 @@ def start_mule(
         "smuggler.vpn_config": vpn_config_path.name,
         "smuggler.vpn_type": vpn_type,
     }
+    if config_id is not None:
+        labels["smuggler.config_id"] = str(config_id)
 
     run_kwargs: dict = {
         "image": image,

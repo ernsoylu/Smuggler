@@ -25,6 +25,7 @@ export interface Mule {
   status: string;
   rpc_port: number;
   vpn_config: string;
+  config_id?: number | null;
   ip_info?: IpInfo;
 }
 
@@ -111,4 +112,5 @@ export interface VpnConfig {
   created_at: string;
   vpn_type: 'wireguard' | 'openvpn';
   requires_auth: boolean;
+  in_use_by_mule?: string | null;
 }

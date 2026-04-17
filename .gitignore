@@ -65,3 +65,10 @@ data/
 # Tools / AI
 .claude/
 .codegraph/
+
+# Desktop (Gradle)
+desktop/build/
+desktop/.gradle/
+desktop/gradle/wrapper/gradle-wrapper.jar.lock
+
+coverage.json

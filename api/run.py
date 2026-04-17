@@ -12,5 +12,5 @@ if __name__ == "__main__":
         print(f"  Logging  → {lf}")
 
     app = create_app()
-    log.info("Starting Smuggler API development server on 127.0.0.1:5000")
-    app.run(host="127.0.0.1", port=5000, debug=True, use_reloader=False)
+    log.info("Starting Smuggler API development server on 127.0.0.1:55555")
+    app.run(host="127.0.0.1", port=55555, debug=True, use_reloader=False)

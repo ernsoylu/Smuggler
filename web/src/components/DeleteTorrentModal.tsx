@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Trash2, X } from 'lucide-react';
 
 interface Props {
@@ -19,7 +20,7 @@ export function DeleteTorrentModal({ isOpen, onClose, onConfirm, isPending, torr
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
       <div className="bg-neutral-900 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden p-6 animate-in fade-in zoom-in-95 duration-200">
         
@@ -88,6 +89,7 @@ export function DeleteTorrentModal({ isOpen, onClose, onConfirm, isPending, torr
         </div>
 
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

@@ -50,6 +50,10 @@ def create_app() -> Flask:
     app.register_blueprint(configs_bp)
     app.register_blueprint(watchdog_bp)
 
+    @app.route("/api/health/", methods=["GET"])
+    def health():
+        return {"status": "ok"}, 200
+
     @app.errorhandler(404)
     def not_found(e):
         log.warning("404: %s", e)

@@ -57,6 +57,26 @@ def _get_conn() -> sqlite3.Connection:
     return conn
 
 
+def _bump_state_version(conn: sqlite3.Connection) -> None:
+    """Monotonic counter the desktop client polls to detect external changes.
+
+    Must run inside the caller's transaction so readers never see a mutation
+    without the matching version bump.
+    """
+    row = conn.execute(
+        "SELECT value FROM settings WHERE key = 'state_version'"
+    ).fetchone()
+    try:
+        current = int(row["value"]) if row else 0
+    except (TypeError, ValueError):
+        current = 0
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('state_version', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (str(current + 1),),
+    )
+
+
 def init_db() -> None:
     """Create tables if they don't exist, run migrations, and seed defaults."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -110,6 +130,8 @@ def set_setting(key: str, value: str) -> None:
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         (key, value),
     )
+    if key != "state_version":
+        _bump_state_version(conn)
     conn.commit()
     conn.close()
 
@@ -122,6 +144,7 @@ def update_settings(data: dict[str, Any]) -> dict[str, str]:
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, str(value)),
         )
+    _bump_state_version(conn)
     conn.commit()
     conn.close()
     return get_all_settings()
@@ -178,6 +201,7 @@ def add_vpn_config(
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
         (name, filename, content, vpn_type, int(requires_auth), ovpn_username, ovpn_password),
     )
+    _bump_state_version(conn)
     conn.commit()
     config_id = cur.lastrowid
     conn.close()
@@ -188,6 +212,8 @@ def add_vpn_config(
 def delete_vpn_config(config_id: int) -> bool:
     conn = _get_conn()
     cur = conn.execute("DELETE FROM vpn_configs WHERE id = ?", (config_id,))
+    if cur.rowcount > 0:
+        _bump_state_version(conn)
     conn.commit()
     deleted = cur.rowcount > 0
     conn.close()

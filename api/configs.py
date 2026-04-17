@@ -15,6 +15,7 @@ from cli.docker_client import (
     start_mule,
     wait_for_vpn,
     stop_mule,
+    list_mules,
 )
 from api.settings import read_settings
 from api.settings_sync import apply_settings_to_mule
@@ -44,10 +45,28 @@ def _detect_requires_auth(content: bytes) -> bool:
     return False
 
 
+def _config_id_to_mule() -> dict[int, str]:
+    """Map active config_id → mule name for non-exited mules."""
+    try:
+        client = get_docker_client()
+        mules = list_mules(client)
+    except RuntimeError:
+        return {}
+    mapping: dict[int, str] = {}
+    for m in mules:
+        if m.config_id is None or m.status == "exited":
+            continue
+        mapping.setdefault(m.config_id, m.name)
+    return mapping
+
+
 @configs_bp.get("/")
 def list_configs():
     log.info("GET /api/configs/")
     configs = list_vpn_configs()
+    in_use = _config_id_to_mule()
+    for c in configs:
+        c["in_use_by_mule"] = in_use.get(c["id"])
     return jsonify(configs)
 
 
@@ -126,6 +145,15 @@ def deploy_mule(config_id: int):
     if not config:
         return jsonify({"error": "Config not found"}), 404
 
+    # Guard: a config can back at most one active mule at a time.
+    in_use = _config_id_to_mule().get(config_id)
+    if in_use:
+        return jsonify({
+            "error": f"Config already in use by active mule '{in_use}'. "
+                     "Stop that mule first or deploy from a different config.",
+            "in_use_by_mule": in_use,
+        }), 409
+
     # Guard: OpenVPN configs that require credentials must have them stored
     if config.get("vpn_type") == "openvpn" and config.get("requires_auth"):
         if not config.get("ovpn_username") or not config.get("ovpn_password"):
@@ -161,6 +189,7 @@ def deploy_mule(config_id: int):
             vpn_type=vpn_type,
             ovpn_username=config.get("ovpn_username"),
             ovpn_password=config.get("ovpn_password"),
+            config_id=config_id,
         )
         log.info(
             "POST /api/configs/%d/deploy: container started name=%s vpn_type=%s",

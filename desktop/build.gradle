@@ -1,0 +1,88 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'org.openjfx.javafxplugin' version '0.1.0'
+    id 'com.gradleup.shadow' version '8.3.5'
+}
+
+group = 'com.smuggler'
+version = '0.1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+javafx {
+    version = '21.0.2'
+    modules = ['javafx.controls', 'javafx.fxml', 'javafx.graphics']
+}
+
+application {
+    mainClass = 'com.smuggler.desktop.Launcher'
+    applicationDefaultJvmArgs = [
+        '--enable-native-access=ALL-UNNAMED'
+    ]
+}
+
+// Inject --module-path / --add-modules into generated start scripts AFTER
+// $APP_HOME is resolved (DEFAULT_JVM_OPTS can't expand $APP_HOME — gradle
+// escapes metacharacters via sed before eval).
+tasks.named('startScripts') {
+    doLast {
+        def unix = file("$outputDir/smuggler-desktop")
+        if (unix.exists()) {
+            unix.text = unix.text.replace(
+                'set -- \\\n        -classpath "$CLASSPATH" \\\n        com.smuggler.desktop.Launcher \\\n        "$@"',
+                'set -- \\\n        --module-path "$APP_HOME/lib" \\\n        --add-modules javafx.controls,javafx.fxml,javafx.graphics \\\n        -classpath "$CLASSPATH" \\\n        com.smuggler.desktop.Launcher \\\n        "$@"'
+            )
+        }
+        def win = file("$outputDir/smuggler-desktop.bat")
+        if (win.exists()) {
+            win.text = win.text.replace(
+                '-classpath "%CLASSPATH%" com.smuggler.desktop.Launcher',
+                '--module-path "%APP_HOME%\\lib" --add-modules javafx.controls,javafx.fxml,javafx.graphics -classpath "%CLASSPATH%" com.smuggler.desktop.Launcher'
+            )
+        }
+    }
+}
+
+dependencies {
+    // UI theme
+    implementation 'io.github.mkpaz:atlantafx-base:2.0.1'
+
+    // Icons (Feather pack mimics Lucide used in the web UI)
+    implementation 'org.kordamp.ikonli:ikonli-javafx:12.3.1'
+    implementation 'org.kordamp.ikonli:ikonli-feather-pack:12.3.1'
+    implementation 'org.kordamp.ikonli:ikonli-material2-pack:12.3.1'
+
+    // JSON for API client
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.17.1'
+    implementation 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.17.1'
+
+    // Logging
+    implementation 'org.slf4j:slf4j-api:2.0.13'
+    implementation 'ch.qos.logback:logback-classic:1.5.6'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+// Distribution: ./gradlew installDist && ./build/install/smuggler-desktop/bin/smuggler-desktop
+// Fat JAR for CI/containerization (advanced—requires extra setup)
+shadowJar {
+    archiveBaseName.set('smuggler-desktop')
+    archiveClassifier.set('all')
+    mergeServiceFiles()
+    manifest {
+        attributes 'Main-Class': 'com.smuggler.desktop.Launcher'
+    }
+}
