@@ -181,6 +181,8 @@ class TestRemoveTorrent:
     @resp_lib.activate
     def test_removes_torrent(self, client):
         mule = make_mule_info()
+        # DELETE first calls tellStatus (dict result), then removes via aria2.
+        resp_lib.add(resp_lib.POST, ARIA2_URL, json=rpc_ok(ACTIVE_DL))
         resp_lib.add(resp_lib.POST, ARIA2_URL, json=rpc_ok("abc123"))
 
         with patch("api.torrents.get_docker_client"), \

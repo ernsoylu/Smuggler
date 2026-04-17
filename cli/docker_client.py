@@ -495,13 +495,17 @@ def check_mule_vpn(client: docker.DockerClient, name_or_id: str) -> dict:
           "healthy": bool,
           "ip":      str | None,   # current external IP (or None on failure)
           "reason":  str,          # human-readable status
+          "kind":    str,          # failure kind when unhealthy —
+                                   # "healthy", "probe_failed", "ip_leak",
+                                   # "container_missing", "not_running"
         }
     """
     log.debug("check_mule_vpn: mule=%s", name_or_id)
     try:
         mule = get_mule(client, name_or_id)
     except RuntimeError as exc:
-        return {"name": name_or_id, "healthy": False, "ip": None, "reason": str(exc)}
+        return {"name": name_or_id, "healthy": False, "ip": None, "reason": str(exc),
+                "kind": "container_missing"}
 
     if mule.status != "running":
         return {
@@ -509,13 +513,15 @@ def check_mule_vpn(client: docker.DockerClient, name_or_id: str) -> dict:
             "healthy": False,
             "ip": None,
             "reason": f"container not running (status={mule.status})",
+            "kind": "not_running",
         }
 
     vpn_iface = "tun0" if mule.vpn_type == "openvpn" else "wg0"
     ip, country, reason = _probe_vpn_ip(mule.container, vpn_iface)
 
     if not ip:
-        return {"name": mule.name, "healthy": False, "ip": None, "reason": reason}
+        return {"name": mule.name, "healthy": False, "ip": None, "reason": reason,
+                "kind": "probe_failed"}
 
     if _PRIVATE_IP_PATTERN.match(ip):
         return {
@@ -523,10 +529,11 @@ def check_mule_vpn(client: docker.DockerClient, name_or_id: str) -> dict:
             "healthy": False,
             "ip": ip,
             "reason": f"IP leak — external IP '{ip}' is a private/Docker address",
+            "kind": "ip_leak",
         }
 
     log.info("check_mule_vpn: mule=%s ip=%s country=%s — healthy", mule.name, ip, country or "?")
-    return {"name": mule.name, "healthy": True, "ip": ip, "reason": reason}
+    return {"name": mule.name, "healthy": True, "ip": ip, "reason": reason, "kind": "healthy"}
 
 
 def _collect_source_downloads(client: docker.DockerClient, source_name: str) -> list[dict]:

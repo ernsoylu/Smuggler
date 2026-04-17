@@ -44,7 +44,24 @@ watchdog_bp = Blueprint("watchdog", __name__, url_prefix="/api/watchdog")
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 WATCHDOG_INTERVAL = 15   # seconds between full sweeps
-FAILURE_THRESHOLD = 3    # consecutive check failures before evacuation
+FAILURE_THRESHOLD = 3    # default — VPN probe failures on a running container
+
+# Per-failure-kind evacuation thresholds. Different failure shapes deserve
+# different patience: an IP leak is urgent (traffic already exposed), while an
+# "exited" container may simply be mid-restart under Docker's unless-stopped
+# policy and deserves time to recover on its own before we tear it down.
+_FAILURE_THRESHOLDS = {
+    "ip_leak":           1,   # 15s  — urgent, traffic is exposed
+    "probe_failed":      3,   # 45s  — existing behaviour
+    "container_missing": 3,   # 45s  — container disappeared from Docker
+    "not_running":       8,   # 2m   — let unless-stopped restart policy recover
+    "exited":            8,   # 2m   — same as not_running (surfaced at sweep edges)
+    "restarting":       20,   # 5m   — Docker is already bouncing the container
+}
+
+
+def _threshold_for(result: dict) -> int:
+    return _FAILURE_THRESHOLDS.get(result.get("kind", ""), FAILURE_THRESHOLD)
 
 # ── Shared state (protected by _lock) ────────────────────────────────────────
 _lock = threading.Lock()
@@ -71,15 +88,19 @@ def _probe_mule(client, mule) -> dict:
     """Return a health-check result for one mule, whether running or not."""
     if mule.status == "running":
         return check_mule_vpn(client, mule.name)
+    # "restarting" means Docker is mid-relaunch; "exited"/"created"/"dead" are
+    # terminal from the container's POV but unless-stopped may still recover.
+    kind = "restarting" if mule.status == "restarting" else "exited"
     return {
         "name": mule.name,
         "healthy": False,
         "ip": None,
         "reason": f"container {mule.status}",
+        "kind": kind,
     }
 
 
-def _record_result(mule_name: str, result: dict) -> tuple[int, bool]:
+def _record_result(mule_name: str, result: dict, threshold: int) -> tuple[int, bool]:
     """Update _mule_states for this mule; return (consecutive_failures, already_evacuated)."""
     with _lock:
         prev = _mule_states.get(mule_name, {})
@@ -89,6 +110,7 @@ def _record_result(mule_name: str, result: dict) -> tuple[int, bool]:
         _mule_states[mule_name] = {
             **result,
             "consecutive_failures": consecutive,
+            "failure_threshold": threshold,
             "evacuated": already_evacuated,
         }
     return consecutive, already_evacuated
@@ -146,16 +168,17 @@ def _run_sweep() -> list[dict]:
     for mule in all_mules:
         result = _probe_mule(client, mule)
         result["checked_at"] = checked_at
+        threshold = _threshold_for(result)
 
-        consecutive, already_evacuated = _record_result(mule.name, result)
+        consecutive, already_evacuated = _record_result(mule.name, result, threshold)
 
         if not result["healthy"]:
             log.warning(
-                "watchdog: mule=%s UNHEALTHY (failures=%d/%d) reason=%s",
-                mule.name, consecutive, FAILURE_THRESHOLD, result["reason"],
+                "watchdog: mule=%s UNHEALTHY (failures=%d/%d kind=%s) reason=%s",
+                mule.name, consecutive, threshold, result.get("kind", "?"), result["reason"],
             )
 
-        if not result["healthy"] and consecutive >= FAILURE_THRESHOLD and not already_evacuated:
+        if not result["healthy"] and consecutive >= threshold and not already_evacuated:
             _do_evacuation(client, mule.name, consecutive)
 
         results.append(result)
@@ -205,6 +228,7 @@ def watchdog_status():
         "config": {
             "interval_seconds": WATCHDOG_INTERVAL,
             "failure_threshold": FAILURE_THRESHOLD,
+            "failure_thresholds": _FAILURE_THRESHOLDS,
         },
         "stats": stats,
         "mules": list(states.values()),
