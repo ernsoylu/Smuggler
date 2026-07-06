@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Trash2, X } from 'lucide-react';
 
@@ -13,9 +13,13 @@ interface Props {
 export function DeleteTorrentModal({ isOpen, onClose, onConfirm, isPending, torrentName }: Readonly<Props>) {
   const [deleteFiles, setDeleteFiles] = useState(false);
 
-  useEffect(() => {
+  // Reset the checkbox when the modal (re)opens — the render-phase "previous
+  // prop" pattern avoids an extra render cycle from doing this in an effect.
+  const [prevOpen, setPrevOpen] = useState(isOpen);
+  if (isOpen !== prevOpen) {
+    setPrevOpen(isOpen);
     if (isOpen) setDeleteFiles(false);
-  }, [isOpen]);
+  }
 
   if (!isOpen) return null;
 

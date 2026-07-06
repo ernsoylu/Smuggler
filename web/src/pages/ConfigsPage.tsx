@@ -321,8 +321,9 @@ export function ConfigsPage() {
         )
       );
       pushNotification({ type: 'success', title: `"${configName}" deployed`, message: 'Mule is live and VPN is connected.' });
-    } catch (e: any) {
-      const errMsg = e.response?.data?.error || e.message || 'Deploy failed';
+    } catch (e) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string };
+      const errMsg = err.response?.data?.error || err.message || 'Deploy failed';
       setDeployingMules(prev =>
         prev.map(m => m.configId === configId && m.startedAt === newMule.startedAt
           ? { ...m, error: errMsg } : m

@@ -8,7 +8,7 @@
  *   stats  — GlobalStats prop: the component builds its own rolling history.
  *   data   — DataPoint[]  prop: caller owns the history (per-mule cards, footer).
  */
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useId } from 'react';
 import * as d3 from 'd3';
 import type { GlobalStats } from '../api/types';
 
@@ -38,15 +38,19 @@ interface Props {
 export function SpeedGraph({ stats, data, height = 140 }: Readonly<Props>) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const svgRef  = useRef<SVGSVGElement>(null);
-  // Unique ID prefix so multiple graphs on the same page don't clash on <defs>
-  const uid = useMemo(() => `sg-${Math.random().toString(36).slice(2, 9)}`, []);
+  // Unique ID prefix so multiple graphs on the same page don't clash on <defs>.
+  // useId is stable and collision-free without the impurity of Math.random().
+  const uid = `sg-${useId().replace(/:/g, '')}`;
 
   const [internalHistory, setInternalHistory] = useState<DataPoint[]>([]);
   const [width, setWidth] = useState(0);
 
-  // Append global stats to internal rolling buffer
+  // Append polled global stats to the internal rolling buffer. Time-series
+  // accumulation keyed on Date.now() (impure — must run in an effect), so the
+  // set-state-in-effect rule is intentionally waived here.
   useEffect(() => {
     if (!stats) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setInternalHistory(prev =>
       [...prev, { t: Date.now(), down: stats.download_speed, up: stats.upload_speed }]
         .slice(-MAX_POINTS)

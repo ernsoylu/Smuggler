@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from flask import Blueprint, request, jsonify
@@ -111,20 +112,29 @@ def _all_downloads(aria2: Aria2Client, mule_name: str) -> list[dict]:
 
 # ─── GET /api/torrents ───────────────────────────────────────────────────────
 
+def _downloads_for_mule(w) -> list[dict]:
+    # Short timeout: this endpoint is polled by the UI, so one hung mule must
+    # not block the whole request. Each mule issues 3 RPCs (active/waiting/stopped).
+    aria2 = Aria2Client(host="localhost", port=w.rpc_port, token=w.rpc_token, timeout=5)
+    try:
+        return _all_downloads(aria2, w.name)
+    except Aria2Error as exc:
+        log.warning("GET /api/torrents/: skipping mule=%s — %s", log_safe(w.name), exc)
+        return []
+
+
 @torrents_bp.get("/")
 def list_all():
     log.info("GET /api/torrents/")
     docker = get_docker_client()
     mules = [w for w in list_mules(docker) if w.status == "running"]
     log.debug("GET /api/torrents/: querying %d running mules", len(mules))
-    result = []
-    for w in mules:
-        aria2 = Aria2Client(host="localhost", port=w.rpc_port, token=w.rpc_token)
-        try:
-            items = _all_downloads(aria2, w.name)
-            result.extend(items)
-        except Aria2Error as exc:
-            log.warning("GET /api/torrents/: skipping mule=%s — %s", log_safe(w.name), exc)
+    result: list[dict] = []
+    # Query mules concurrently instead of serially.
+    if mules:
+        with ThreadPoolExecutor(max_workers=min(len(mules), 16)) as pool:
+            for items in pool.map(_downloads_for_mule, mules):
+                result.extend(items)
     log.info("GET /api/torrents/: returning %d torrents", len(result))
     return jsonify(result)
 

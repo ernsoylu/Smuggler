@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 
 from flask import Blueprint, jsonify
 
@@ -13,6 +14,19 @@ from api.database import get_setting
 
 log = get_logger(__name__)
 stats_bp = Blueprint("stats", __name__, url_prefix="/api/stats")
+
+# Short per-mule timeout: this endpoint is polled every ~2s by the UI, so a
+# hung mule must not block the request for the default 10s.
+_POLL_TIMEOUT = 3
+
+
+def _mule_global_stat(w) -> dict | None:
+    aria2 = Aria2Client(host="localhost", port=w.rpc_port, token=w.rpc_token, timeout=_POLL_TIMEOUT)
+    try:
+        return aria2.get_global_stat()
+    except Aria2Error as exc:
+        log.warning("GET /api/stats/: skipping mule=%s — %s", w.name, exc)
+        return None
 
 
 @stats_bp.get("/")
@@ -28,17 +42,21 @@ def global_stats():
     num_waiting = 0
     num_stopped = 0
 
-    for w in mules:
-        aria2 = Aria2Client(host="localhost", port=w.rpc_port, token=w.rpc_token)
-        try:
-            gs = aria2.get_global_stat()
-            total_down += int(gs.get("downloadSpeed", 0))
-            total_up += int(gs.get("uploadSpeed", 0))
-            num_active += int(gs.get("numActive", 0))
-            num_waiting += int(gs.get("numWaiting", 0))
-            num_stopped += int(gs.get("numStopped", 0))
-        except Aria2Error as exc:
-            log.warning("GET /api/stats/: skipping mule=%s — %s", w.name, exc)
+    # Query mules concurrently — the fan-out is otherwise O(mules) × RPC latency.
+    if mules:
+        with ThreadPoolExecutor(max_workers=min(len(mules), 16)) as pool:
+            results = list(pool.map(_mule_global_stat, mules))
+    else:
+        results = []
+
+    for gs in results:
+        if gs is None:
+            continue
+        total_down += int(gs.get("downloadSpeed", 0))
+        total_up += int(gs.get("uploadSpeed", 0))
+        num_active += int(gs.get("numActive", 0))
+        num_waiting += int(gs.get("numWaiting", 0))
+        num_stopped += int(gs.get("numStopped", 0))
 
     # Disk space for configured download directory
     disk_free: int | None = None

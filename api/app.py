@@ -41,7 +41,24 @@ def create_app() -> Flask:
         log.error("Failed to verify download_dir at startup: %s", exc)
 
     app = Flask(__name__)
-    CORS(app)
+
+    # Restrict cross-origin access. In production the frontend is served by nginx
+    # and proxies /api same-origin, so CORS is only needed for local dev / the
+    # desktop client. Override with SMG_CORS_ORIGINS (comma-separated, or "*").
+    import os as _os_cors
+    _origins_env = _os_cors.environ.get("SMG_CORS_ORIGINS", "").strip()
+    if _origins_env == "*":
+        cors_origins: object = "*"
+    elif _origins_env:
+        cors_origins = [o.strip() for o in _origins_env.split(",") if o.strip()]
+    else:
+        cors_origins = [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost",
+            "http://127.0.0.1",
+        ]
+    CORS(app, origins=cors_origins)
 
     app.register_blueprint(mules_bp)
     app.register_blueprint(torrents_bp)
@@ -61,8 +78,10 @@ def create_app() -> Flask:
 
     @app.errorhandler(500)
     def internal(e):
+        # Log the full error server-side but never leak internal exception
+        # detail (paths, stack info) to the client.
         log.error("500: %s", e)
-        return {"error": str(e)}, 500
+        return {"error": "Internal server error"}, 500
 
     log.info("create_app: blueprints registered — mules, torrents, stats, settings, configs, watchdog")
 

@@ -36,9 +36,12 @@ export function StatusFooter() {
     refetchInterval: 2_000,
   });
 
-  // Build rolling history from stats
+  // Build a rolling speed history from polled stats. Genuine time-series
+  // accumulation keyed on Date.now() (impure — must run in an effect), so the
+  // set-state-in-effect rule is intentionally waived here.
   useEffect(() => {
     if (!stats) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHistory(prev =>
       [...prev, { t: Date.now(), down: stats.download_speed, up: stats.upload_speed }]
         .slice(-MAX_POINTS)

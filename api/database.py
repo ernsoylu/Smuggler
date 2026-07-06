@@ -7,6 +7,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from api.crypto import decrypt, encrypt, encryption_enabled, is_encrypted
 from cli.log import get_logger, log_safe
 
 log = get_logger(__name__)
@@ -95,9 +96,35 @@ def init_db() -> None:
             "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
             (key, value),
         )
+    # Encrypt any legacy plaintext OpenVPN passwords now that a key is available.
+    _encrypt_legacy_passwords(conn)
     conn.commit()
     conn.close()
     log.info("init_db: done")
+
+
+def _encrypt_legacy_passwords(conn: sqlite3.Connection) -> None:
+    """Upgrade pre-encryption plaintext ``ovpn_password`` rows in place.
+
+    No-op when encryption is disabled (no ``SMG_SECRET_KEY``) or all rows are
+    already encrypted. Runs inside ``init_db``'s transaction.
+    """
+    if not encryption_enabled():
+        return
+    rows = conn.execute(
+        "SELECT id, ovpn_password FROM vpn_configs "
+        "WHERE ovpn_password IS NOT NULL AND ovpn_password != ''"
+    ).fetchall()
+    migrated = 0
+    for r in rows:
+        if not is_encrypted(r["ovpn_password"]):
+            conn.execute(
+                "UPDATE vpn_configs SET ovpn_password = ? WHERE id = ?",
+                (encrypt(r["ovpn_password"]), r["id"]),
+            )
+            migrated += 1
+    if migrated:
+        log.info("init_db: encrypted %d legacy plaintext OpenVPN password(s)", migrated)
 
 
 # ── Settings ──────────────────────────────────────────────────────────────────
@@ -182,6 +209,8 @@ def get_vpn_config(config_id: int) -> dict | None:
     d = dict(row)
     d["vpn_type"] = d.get("vpn_type") or "wireguard"
     d["requires_auth"] = bool(d.get("requires_auth", 0))
+    # Transparently decrypt the stored secret back to plaintext for callers.
+    d["ovpn_password"] = decrypt(d.get("ovpn_password"))
     return d
 
 
@@ -199,7 +228,8 @@ def add_vpn_config(
         "INSERT INTO vpn_configs "
         "(name, filename, content, vpn_type, requires_auth, ovpn_username, ovpn_password) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (name, filename, content, vpn_type, int(requires_auth), ovpn_username, ovpn_password),
+        (name, filename, content, vpn_type, int(requires_auth),
+         ovpn_username, encrypt(ovpn_password)),
     )
     _bump_state_version(conn)
     conn.commit()

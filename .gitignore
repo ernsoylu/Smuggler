@@ -16,10 +16,12 @@ env/
 .uv/
 uv.lock
 
-# pytest
+# pytest / coverage (generated reports — regenerated in CI for Sonar)
 .pytest_cache/
 .coverage
 htmlcov/
+coverage.xml
+web/coverage/
 
 # Downloads (runtime data — never commit downloaded files)
 downloads/*
