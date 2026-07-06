@@ -1,0 +1,105 @@
+"""Symmetric encryption for secrets at rest (e.g. OpenVPN passwords).
+
+Keyed off the ``SMG_SECRET_KEY`` environment variable. The raw env value may be
+any string — a stable Fernet key is derived from it with SHA-256 so operators
+don't have to hand-generate a url-safe base64 key.
+
+Ciphertext is stored with a ``fernet:`` prefix so legacy plaintext rows (written
+before encryption existed) are unambiguously distinguishable and can be migrated
+in place. Encryption is transparent to callers: when ``SMG_SECRET_KEY`` is unset
+values pass through as plaintext (with a one-time warning), preserving behaviour
+for deployments that have not yet configured a key.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import os
+
+from cryptography.fernet import Fernet, InvalidToken
+
+from cli.log import get_logger
+
+log = get_logger(__name__)
+
+_PREFIX = "fernet:"
+_ENV_VAR = "SMG_SECRET_KEY"
+
+# Ensures the "no key configured" warning is emitted at most once per process.
+_warned_no_key = False
+
+
+def _get_fernet() -> Fernet | None:
+    """Build a Fernet from ``SMG_SECRET_KEY``, or ``None`` if it is not set.
+
+    Not cached: the key is read from the environment on each call so tests (and
+    runtime re-configuration) see changes, and SHA-256 is cheap.
+    """
+    secret = os.environ.get(_ENV_VAR, "").strip()
+    if not secret:
+        return None
+    digest = hashlib.sha256(secret.encode("utf-8")).digest()
+    return Fernet(base64.urlsafe_b64encode(digest))
+
+
+def encryption_enabled() -> bool:
+    """True when a secret key is configured and encryption is active."""
+    return _get_fernet() is not None
+
+
+def is_encrypted(value: str | None) -> bool:
+    """True when ``value`` is a Smuggler-encrypted token (not legacy plaintext)."""
+    return bool(value) and value.startswith(_PREFIX)
+
+
+def encrypt(plaintext: str | None) -> str | None:
+    """Encrypt a secret for storage.
+
+    Returns ``None``/empty unchanged. When no key is configured, returns the
+    plaintext as-is (with a one-time warning) so the feature degrades gracefully.
+    """
+    global _warned_no_key
+    if not plaintext:
+        return plaintext
+    if is_encrypted(plaintext):
+        return plaintext  # already encrypted — do not double-wrap
+    fernet = _get_fernet()
+    if fernet is None:
+        if not _warned_no_key:
+            log.warning(
+                "%s is not set — secrets are stored in PLAINTEXT. "
+                "Set %s to enable encryption at rest.",
+                _ENV_VAR, _ENV_VAR,
+            )
+            _warned_no_key = True
+        return plaintext
+    token = fernet.encrypt(plaintext.encode("utf-8")).decode("ascii")
+    return _PREFIX + token
+
+
+def decrypt(value: str | None) -> str | None:
+    """Decrypt a stored secret back to plaintext.
+
+    Legacy plaintext values (no ``fernet:`` prefix) are returned unchanged so
+    older rows keep working. Returns ``None`` if an encrypted value cannot be
+    decrypted (missing/wrong key) rather than raising, so a bad key can't take
+    the whole API down.
+    """
+    if not value:
+        return value
+    if not is_encrypted(value):
+        return value  # legacy plaintext row
+    fernet = _get_fernet()
+    if fernet is None:
+        log.error(
+            "%s is not set but an encrypted secret was found — cannot decrypt.",
+            _ENV_VAR,
+        )
+        return None
+    token = value[len(_PREFIX):]
+    try:
+        return fernet.decrypt(token.encode("ascii")).decode("utf-8")
+    except InvalidToken:
+        log.error("Failed to decrypt secret — wrong %s? Returning None.", _ENV_VAR)
+        return None

@@ -241,12 +241,29 @@ ok "downloads/, vpn_configs/, logs/ ready"
 # ── 11. .env file ───────────────────────────────────────────────────────────
 section "Environment config"
 cd "$ROOT"
+gen_secret_key() {
+    openssl rand -base64 32 2>/dev/null \
+        || python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+}
+
 if [[ ! -f .env ]]; then
-    cat > .env <<'EOF'
+    SMG_KEY=$(gen_secret_key)
+    cat > .env <<EOF
 DVD_LOGGING=true
 DVD_LOG_LEVEL=INFO
+# Secret key for encrypting stored credentials (OpenVPN passwords) at rest.
+# Keep this stable and private — changing it makes existing encrypted secrets
+# unrecoverable. Leave empty to disable encryption (not recommended).
+SMG_SECRET_KEY=${SMG_KEY}
 EOF
-    ok ".env created with defaults"
+    ok ".env created with defaults (generated SMG_SECRET_KEY)"
+elif ! grep -q '^SMG_SECRET_KEY=' .env; then
+    {
+        echo ""
+        echo "# Secret key for encrypting stored credentials at rest (added by setup)."
+        echo "SMG_SECRET_KEY=$(gen_secret_key)"
+    } >> .env
+    ok ".env exists — appended a generated SMG_SECRET_KEY"
 else
     ok ".env already exists — skipping"
 fi

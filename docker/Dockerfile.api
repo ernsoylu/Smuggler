@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
@@ -7,10 +7,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy requirements if available
+# Install runtime dependencies. requirements.txt is the single source of truth
+# for the API image and already pins flask, flask-cors, requests, docker,
+# python-dotenv and gunicorn — do not swallow failures here.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt || true \
- && pip install --no-cache-dir flask requests docker gunicorn flask-cors
+RUN pip install --no-cache-dir -r requirements.txt
 
 # We will mount the working directory via docker-compose, 
 # but copying the code makes the image self-contained if needed.

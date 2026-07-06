@@ -2,7 +2,7 @@
 
 ## Tech Stack
 - **Backend:** Python 3.12+ (uv), Flask, Docker SDK, aria2-rpc.
-- **Frontend:** React 18 (Vite), TS, Tailwind, TanStack Query, Recharts.
+- **Frontend:** React 19 (Vite), TS, Tailwind, TanStack Query, D3.
 - **VPN:** WireGuard (raw wg/ip) & OpenVPN (tun0).
 - **Storage:** SQLite (WAL), Migration-aware.
 
@@ -11,7 +11,7 @@
 2. **Naming:** Always use "mule", never "worker".
 3. **Labels:** Use `smuggler.*` namespace for Docker labels.
 4. **No Code Duplication:** API blueprints must call `cli/` clients (docker/aria2).
-5. **Security:** Never log or expose PrivateKeys/Credentials. Use environment variables for mule credentials.
+5. **Security:** Never log or expose PrivateKeys/Credentials. Use environment variables for mule credentials. Stored OpenVPN passwords are encrypted at rest via `api/crypto.py` (Fernet, keyed off `SMG_SECRET_KEY`); keep encrypt/decrypt inside `api/database.py` so callers only ever see plaintext.
 6. **Path Resolution:** Use `SMG_HOST_ROOT` for paths to be mounted into containers (data/tmp, downloads).
 
 ## Core Commands

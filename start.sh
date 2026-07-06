@@ -49,7 +49,9 @@ build_desktop() {
 
 debug_api() {
     echo "[+] Starting Python API server (127.0.0.1:55555)…"
-    python3 main.py &
+    # main.py is the WSGI entrypoint (defines `app`) — it does NOT serve.
+    # api.run is the development server that actually binds and listens.
+    python3 -m api.run &
 }
 
 debug_web() {

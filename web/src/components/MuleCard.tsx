@@ -149,20 +149,26 @@ export function WorkerCard({ worker }: Readonly<Props>) {
     enabled: expanded && worker.status === 'running',
   });
 
-  // Build speed history from torrent data
+  // Reset history when the card collapses — render-phase "previous prop"
+  // pattern (no extra render, unlike an effect).
+  const [prevExpanded, setPrevExpanded] = useState(expanded);
+  if (expanded !== prevExpanded) {
+    setPrevExpanded(expanded);
+    if (!expanded) setHistory([]);
+  }
+
+  // Build a rolling speed history from polled torrent data. This is a genuine
+  // time-series accumulation keyed on Date.now() (an impure call that must run
+  // in an effect, not during render), so the set-state-in-effect rule is waived.
   useEffect(() => {
     if (!expanded || torrents.length === 0) return;
     const dl = torrents.reduce((s, t) => s + (t.download_speed ?? 0), 0);
     const ul = torrents.reduce((s, t) => s + (t.upload_speed ?? 0), 0);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHistory(prev =>
       [...prev, { t: Date.now(), down: dl, up: ul }].slice(-MAX_POINTS)
     );
   }, [torrents, expanded]);
-
-  // Reset history when collapsed
-  useEffect(() => {
-    if (!expanded) setHistory([]);
-  }, [expanded]);
 
   const isRunning = worker.status === 'running';
   const statusColor = isRunning ? 'bg-emerald-500' : 'bg-neutral-500';

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getSettings, saveSettings } from '../api/client';
 import { FolderOpen, Save, CheckCircle, AlertCircle, Gauge, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react';
@@ -18,16 +18,18 @@ export function SettingsPage() {
     queryFn: getSettings,
   });
 
-  useEffect(() => {
-    if (settings) {
-      setForm({
-        download_dir: settings.download_dir || '',
-        max_concurrent_downloads: settings.max_concurrent_downloads || '5',
-        max_download_speed: settings.max_download_speed || '0',
-        max_upload_speed: settings.max_upload_speed || '0',
-      });
-    }
-  }, [settings]);
+  // Populate the form once the settings load / change — render-phase sync from
+  // the fetched data avoids the extra render an effect would cause.
+  const [prevSettings, setPrevSettings] = useState(settings);
+  if (settings && settings !== prevSettings) {
+    setPrevSettings(settings);
+    setForm({
+      download_dir: settings.download_dir || '',
+      max_concurrent_downloads: settings.max_concurrent_downloads || '5',
+      max_download_speed: settings.max_download_speed || '0',
+      max_upload_speed: settings.max_upload_speed || '0',
+    });
+  }
 
   const save = useMutation({
     mutationFn: () => saveSettings(form),

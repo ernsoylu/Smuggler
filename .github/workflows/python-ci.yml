@@ -50,6 +50,13 @@ jobs:
 
       - name: Run tests with coverage
         if: matrix.python-version == '3.12'
-        run: uv run pytest tests/ -q --tb=short --cov=cli --cov=api --cov-report=term-missing
+        run: uv run pytest tests/ -q --tb=short --cov=cli --cov=api --cov-report=term-missing --cov-report=xml
         env:
           DVD_LOGGING: "false"
+
+      - name: Upload coverage report
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-coverage
+          path: coverage.xml

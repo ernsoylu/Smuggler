@@ -1,0 +1,80 @@
+name: SonarQube Cloud
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  sonar:
+    name: Analyze & Quality Gate
+    runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+    steps:
+      # SonarQube Cloud needs a token that only the repo owner can provision.
+      # When it's missing, skip the analysis instead of red-failing every PR;
+      # the job activates automatically once SONAR_TOKEN is added to the repo.
+      - name: Check for SONAR_TOKEN
+        id: check
+        run: |
+          if [ -n "$SONAR_TOKEN" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SONAR_TOKEN is not set — skipping SonarQube Cloud analysis."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.enabled == 'true'
+        with:
+          # Full history so Sonar can attribute issues/coverage to New Code.
+          fetch-depth: 0
+
+      # ── Python coverage (coverage.xml) ────────────────────────────────────
+      - name: Install uv
+        if: steps.check.outputs.enabled == 'true'
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+        with:
+          version: "latest"
+
+      - name: Set up Python 3.12
+        if: steps.check.outputs.enabled == 'true'
+        run: uv python install 3.12
+
+      - name: Install Python dependencies
+        if: steps.check.outputs.enabled == 'true'
+        run: uv sync --all-extras
+
+      - name: Run Python tests with coverage
+        if: steps.check.outputs.enabled == 'true'
+        run: uv run pytest tests/ -q --tb=short --cov=cli --cov=api --cov-report=xml
+        env:
+          DVD_LOGGING: "false"
+
+      # ── Frontend coverage (web/coverage/lcov.info) ────────────────────────
+      - name: Set up Node.js
+        if: steps.check.outputs.enabled == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install frontend dependencies
+        if: steps.check.outputs.enabled == 'true'
+        working-directory: web
+        run: npm ci
+
+      - name: Run frontend tests with coverage
+        if: steps.check.outputs.enabled == 'true'
+        working-directory: web
+        run: npm run test:coverage
+
+      # ── SonarQube Cloud scan + quality gate ───────────────────────────────
+      - name: SonarQube Scan
+        if: steps.check.outputs.enabled == 'true'
+        uses: SonarSource/sonarqube-scan-action@c7ee0f9df90b7aa20e8dcf9695dcfe2e7da5b4f2 # v7
