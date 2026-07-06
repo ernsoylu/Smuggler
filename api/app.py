@@ -37,8 +37,8 @@ def create_app() -> Flask:
                 os.makedirs(dl_dir, exist_ok=True)
             if not os.access(dl_dir, os.W_OK):
                 log.critical("SECURITY/CONFIG: Download directory %s is NOT WRITABLE. Please fix permissions.", dl_dir)
-    except Exception as exc:
-        log.error("Failed to verify download_dir at startup: %s", exc)
+    except Exception:
+        log.exception("Failed to verify download_dir at startup")
 
     app = Flask(__name__)
 

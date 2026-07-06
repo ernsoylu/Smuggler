@@ -14,7 +14,6 @@ env/
 
 # uv
 .uv/
-uv.lock
 
 # pytest / coverage (generated reports — regenerated in CI for Sonar)
 .pytest_cache/

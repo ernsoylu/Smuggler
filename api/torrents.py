@@ -155,7 +155,7 @@ def list_for_mule(mule_name: str):
         log.info("GET /api/torrents/%s: returning %d torrents", safe, len(result))
         return jsonify(result)
     except Aria2Error as exc:
-        log.error("GET /api/torrents/%s: aria2 error — %s", safe, exc)
+        log.exception("GET /api/torrents/%s: aria2 error", safe)
         return jsonify({"error": str(exc)}), 502
 
 
@@ -181,7 +181,7 @@ def _add_magnet(aria2: Aria2Client, mule_name: str):
         log.info("POST /api/torrents/%s: magnet added gid=%s", safe, log_safe(gid))
         return jsonify({"gid": gid}), 201
     except Aria2Error as exc:
-        log.error("POST /api/torrents/%s: aria2 error adding magnet — %s", safe, exc)
+        log.exception("POST /api/torrents/%s: aria2 error adding magnet", safe)
         return jsonify({"error": str(exc)}), 502
 
 
@@ -202,7 +202,7 @@ def _add_torrent_file(aria2: Aria2Client, mule_name: str):
         log.info("POST /api/torrents/%s: torrent file added gid=%s", safe, log_safe(gid))
         return jsonify({"gid": gid}), 201
     except Aria2Error as exc:
-        log.error("POST /api/torrents/%s: aria2 error adding torrent file — %s", safe, exc)
+        log.exception("POST /api/torrents/%s: aria2 error adding torrent file", safe)
         return jsonify({"error": str(exc)}), 502
     finally:
         try:
@@ -297,7 +297,7 @@ def remove(mule_name: str, gid: str):
         log.warning("DELETE /api/torrents/%s/%s: mule error — %s", safe, safe_gid, exc)
         return jsonify({"error": str(exc)}), 404
     except Aria2Error as exc:
-        log.error("DELETE /api/torrents/%s/%s: aria2 error — %s", safe, safe_gid, exc)
+        log.exception("DELETE /api/torrents/%s/%s: aria2 error", safe, safe_gid)
         return jsonify({"error": str(exc)}), 502
 
     host_dl_dir = ""
@@ -331,7 +331,7 @@ def pause(mule_name: str, gid: str):
         log.warning("POST /api/torrents/%s/%s/pause: mule error — %s", safe, safe_gid, exc)
         return jsonify({"error": str(exc)}), 404
     except Aria2Error as exc:
-        log.error("POST /api/torrents/%s/%s/pause: aria2 error — %s", safe, safe_gid, exc)
+        log.exception("POST /api/torrents/%s/%s/pause: aria2 error", safe, safe_gid)
         return jsonify({"error": str(exc)}), 502
 
 
@@ -350,7 +350,7 @@ def resume(mule_name: str, gid: str):
         log.warning("POST /api/torrents/%s/%s/resume: mule error — %s", safe, safe_gid, exc)
         return jsonify({"error": str(exc)}), 404
     except Aria2Error as exc:
-        log.error("POST /api/torrents/%s/%s/resume: aria2 error — %s", safe, safe_gid, exc)
+        log.exception("POST /api/torrents/%s/%s/resume: aria2 error", safe, safe_gid)
         return jsonify({"error": str(exc)}), 502
 
 
@@ -396,7 +396,7 @@ def get_options(mule_name: str, gid: str):
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 404
     except Aria2Error as exc:
-        log.error("GET /api/torrents/%s/%s/options: aria2 error — %s", safe, safe_gid, exc)
+        log.exception("GET /api/torrents/%s/%s/options: aria2 error", safe, safe_gid)
         return jsonify({"error": str(exc)}), 502
 
     return jsonify({
@@ -430,7 +430,7 @@ def set_options(mule_name: str, gid: str):
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 404
     except Aria2Error as exc:
-        log.error("PATCH /api/torrents/%s/%s/options: aria2 error — %s", safe, safe_gid, exc)
+        log.exception("PATCH /api/torrents/%s/%s/options: aria2 error", safe, safe_gid)
         return jsonify({"error": str(exc)}), 502
 
 
@@ -454,5 +454,5 @@ def set_file_selection(mule_name: str, gid: str):
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 404
     except Aria2Error as exc:
-        log.error("PATCH /api/torrents/%s/%s/files: aria2 error — %s", safe, safe_gid, exc)
+        log.exception("PATCH /api/torrents/%s/%s/files: aria2 error", safe, safe_gid)
         return jsonify({"error": str(exc)}), 502

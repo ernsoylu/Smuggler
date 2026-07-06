@@ -40,7 +40,7 @@ export function SpeedGraph({ stats, data, height = 140 }: Readonly<Props>) {
   const svgRef  = useRef<SVGSVGElement>(null);
   // Unique ID prefix so multiple graphs on the same page don't clash on <defs>.
   // useId is stable and collision-free without the impurity of Math.random().
-  const uid = `sg-${useId().replace(/:/g, '')}`;
+  const uid = `sg-${useId().replaceAll(':', '')}`;
 
   const [internalHistory, setInternalHistory] = useState<DataPoint[]>([]);
   const [width, setWidth] = useState(0);
