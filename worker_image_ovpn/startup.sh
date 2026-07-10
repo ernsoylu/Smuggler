@@ -56,6 +56,7 @@ log "Original gateway: ${ORIG_GW} dev ${ORIG_DEV}"
 # ─── 3. Pin the VPN server endpoint to the original gateway ─────────────────
 REMOTE_HOST=$(grep -iP '^\s*remote\s+\S+' "${OVPN_CONF}" \
               | awk '{print $2}' | head -1 || true)
+REMOTE_IP=""
 
 if [[ -n "${REMOTE_HOST}" ]] && [[ -n "${ORIG_GW}" ]]; then
     REMOTE_IP=$(getent ahostsv4 "${REMOTE_HOST}" 2>/dev/null \
@@ -77,6 +78,11 @@ OVPN_ARGS=(
     --dev      "${VPN_IFACE}"
     --dev-type tun
     --script-security 2
+    # Force ALL traffic through the tunnel regardless of what the .ovpn ships.
+    # Without this, a config lacking redirect-gateway leaves the default route on
+    # eth0 and aria2 leaks the real IP — and the tun0-bound checks would not
+    # notice. 'def1' uses 0.0.0.0/1 + 128.0.0.0/1 so the endpoint stays reachable.
+    --redirect-gateway def1
     --log /proc/1/fd/1
 )
 
@@ -120,6 +126,43 @@ ETH0_IP=$(ip -4 addr show eth0 2>/dev/null \
 if [[ -n "${ETH0_IP}" ]] && [[ -n "${ORIG_GW}" ]]; then
     ip rule add from "${ETH0_IP}" table 128 2>/dev/null || true
     ip route add default via "${ORIG_GW}" dev "${ORIG_DEV}" table 128 2>/dev/null || true
+fi
+
+# ─── 6b. DNS lock, IPv6 block, and firewall kill-switch ─────────────────────
+# The default route goes through tun0 (--redirect-gateway def1). Close the
+# remaining leak paths on the real NIC: DNS and any fallback egress.
+
+# DNS: prefer the config's pushed DNS, else public resolvers — both via tun0.
+# Block Docker's embedded resolver (127.0.0.11) so a query can never egress via
+# the host/eth0 and reveal what the mule is resolving (identity correlation).
+OVPN_DNS=$(grep -iP 'dhcp-option\s+DNS' "${OVPN_CONF}" 2>/dev/null \
+           | grep -oP '[0-9]+(\.[0-9]+){3}' | head -1 || true)
+if [[ -n "${OVPN_DNS}" ]]; then
+    printf "nameserver %s\nnameserver 1.1.1.1\nnameserver 8.8.8.8\n" "${OVPN_DNS}" > /etc/resolv.conf
+    log "DNS locked to VPN DNS (${OVPN_DNS}) + public fallbacks (via ${VPN_IFACE})"
+else
+    printf "nameserver 1.1.1.1\nnameserver 8.8.8.8\n" > /etc/resolv.conf
+    log "DNS locked to public resolvers (via ${VPN_IFACE})"
+fi
+iptables -A OUTPUT -d 127.0.0.11 -p udp --dport 53 -j REJECT 2>/dev/null || true
+iptables -A OUTPUT -d 127.0.0.11 -p tcp --dport 53 -j REJECT 2>/dev/null || true
+
+# IPv6: this tunnel carries IPv4 only — block IPv6 egress on the real NIC so v6
+# traffic (including BitTorrent/DHT over v6) cannot bypass the tunnel.
+ip6tables -A OUTPUT -o "${ORIG_DEV}" -d fe80::/10 -j ACCEPT 2>/dev/null || true
+ip6tables -A OUTPUT -o "${ORIG_DEV}" -j DROP 2>/dev/null || true
+
+# Firewall kill-switch on the real NIC: permit only VPN transport to the pinned
+# endpoint and aria2 RPC replies; drop everything else. If tun0 dies (OpenVPN
+# also restores the eth0 default route on exit), aria2 traffic is dropped here
+# instead of leaking the real IP during the window before the monitor reacts.
+iptables -A OUTPUT -o "${ORIG_DEV}" -p tcp --sport 6800 -j ACCEPT 2>/dev/null || true
+if [[ -n "${REMOTE_IP}" ]]; then
+    iptables -A OUTPUT -o "${ORIG_DEV}" -d "${REMOTE_IP}" -j ACCEPT 2>/dev/null || true
+    iptables -A OUTPUT -o "${ORIG_DEV}" -j DROP 2>/dev/null || true
+    log "Kill-switch armed: only VPN endpoint ${REMOTE_IP} + RPC allowed on ${ORIG_DEV}"
+else
+    warn "VPN endpoint IP unknown — firewall kill-switch NOT armed (routing only)"
 fi
 
 # ─── 7. Remove credentials from disk ────────────────────────────────────────
@@ -226,16 +269,19 @@ kill_switch() {
                 # Use icanhazip.com for health check as it's not aggressively rate-limited
                 local live_ip
                 live_ip=$(curl -s -4 --interface "${VPN_IFACE}" --max-time 10 "https://icanhazip.com" | tr -d '[:space:]' || echo "")
-                
+                # Probe via the default route too (the path aria2 actually uses).
+                # A mismatch means traffic is exiting somewhere other than tun0.
+                local route_ip
+                route_ip=$(curl -s -4 --max-time 10 "https://icanhazip.com" | tr -d '[:space:]' || echo "")
+
                 if [[ -z "${live_ip}" ]]; then
                     reason="runtime IP check failed — no connectivity through ${VPN_IFACE}"
+                elif echo "${live_ip}" | grep -qP '^(172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|10\.)'; then
+                    reason="IP leak detected: external IP ${live_ip} is a private address"
+                elif [[ -n "${route_ip}" && "${route_ip}" != "${live_ip}" ]]; then
+                    reason="IP leak detected: default-route exit ${route_ip} != VPN exit ${live_ip}"
                 else
-                    # Flag if IP changed to a private/Docker address
-                    if echo "${live_ip}" | grep -qP '^(172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|10\.)'; then
-                        reason="IP leak detected: external IP ${live_ip} is a private address"
-                    else
-                        write_health "healthy" "${live_ip}" "periodic check OK"
-                    fi
+                    write_health "healthy" "${live_ip}" "periodic check OK"
                 fi
             fi
         fi

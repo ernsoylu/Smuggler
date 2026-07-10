@@ -6,7 +6,6 @@ import base64
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 import requests.exceptions

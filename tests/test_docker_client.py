@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 import tempfile
 import os
 
@@ -13,6 +13,7 @@ import pytest
 from cli.docker_client import (
     MuleInfo,
     build_image,
+    check_mule_vpn,
     exec_in_mule,
     get_container_logs,
     get_docker_client,
@@ -93,7 +94,10 @@ class TestStartMule:
             call_kwargs = mock_docker_client.containers.run.call_args
             assert call_kwargs.kwargs["image"] == MULE_IMAGE
             assert "NET_ADMIN" in call_kwargs.kwargs["cap_add"]
-            assert "SYS_MODULE" in call_kwargs.kwargs["cap_add"]
+            # SYS_MODULE must NOT be granted — it is a host-kernel escape primitive.
+            assert "SYS_MODULE" not in call_kwargs.kwargs["cap_add"]
+            # aria2 RPC must be published on loopback only, not 0.0.0.0.
+            assert call_kwargs.kwargs["ports"]["6800/tcp"] == ("127.0.0.1", 16800)
             assert MULE_LABEL in call_kwargs.kwargs["labels"]
             assert call_kwargs.kwargs["restart_policy"] == {"Name": "unless-stopped"}
         finally:
@@ -392,3 +396,64 @@ class TestGetContainerLogs:
         result = get_container_logs(mock_docker_client, "smuggler-mule-test", tail=10)
         assert result == "line1\nline2\n"
         mock_container.logs.assert_called_once_with(tail=10)
+
+
+# ─── check_mule_vpn: real-egress leak detection ──────────────────────────────
+
+class TestCheckMuleVpnLeakDetection:
+    def _running_mule(self):
+        c = MagicMock()
+        c.name = "smuggler-mule-test"
+        c.short_id = "abc"
+        c.status = "running"
+        c.labels = {
+            "smuggler.mule": "true",
+            "smuggler.rpc_token": "tok",
+            "smuggler.rpc_port": "16800",
+            "smuggler.vpn_config": "vpn.conf",
+            "smuggler.vpn_type": "wireguard",
+        }
+        return c
+
+    def test_healthy_when_default_route_matches_tunnel(self, mock_docker_client):
+        c = self._running_mule()
+        # Both the tunnel-bound probe and the default-route probe see the same
+        # public IP → aria2's traffic really does exit via the VPN.
+        c.exec_run.side_effect = lambda cmd, **kw: (0, b"203.0.113.9\n")
+        mock_docker_client.containers.get.return_value = c
+        result = check_mule_vpn(mock_docker_client, "smuggler-mule-test")
+        assert result["healthy"] is True
+        assert result["kind"] == "healthy"
+        assert result["ip"] == "203.0.113.9"
+
+    def test_flags_leak_when_default_route_differs_from_tunnel(self, mock_docker_client):
+        c = self._running_mule()
+
+        def exec_side(cmd, **kw):
+            # Interface-bound probe sees the true VPN exit; the default route
+            # (what aria2 uses) exits via a different IP → real-IP leak.
+            if "--interface" in cmd:
+                return (0, b"203.0.113.9\n")
+            return (0, b"198.51.100.7\n")
+
+        c.exec_run.side_effect = exec_side
+        mock_docker_client.containers.get.return_value = c
+        result = check_mule_vpn(mock_docker_client, "smuggler-mule-test")
+        assert result["healthy"] is False
+        assert result["kind"] == "ip_leak"
+        assert result["ip"] == "198.51.100.7"
+
+    def test_no_false_leak_when_default_route_probe_fails(self, mock_docker_client):
+        c = self._running_mule()
+
+        def exec_side(cmd, **kw):
+            if "--interface" in cmd:
+                return (0, b"203.0.113.9\n")
+            return (28, b"")  # default-route probe times out / is dropped
+
+        c.exec_run.side_effect = exec_side
+        mock_docker_client.containers.get.return_value = c
+        result = check_mule_vpn(mock_docker_client, "smuggler-mule-test")
+        # Tunnel proved healthy; a failed default-route probe must not be a leak.
+        assert result["healthy"] is True
+        assert result["kind"] == "healthy"

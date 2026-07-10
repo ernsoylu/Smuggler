@@ -42,6 +42,9 @@ public final class ApiClient {
     private final String baseUrl;
     private final HttpClient http;
     private final ObjectMapper json;
+    // Optional token for a token-gated API (SMG_API_TOKEN). Sent as
+    // X-Smuggler-Token on every request when set.
+    private final String apiToken;
 
     public ApiClient() {
         this(System.getenv().getOrDefault("SMG_API_URL", DEFAULT_BASE));
@@ -49,6 +52,7 @@ public final class ApiClient {
 
     public ApiClient(String baseUrl) {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        this.apiToken = System.getenv("SMG_API_TOKEN");
         this.http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .build();
@@ -57,6 +61,15 @@ public final class ApiClient {
     }
 
     public String baseUrl() { return baseUrl; }
+
+    /** Build a request to {@code path}, attaching the API token header when configured. */
+    private HttpRequest.Builder authReq(String path) {
+        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(baseUrl + path));
+        if (apiToken != null && !apiToken.isBlank()) {
+            b.header("X-Smuggler-Token", apiToken);
+        }
+        return b;
+    }
 
     // ── Health ────────────────────────────────────────────────────────────────
 
@@ -236,7 +249,7 @@ public final class ApiClient {
     // ── Low-level helpers ─────────────────────────────────────────────────────
 
     private <T> CompletableFuture<T> getJson(String path, Class<T> cls) {
-        HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + path))
+        HttpRequest req = authReq(path)
             .timeout(Duration.ofSeconds(10))
             .GET()
             .build();
@@ -245,7 +258,7 @@ public final class ApiClient {
     }
 
     private <T> CompletableFuture<List<T>> getList(String path, TypeReference<List<T>> ref) {
-        HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + path))
+        HttpRequest req = authReq(path)
             .timeout(Duration.ofSeconds(10))
             .GET()
             .build();
@@ -254,7 +267,7 @@ public final class ApiClient {
     }
 
     private <T> CompletableFuture<T> postJson(String path, String body, Class<T> cls) {
-        HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + path))
+        HttpRequest req = authReq(path)
             .timeout(Duration.ofSeconds(60))
             .header("Content-Type", "application/json")
             .POST(BodyPublishers.ofString(body, StandardCharsets.UTF_8))
@@ -264,7 +277,7 @@ public final class ApiClient {
     }
 
     private <T> CompletableFuture<T> postJson(String path, String body, TypeReference<T> ref) {
-        HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + path))
+        HttpRequest req = authReq(path)
             .timeout(Duration.ofSeconds(60))
             .header("Content-Type", "application/json")
             .POST(BodyPublishers.ofString(body, StandardCharsets.UTF_8))
@@ -274,7 +287,7 @@ public final class ApiClient {
     }
 
     private CompletableFuture<Void> patchJson(String path, String body) {
-        HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + path))
+        HttpRequest req = authReq(path)
             .timeout(Duration.ofSeconds(15))
             .header("Content-Type", "application/json")
             .method("PATCH", BodyPublishers.ofString(body, StandardCharsets.UTF_8))
@@ -285,7 +298,7 @@ public final class ApiClient {
     }
 
     private CompletableFuture<Void> delete(String path) {
-        HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + path))
+        HttpRequest req = authReq(path)
             .timeout(Duration.ofSeconds(30))
             .DELETE()
             .build();
@@ -296,7 +309,7 @@ public final class ApiClient {
 
     private <T> CompletableFuture<T> postMultipart(String path, Multipart mp, Class<T> cls) {
         BodyPublisher pub = mp.bodyPublisher();
-        HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + path))
+        HttpRequest req = authReq(path)
             .timeout(Duration.ofSeconds(60))
             .header("Content-Type", "multipart/form-data; boundary=" + mp.boundary)
             .POST(pub)
@@ -307,7 +320,7 @@ public final class ApiClient {
 
     private <T> CompletableFuture<T> postMultipart(String path, Multipart mp, TypeReference<T> ref) {
         BodyPublisher pub = mp.bodyPublisher();
-        HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + path))
+        HttpRequest req = authReq(path)
             .timeout(Duration.ofSeconds(60))
             .header("Content-Type", "multipart/form-data; boundary=" + mp.boundary)
             .POST(pub)

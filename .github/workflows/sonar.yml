@@ -7,6 +7,13 @@ on:
     branches: [main, master]
     types: [opened, synchronize, reopened]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: sonar-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   sonar:
     name: Analyze & Quality Gate

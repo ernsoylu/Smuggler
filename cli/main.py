@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import sys
 import time
 import webbrowser
 from pathlib import Path
@@ -79,6 +78,13 @@ _VPN_TYPE_DEFAULTS = {
 @click.version_option("0.1.0", prog_name="smg")
 def cli() -> None:
     """smg — Smuggle torrents through isolated per-mule WireGuard or OpenVPN tunnels."""
+    # Load .env so CLI-driven deploys share the API's SMG_SECRET_KEY and encrypt
+    # stored credentials at rest instead of silently writing plaintext.
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
 
 
 @cli.command("build")
@@ -177,8 +183,10 @@ def web(no_open: bool) -> None:
         console.print(f"[green]✓[/green] {API_CONTAINER} and {UI_CONTAINER} already running")
     else:
         services = []
-        if not api_running: services.append(API_CONTAINER)
-        if not ui_running:  services.append(UI_CONTAINER)
+        if not api_running:
+            services.append(API_CONTAINER)
+        if not ui_running:
+            services.append(UI_CONTAINER)
         console.print(f"[yellow]…[/yellow] starting: {', '.join(services)}")
         try:
             _compose_up(*services)

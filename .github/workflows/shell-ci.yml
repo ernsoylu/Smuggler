@@ -1,0 +1,26 @@
+name: Shell CI
+
+# Reusable workflow — invoked by the CI orchestrator (.github/workflows/ci.yml).
+# The mule startup scripts implement the VPN kill-switch and DNS/IPv6 leak
+# protection, so a shell bug is a security bug: lint every shell script.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          # Start at error severity so the gate goes green on first run; raise to
+          # "warning" once the scripts are confirmed clean in CI.
+          severity: error
+        env:
+          SHELLCHECK_OPTS: -e SC1091

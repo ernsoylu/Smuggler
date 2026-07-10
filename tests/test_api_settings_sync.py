@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from api.settings_sync import apply_settings_to_mule, sync_all_mules
 

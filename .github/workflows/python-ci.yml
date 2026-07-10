@@ -1,31 +1,40 @@
 name: Python CI
 
+# Reusable workflow — invoked by the CI orchestrator (.github/workflows/ci.yml),
+# which owns path filtering, concurrency, and the single required "CI Gate".
 on:
-  push:
-    branches: [main, master]
-    paths:
-      - "api/**"
-      - "cli/**"
-      - "tests/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - ".github/workflows/python-ci.yml"
-  pull_request:
-    branches: [main, master]
-    paths:
-      - "api/**"
-      - "cli/**"
-      - "tests/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - ".github/workflows/python-ci.yml"
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Ruff
+        run: uv run ruff check --output-format=github .
+
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
-
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.12", "3.13"]
 
@@ -36,6 +45,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+          enable-cache: true
 
       - name: Set up Python ${{ matrix.python-version }}
         run: uv python install ${{ matrix.python-version }}
@@ -43,14 +53,16 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras
 
+      # One run per interpreter — coverage-instrumented on 3.12 (fed to Sonar),
+      # plain on 3.13 so we still exercise the newer runtime.
       - name: Run tests
-        run: uv run pytest tests/ -q --tb=short
-        env:
-          DVD_LOGGING: "false"
-
-      - name: Run tests with coverage
-        if: matrix.python-version == '3.12'
-        run: uv run pytest tests/ -q --tb=short --cov=cli --cov=api --cov-report=term-missing --cov-report=xml
+        run: |
+          if [ "${{ matrix.python-version }}" = "3.12" ]; then
+            uv run pytest tests/ -q --tb=short \
+              --cov=cli --cov=api --cov-report=term-missing --cov-report=xml
+          else
+            uv run pytest tests/ -q --tb=short
+          fi
         env:
           DVD_LOGGING: "false"
 

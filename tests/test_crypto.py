@@ -149,6 +149,82 @@ class TestEncryptionAtRest:
         assert db.get_vpn_config(config_id)["ovpn_password"] == "s3cr3t"
 
 
+def _raw_content(db_file, config_id: int):
+    conn = sqlite3.connect(str(db_file))
+    row = conn.execute(
+        "SELECT content FROM vpn_configs WHERE id = ?", (config_id,)
+    ).fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+# ─── binary (config body) round-trip ─────────────────────────────────────────
+
+class TestBytesRoundTrip:
+    def test_encrypt_then_decrypt_recovers_bytes(self, with_key):
+        token = crypto.encrypt_bytes(b"[Interface]\nPrivateKey=abc\n")
+        assert token.startswith(b"fernet:")
+        assert crypto.decrypt_bytes(token) == b"[Interface]\nPrivateKey=abc\n"
+
+    def test_ciphertext_hides_plaintext(self, with_key):
+        token = crypto.encrypt_bytes(b"PrivateKey=SUPERSECRET")
+        assert b"SUPERSECRET" not in token
+
+    @pytest.mark.parametrize("value", [None, b""])
+    def test_empty_passthrough(self, with_key, value):
+        assert crypto.encrypt_bytes(value) == value
+        assert crypto.decrypt_bytes(value) == value
+
+    def test_encrypt_does_not_double_wrap(self, with_key):
+        once = crypto.encrypt_bytes(b"data")
+        twice = crypto.encrypt_bytes(once)
+        assert once == twice
+        assert crypto.decrypt_bytes(twice) == b"data"
+
+    def test_without_key_passthrough(self, without_key):
+        assert crypto.encrypt_bytes(b"data") == b"data"
+        assert crypto.decrypt_bytes(b"data") == b"data"
+
+
+class TestConfigBodyAtRest:
+    def test_content_stored_encrypted_but_read_plaintext(self, with_key, temp_db):
+        cid = db.add_vpn_config(
+            "wg", "wg0.conf", b"[Interface]\nPrivateKey=xyz\n", "wireguard"
+        )
+        raw = _raw_content(temp_db, cid)
+        assert raw is not None and raw.startswith(b"fernet:")
+        assert b"PrivateKey=xyz" not in raw
+        assert db.get_vpn_config(cid)["content"] == b"[Interface]\nPrivateKey=xyz\n"
+
+    def test_content_plaintext_without_key(self, without_key, temp_db):
+        cid = db.add_vpn_config("wg", "wg0.conf", b"[Interface]\n", "wireguard")
+        assert _raw_content(temp_db, cid) == b"[Interface]\n"
+        assert db.get_vpn_config(cid)["content"] == b"[Interface]\n"
+
+
+class TestLegacyContentMigration:
+    def test_init_db_encrypts_existing_plaintext_content(self, with_key, tmp_path):
+        db_file = tmp_path / "legacy_content.db"
+        with patch.object(db, "DB_PATH", db_file):
+            db.init_db()
+            conn = sqlite3.connect(str(db_file))
+            conn.execute(
+                "INSERT INTO vpn_configs "
+                "(name, filename, content, vpn_type, requires_auth) "
+                "VALUES ('l', 'l.conf', ?, 'wireguard', 0)",
+                (b"[Interface]\nPrivateKey=legacy\n",),
+            )
+            conn.commit()
+            conn.close()
+
+            db.init_db()  # migrates the plaintext body in place
+            raw = _raw_content(db_file, 1)
+            assert raw.startswith(b"fernet:")
+            assert (
+                db.get_vpn_config(1)["content"] == b"[Interface]\nPrivateKey=legacy\n"
+            )
+
+
 class TestLegacyMigration:
     def test_init_db_encrypts_existing_plaintext_rows(self, with_key, tmp_path):
         db_file = tmp_path / "legacy.db"

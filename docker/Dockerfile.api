@@ -22,4 +22,7 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 55555
 
-CMD ["gunicorn", "--bind", "0.0.0.0:55555", "--workers", "1", "--threads", "8", "--timeout", "180", "main:app"]
+# Bind to loopback by default — the API holds the Docker socket and must not be
+# reachable from the LAN. Override SMG_API_BIND only behind an authenticated
+# reverse proxy. Shell form so the env var expands.
+CMD gunicorn --bind ${SMG_API_BIND:-127.0.0.1:55555} --workers 1 --threads 8 --timeout 180 main:app
