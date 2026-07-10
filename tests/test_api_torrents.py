@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import io
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
 import responses as resp_lib
-import requests
 
 from api.app import create_app
 from cli.aria2_client import Aria2Error
@@ -155,6 +153,17 @@ class TestAddTorrent:
              patch("api.torrents.get_mule", return_value=mule):
             r = client.post("/api/torrents/smuggler-mule-test",
                             json={})
+        assert r.status_code == 400
+
+    def test_rejects_non_magnet_uri(self, client):
+        """SSRF guard: aria2.addUri also honours http/ftp/file — reject those."""
+        mule = make_mule_info()
+        with patch("api.torrents.get_docker_client"), \
+             patch("api.torrents.get_mule", return_value=mule):
+            r = client.post(
+                "/api/torrents/smuggler-mule-test",
+                json={"magnet": "http://169.254.169.254/latest/meta-data/"},
+            )
         assert r.status_code == 400
 
     @resp_lib.activate
@@ -330,6 +339,13 @@ class TestCollectDeletePaths:
         paths = _collect_delete_paths(status, str(tmp_path))
         assert paths == []
 
+    def test_rejects_traversal_path(self, tmp_path):
+        """A torrent whose file path escapes /downloads must be refused."""
+        from api.torrents import _collect_delete_paths
+        status = {"files": [{"path": "/downloads/../../etc/passwd"}]}
+        paths = _collect_delete_paths(status, str(tmp_path))
+        assert paths == []
+
 
 class TestDropFromAria2:
     def test_removes_active_download(self):
@@ -379,6 +395,16 @@ class TestUnlinkAndPrune:
         f2.write_bytes(b"data")
         _unlink_and_prune([f1], str(tmp_path))
         assert sub.exists()
+
+    def test_skips_path_outside_root(self, tmp_path):
+        """Defence in depth: a path outside the downloads root is never unlinked."""
+        from api.torrents import _unlink_and_prune
+        root = tmp_path / "downloads"
+        root.mkdir()
+        outside = tmp_path / "outside.txt"
+        outside.write_bytes(b"keep me")
+        _unlink_and_prune([outside], str(root))
+        assert outside.exists()
 
 
 # ─── Error paths for existing endpoints ─────────────────────────────────────

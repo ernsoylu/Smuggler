@@ -1,0 +1,127 @@
+name: CI
+
+# Single entry point for all CI. Detects which areas changed, runs only the
+# relevant reusable workflows, and ends in one always-running "CI Gate" job.
+# Require just "CI / CI Gate" in branch protection: it reports on every PR and
+# fails if any triggered area failed (skipped areas count as passing).
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+# Permissions are declared per job (least privilege, explicit per job).
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      python: ${{ steps.filter.outputs.python }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      desktop: ${{ steps.filter.outputs.desktop }}
+      docker: ${{ steps.filter.outputs.docker }}
+      shell: ${{ steps.filter.outputs.shell }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
+        id: filter
+        with:
+          filters: |
+            python:
+              - 'api/**'
+              - 'cli/**'
+              - 'tests/**'
+              - 'main.py'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - '.github/workflows/python-ci.yml'
+              - '.github/workflows/ci.yml'
+            frontend:
+              - 'web/**'
+              - '.github/workflows/frontend-ci.yml'
+              - '.github/workflows/ci.yml'
+            desktop:
+              - 'desktop/**'
+              - '.github/workflows/desktop-ci.yml'
+              - '.github/workflows/ci.yml'
+            docker:
+              - 'docker/**'
+              - 'worker_image/**'
+              - 'worker_image_ovpn/**'
+              - 'docker-compose.yml'
+              - 'requirements.txt'
+              - '.github/workflows/docker-ci.yml'
+              - '.github/workflows/ci.yml'
+            shell:
+              - '**/*.sh'
+              - '.github/workflows/shell-ci.yml'
+              - '.github/workflows/ci.yml'
+
+  python:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/python-ci.yml
+
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/frontend-ci.yml
+
+  desktop:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/desktop-ci.yml
+
+  docker:
+    needs: changes
+    if: needs.changes.outputs.docker == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/docker-ci.yml
+
+  shell:
+    needs: changes
+    if: needs.changes.outputs.shell == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/shell-ci.yml
+
+  ci-gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    if: always()
+    permissions: {}
+    needs: [changes, python, frontend, desktop, docker, shell]
+    steps:
+      - name: Verify no triggered job failed
+        run: |
+          echo "changes=${{ needs.changes.result }}"
+          echo "python=${{ needs.python.result }}   frontend=${{ needs.frontend.result }}"
+          echo "desktop=${{ needs.desktop.result }} docker=${{ needs.docker.result }} shell=${{ needs.shell.result }}"
+          for r in "${{ needs.changes.result }}" \
+                   "${{ needs.python.result }}" \
+                   "${{ needs.frontend.result }}" \
+                   "${{ needs.desktop.result }}" \
+                   "${{ needs.docker.result }}" \
+                   "${{ needs.shell.result }}"; do
+            # Allowed outcomes: success (ran & passed) or skipped (area unchanged).
+            if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+              echo "::error::A required CI job did not pass (result: $r)."
+              exit 1
+            fi
+          done
+          echo "CI Gate: all triggered jobs passed."

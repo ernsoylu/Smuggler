@@ -167,6 +167,12 @@ def _add_magnet(aria2: Aria2Client, mule_name: str):
     if not magnet:
         log.warning("POST /api/torrents/%s: missing magnet field", safe)
         return jsonify({"error": "magnet URI is required in JSON body"}), 400
+    # Only accept magnet: URIs. aria2.addUri also honours http(s)/ftp/file
+    # schemes, which would turn a mule into an SSRF/arbitrary-fetch proxy able
+    # to reach host and sibling-container services on the Docker bridge.
+    if not magnet.lower().startswith("magnet:"):
+        log.warning("POST /api/torrents/%s: rejected non-magnet URI", safe)
+        return jsonify({"error": "Only magnet: URIs are accepted"}), 400
     options: dict = {}
     try:
         qs = _up.parse_qs(_up.urlparse(magnet).query)
@@ -236,16 +242,30 @@ def add(mule_name: str):
 # ─── DELETE /api/torrents/<mule>/<gid> ─────────────────────────────────────
 
 def _collect_delete_paths(status: dict, host_dl_dir: str) -> list[Path]:
-    """Map aria2 file paths (under /downloads/) to host filesystem paths."""
+    """Map aria2 file paths (under /downloads/) to host filesystem paths.
+
+    Every candidate is confined to ``host_dl_dir``: a malicious torrent whose
+    file paths contain traversal sequences (e.g. ``/downloads/../../etc``) must
+    not be able to escape the downloads root and target arbitrary host files
+    when the caller passes ``?delete_files=true``.
+    """
     paths: list[Path] = []
+    host_root = Path(host_dl_dir).resolve()
     for f in status.get("files", []):
         p = f.get("path")
-        if p and p.startswith("/downloads/"):
-            try:
-                rel = Path(p).relative_to("/downloads")
-                paths.append(Path(host_dl_dir) / rel)
-            except ValueError:
-                pass
+        if not p or not p.startswith("/downloads/"):
+            continue
+        try:
+            rel = Path(p).relative_to("/downloads")
+        except ValueError:
+            continue
+        candidate = Path(host_dl_dir) / rel
+        try:
+            (host_root / rel).resolve().relative_to(host_root)
+        except (ValueError, OSError):
+            log.warning("DELETE: refusing path outside downloads root: %s", log_safe(p))
+            continue
+        paths.append(candidate)
     return paths
 
 
@@ -262,6 +282,19 @@ def _drop_from_aria2(aria2: Aria2Client, gid: str, aria2_status: str | None) -> 
 
 def _unlink_and_prune(paths: list[Path], host_dl_dir: str) -> None:
     """Delete the given files, then prune empty parent directories within host_dl_dir."""
+    # Defence in depth: re-confine every path to the downloads root before any
+    # unlink, so no traversal slips through even if a caller built the list by
+    # another route than _collect_delete_paths.
+    host_root_resolved = Path(host_dl_dir).resolve()
+    safe_paths: list[Path] = []
+    for path in paths:
+        try:
+            path.resolve().relative_to(host_root_resolved)
+            safe_paths.append(path)
+        except (ValueError, OSError):
+            log.warning("DELETE: skipping path outside downloads root: %s", log_safe(path))
+    paths = safe_paths
+
     for path in paths:
         try:
             if path.is_file():

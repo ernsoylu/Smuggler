@@ -1,16 +1,11 @@
 name: Desktop CI
 
+# Reusable workflow — invoked by the CI orchestrator (.github/workflows/ci.yml).
 on:
-  push:
-    branches: [main, master]
-    paths:
-      - "desktop/**"
-      - ".github/workflows/desktop-ci.yml"
-  pull_request:
-    branches: [main, master]
-    paths:
-      - "desktop/**"
-      - ".github/workflows/desktop-ci.yml"
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   build:

@@ -91,6 +91,7 @@ else
 fi
 
 # ─── 5. Set up routing ──────────────────────────────────────────────────────
+WG_EP_IP=""
 if [[ -n "${WG_EP_HOST}" ]] && [[ -n "${ORIG_GW}" ]]; then
     WG_EP_IP=$(getent ahostsv4 "${WG_EP_HOST}" 2>/dev/null | awk 'NR==1{print $1}' || true)
     if [[ -n "${WG_EP_IP}" ]]; then
@@ -124,6 +125,20 @@ log "Docker DNS (127.0.0.11) blocked"
 
 # Replace default route — all traffic through wg0
 ip -4 route replace default dev "${WG_IFACE}"
+
+# ─── 6b. Firewall kill-switch on the real NIC ───────────────────────────────
+# Belt-and-suspenders to the wg0 default route: on ${ORIG_DEV} permit only
+# WireGuard transport to the pinned endpoint and aria2 RPC replies, and drop
+# everything else. If wg0 disappears or the default route is ever restored to
+# eth0, aria2 traffic is dropped here instead of leaking the real IP.
+iptables -A OUTPUT -o "${ORIG_DEV}" -p tcp --sport 6800 -j ACCEPT 2>/dev/null || true
+if [[ -n "${WG_EP_IP}" ]]; then
+    iptables -A OUTPUT -o "${ORIG_DEV}" -d "${WG_EP_IP}" -j ACCEPT 2>/dev/null || true
+    iptables -A OUTPUT -o "${ORIG_DEV}" -j DROP 2>/dev/null || true
+    log "Kill-switch armed: only WG endpoint ${WG_EP_IP} + RPC allowed on ${ORIG_DEV}"
+else
+    warn "WG endpoint IP unknown — firewall kill-switch NOT armed (relying on wg0 default route)"
+fi
 
 # ─── 7. Verify external connectivity through VPN ────────────────────────────
 log "Verifying VPN connectivity through ${WG_IFACE}..."
@@ -258,16 +273,19 @@ kill_switch() {
                 # Use icanhazip.com for health check as it's not aggressively rate-limited
                 local live_ip
                 live_ip=$(curl -s -4 --interface "${WG_IFACE}" --max-time 10 "https://icanhazip.com" | tr -d '[:space:]' || echo "")
-                
+                # Probe via the default route too (the path aria2 actually uses).
+                # A mismatch means traffic is exiting somewhere other than wg0.
+                local route_ip
+                route_ip=$(curl -s -4 --max-time 10 "https://icanhazip.com" | tr -d '[:space:]' || echo "")
+
                 if [[ -z "${live_ip}" ]]; then
                     reason="runtime IP check failed — no connectivity through ${WG_IFACE}"
+                elif echo "${live_ip}" | grep -qP '^(172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|10\.)'; then
+                    reason="IP leak detected: external IP ${live_ip} is a private address"
+                elif [[ -n "${route_ip}" && "${route_ip}" != "${live_ip}" ]]; then
+                    reason="IP leak detected: default-route exit ${route_ip} != VPN exit ${live_ip}"
                 else
-                    # Flag if IP changed to a private/Docker address
-                    if echo "${live_ip}" | grep -qP '^(172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|10\.)'; then
-                        reason="IP leak detected: external IP ${live_ip} is a private address"
-                    else
-                        write_health "healthy" "${live_ip}" "periodic check OK"
-                    fi
+                    write_health "healthy" "${live_ip}" "periodic check OK"
                 fi
             fi
         fi

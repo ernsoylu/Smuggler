@@ -7,7 +7,15 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from api.crypto import decrypt, encrypt, encryption_enabled, is_encrypted
+from api.crypto import (
+    decrypt,
+    decrypt_bytes,
+    encrypt,
+    encrypt_bytes,
+    encryption_enabled,
+    is_encrypted,
+    is_encrypted_bytes,
+)
 from cli.log import get_logger, log_safe
 
 log = get_logger(__name__)
@@ -98,6 +106,9 @@ def init_db() -> None:
         )
     # Encrypt any legacy plaintext OpenVPN passwords now that a key is available.
     _encrypt_legacy_passwords(conn)
+    # Encrypt any legacy plaintext VPN config bodies (WireGuard private keys,
+    # inline OpenVPN keys/certs) the same way.
+    _encrypt_legacy_content(conn)
     conn.commit()
     conn.close()
     log.info("init_db: done")
@@ -125,6 +136,30 @@ def _encrypt_legacy_passwords(conn: sqlite3.Connection) -> None:
             migrated += 1
     if migrated:
         log.info("init_db: encrypted %d legacy plaintext OpenVPN password(s)", migrated)
+
+
+def _encrypt_legacy_content(conn: sqlite3.Connection) -> None:
+    """Upgrade pre-encryption plaintext ``content`` BLOBs in place.
+
+    No-op when encryption is disabled or all rows are already encrypted. Runs
+    inside ``init_db``'s transaction.
+    """
+    if not encryption_enabled():
+        return
+    rows = conn.execute(
+        "SELECT id, content FROM vpn_configs WHERE content IS NOT NULL"
+    ).fetchall()
+    migrated = 0
+    for r in rows:
+        body = r["content"]
+        if body and not is_encrypted_bytes(body):
+            conn.execute(
+                "UPDATE vpn_configs SET content = ? WHERE id = ?",
+                (encrypt_bytes(body), r["id"]),
+            )
+            migrated += 1
+    if migrated:
+        log.info("init_db: encrypted %d legacy plaintext VPN config body/ies", migrated)
 
 
 # ── Settings ──────────────────────────────────────────────────────────────────
@@ -209,8 +244,9 @@ def get_vpn_config(config_id: int) -> dict | None:
     d = dict(row)
     d["vpn_type"] = d.get("vpn_type") or "wireguard"
     d["requires_auth"] = bool(d.get("requires_auth", 0))
-    # Transparently decrypt the stored secret back to plaintext for callers.
+    # Transparently decrypt the stored secrets back to plaintext for callers.
     d["ovpn_password"] = decrypt(d.get("ovpn_password"))
+    d["content"] = decrypt_bytes(d.get("content"))
     return d
 
 
@@ -228,7 +264,7 @@ def add_vpn_config(
         "INSERT INTO vpn_configs "
         "(name, filename, content, vpn_type, requires_auth, ovpn_username, ovpn_password) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (name, filename, content, vpn_type, int(requires_auth),
+        (name, filename, encrypt_bytes(content), vpn_type, int(requires_auth),
          ovpn_username, encrypt(ovpn_password)),
     )
     _bump_state_version(conn)

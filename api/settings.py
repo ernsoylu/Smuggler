@@ -6,9 +6,9 @@ import os
 import re
 from flask import Blueprint, request, jsonify
 
-from api.database import get_all_settings, update_settings, get_setting
+from api.database import get_all_settings, update_settings
 from api.settings_sync import sync_all_mules
-from cli.log import get_logger, log_safe
+from cli.log import get_logger
 
 log = get_logger(__name__)
 settings_bp = Blueprint("settings", __name__, url_prefix="/api/settings")

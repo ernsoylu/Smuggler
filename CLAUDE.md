@@ -11,7 +11,7 @@
 2. **Naming:** Always use "mule", never "worker".
 3. **Labels:** Use `smuggler.*` namespace for Docker labels.
 4. **No Code Duplication:** API blueprints must call `cli/` clients (docker/aria2).
-5. **Security:** Never log or expose PrivateKeys/Credentials. Use environment variables for mule credentials. Stored OpenVPN passwords are encrypted at rest via `api/crypto.py` (Fernet, keyed off `SMG_SECRET_KEY`); keep encrypt/decrypt inside `api/database.py` so callers only ever see plaintext.
+5. **Security:** Never log or expose PrivateKeys/Credentials. Use environment variables for mule credentials. Stored OpenVPN passwords **and VPN config bodies** (WireGuard private keys, inline OpenVPN keys) are encrypted at rest via `api/crypto.py` (Fernet, keyed off `SMG_SECRET_KEY`) — strings via `encrypt`/`decrypt`, BLOBs via `encrypt_bytes`/`decrypt_bytes`; keep encrypt/decrypt inside `api/database.py` so callers only ever see plaintext. The API binds to loopback by default and is optionally gated by `SMG_API_TOKEN` (`X-Smuggler-Token` header); mules run least-privilege (`NET_ADMIN` only, no `SYS_MODULE`) with an `iptables` kill-switch.
 6. **Path Resolution:** Use `SMG_HOST_ROOT` for paths to be mounted into containers (data/tmp, downloads).
 
 ## Core Commands

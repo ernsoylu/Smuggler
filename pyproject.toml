@@ -27,8 +27,17 @@ dev-dependencies = [
     "pytest-mock>=3.12.0",
     "responses>=0.25.0",
     "pytest-flask>=1.3.0",
-    "pytest-cov>=4.1.0"
+    "pytest-cov>=4.1.0",
+    "ruff>=0.9.0"
 ]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [".venv", "web", "desktop"]
+# Lint rules are ruff's default set (pyflakes F + pycodestyle E4/E7/E9): unused
+# imports, undefined names, and real syntax/style errors. Kept conservative so
+# the gate is meaningful rather than noisy; expand `lint.select` over time.
 
 [tool.hatch.build.targets.wheel]
 packages = ["cli", "api"]

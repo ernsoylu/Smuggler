@@ -89,6 +89,30 @@ if ! ${DOCKER_CMD} info &>/dev/null 2>&1; then
 fi
 ok "Docker daemon is reachable"
 
+# ── 2b. WireGuard kernel module (host) ────────────────────────────────────────
+section "WireGuard kernel module"
+# Mules run with NET_ADMIN only — we deliberately do NOT grant CAP_SYS_MODULE
+# (which would let a container load modules into the host kernel). So the
+# wireguard module must be present on the host for WireGuard mules to work.
+if [[ "$OS" == "linux" ]]; then
+    if lsmod 2>/dev/null | grep -q '^wireguard'; then
+        ok "wireguard module already loaded"
+    elif sudo modprobe wireguard 2>/dev/null; then
+        ok "wireguard module loaded"
+    else
+        warn "Could not load the 'wireguard' module. Install it (e.g. 'sudo apt-get install wireguard') — WireGuard mules need it on the host."
+    fi
+    if [[ -d /etc/modules-load.d ]] && ! grep -qs '^wireguard' /etc/modules-load.d/*.conf 2>/dev/null; then
+        if echo wireguard | sudo tee /etc/modules-load.d/wireguard.conf >/dev/null 2>&1; then
+            ok "wireguard set to load on boot"
+        else
+            warn "Could not persist wireguard autoload (/etc/modules-load.d)"
+        fi
+    fi
+else
+    ok "Non-Linux host — WireGuard module handled by the Docker VM"
+fi
+
 # ── 3. Java 21+ ───────────────────────────────────────────────────────────────
 section "Java 21+ (for desktop app)"
 JAVA_OK=0
@@ -251,22 +275,30 @@ if [[ ! -f .env ]]; then
     cat > .env <<EOF
 DVD_LOGGING=true
 DVD_LOG_LEVEL=INFO
-# Secret key for encrypting stored credentials (OpenVPN passwords) at rest.
-# Keep this stable and private — changing it makes existing encrypted secrets
-# unrecoverable. Leave empty to disable encryption (not recommended).
+# Secret key for encrypting stored secrets at rest — OpenVPN passwords AND VPN
+# config bodies (WireGuard private keys, inline OpenVPN keys). Keep this stable
+# and private — changing it makes existing encrypted secrets unrecoverable.
+# Leave empty to disable encryption (not recommended).
 SMG_SECRET_KEY=${SMG_KEY}
+# Optional API token. When set, every /api/* request must carry a matching
+# X-Smuggler-Token header (the web UI injects it automatically). Recommended if
+# you expose the API beyond loopback. Uncomment to enable:
+# SMG_API_TOKEN=$(gen_secret_key)
 EOF
     ok ".env created with defaults (generated SMG_SECRET_KEY)"
 elif ! grep -q '^SMG_SECRET_KEY=' .env; then
     {
         echo ""
-        echo "# Secret key for encrypting stored credentials at rest (added by setup)."
+        echo "# Secret key for encrypting stored secrets at rest (added by setup)."
         echo "SMG_SECRET_KEY=$(gen_secret_key)"
     } >> .env
     ok ".env exists — appended a generated SMG_SECRET_KEY"
 else
     ok ".env already exists — skipping"
 fi
+# .env holds the master encryption key — keep it owner-readable only.
+chmod 600 .env 2>/dev/null || true
+ok ".env permissions set to 600"
 
 # ── 12. Build WireGuard mule image ──────────────────────────────────────────
 section "Docker image: smuggler-mule (WireGuard)"

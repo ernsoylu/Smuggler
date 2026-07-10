@@ -7,6 +7,11 @@ from cli.log import get_logger, log_file_path
 log = get_logger(__name__)
 
 if __name__ == "__main__":
+    from dotenv import load_dotenv
+
+    # Load .env so SMG_SECRET_KEY / SMG_API_TOKEN are available to the dev server.
+    load_dotenv()
+
     from api.app import create_app
 
     lf = log_file_path()

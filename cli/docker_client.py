@@ -89,7 +89,10 @@ def start_mule(
     For WireGuard (vpn_type='wireguard'):
       - Uses image smuggler-mule:latest
       - Config mounted at /etc/wireguard/wg0.conf
-      - Requires NET_ADMIN + SYS_MODULE capabilities
+      - Requires only NET_ADMIN. The ``wireguard`` kernel module must already be
+        loaded on the host (``modprobe wireguard`` — setup.sh does this); we do
+        NOT grant CAP_SYS_MODULE, which would let a compromised mule load
+        arbitrary modules into the host kernel (full host takeover).
 
     For OpenVPN (vpn_type='openvpn'):
       - Uses image smuggler-mule-ovpn:latest
@@ -125,7 +128,10 @@ def start_mule(
     else:
         image = MULE_IMAGE
         container_config_path = "/etc/wireguard/wg0.conf"
-        cap_add = ["NET_ADMIN", "SYS_MODULE"]
+        # NET_ADMIN only — configuring an existing wg interface needs it, but we
+        # deliberately do NOT add SYS_MODULE (host-kernel module loading = escape
+        # primitive). The host must have the wireguard module loaded already.
+        cap_add = ["NET_ADMIN"]
         sysctls = {"net.ipv4.conf.all.src_valid_mark": "1"}
         devices = []
 
@@ -156,7 +162,10 @@ def start_mule(
         "detach": True,
         "cap_add": cap_add,
         "volumes": volumes,
-        "ports": {f"{ARIA2_INTERNAL_PORT}/tcp": host_port},
+        # Publish the aria2 RPC port on the loopback interface ONLY. The API
+        # (host network) reaches it via 127.0.0.1; binding to 0.0.0.0 would
+        # expose the token-gated RPC to the whole LAN.
+        "ports": {f"{ARIA2_INTERNAL_PORT}/tcp": ("127.0.0.1", host_port)},
         "environment": environment,
         "labels": labels,
         "restart_policy": {"Name": "unless-stopped"},
@@ -218,8 +227,12 @@ def wait_for_vpn(
             continue
 
         try:
+            # Bind the probe to the tunnel interface so this startup check never
+            # egresses via eth0 (which would reveal the real IP to ipinfo.io
+            # before routing settles).
+            vpn_iface = "tun0" if mule.vpn_type == "openvpn" else "wg0"
             exit_code, output = mule.container.exec_run(
-                "curl -sf --max-time 8 https://ipinfo.io/json",
+                f"curl -sf --interface {vpn_iface} --max-time 8 https://ipinfo.io/json",
                 demux=False,
             )
             if exit_code == 0 and output:
@@ -487,6 +500,32 @@ def _probe_vpn_ip(container, vpn_iface: str) -> tuple[str | None, str | None, st
     return ip, country, reason
 
 
+def _probe_default_route_ip(container) -> tuple[str | None, str]:
+    """Probe the external IP via the *default route* (no ``--interface`` binding).
+
+    This reflects the path aria2's own traffic takes. Compared against the
+    interface-bound probe, a mismatch reveals that the container's default route
+    is not the VPN tunnel (e.g. an OpenVPN config without ``redirect-gateway``),
+    which the interface-bound probe alone cannot detect. Returns ``(ip, reason)``;
+    ``ip`` is ``None`` when the probe fails (which, when the tunnel probe
+    succeeded, means egress is blocked rather than leaking).
+    """
+    try:
+        exit_code, output = container.exec_run(
+            "curl -sf --max-time 8 https://icanhazip.com",
+            demux=False,
+        )
+    except docker.errors.APIError as exc:
+        return None, f"exec error on default-route probe: {exc}"
+    if exit_code != 0 or not output:
+        return None, f"default-route probe failed (exit={exit_code})"
+    lines = output.decode(errors="replace").strip().splitlines()
+    ip = lines[-1].strip() if lines else ""
+    if _IPV4_PATTERN.match(ip):
+        return ip, ""
+    return None, "default-route probe returned unexpected body"
+
+
 def check_mule_vpn(client: docker.DockerClient, name_or_id: str) -> dict:
     """
     Verify that a running mule's traffic is still exiting through the VPN.
@@ -537,6 +576,30 @@ def check_mule_vpn(client: docker.DockerClient, name_or_id: str) -> dict:
             "healthy": False,
             "ip": ip,
             "reason": f"IP leak — external IP '{ip}' is a private/Docker address",
+            "kind": "ip_leak",
+        }
+
+    # Real-egress verification: the interface-bound probe above only proves the
+    # tunnel *interface* can reach the internet. aria2 egresses via the default
+    # route, so probe that too. A default-route exit IP that differs from the
+    # tunnel IP means aria2's real traffic is bypassing the VPN — a real-IP leak
+    # the interface-bound probe cannot see. A *failed* default-route probe is not
+    # treated as a leak (with the mule kill-switch firewall active, a broken
+    # default route is dropped, not leaked) to avoid false-positive evacuations.
+    route_ip, _route_reason = _probe_default_route_ip(mule.container)
+    if route_ip and route_ip != ip:
+        log.error(
+            "check_mule_vpn: mule=%s REAL-IP LEAK — default-route ip=%s != vpn ip=%s",
+            mule.name, route_ip, ip,
+        )
+        return {
+            "name": mule.name,
+            "healthy": False,
+            "ip": route_ip,
+            "reason": (
+                f"IP leak — default-route exit IP '{route_ip}' does not match "
+                f"VPN IP '{ip}'; aria2 traffic is bypassing the tunnel"
+            ),
             "kind": "ip_leak",
         }
 

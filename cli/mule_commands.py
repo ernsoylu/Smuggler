@@ -12,19 +12,14 @@ from rich.table import Table
 from rich import box
 
 from cli.docker_client import (
-    build_image,
     exec_in_mule,
-    get_container_logs,
     get_docker_client,
-    get_mule,
     kill_all_mules,
     kill_mule,
     list_mules,
     start_mule,
     stop_mule,
     wait_for_vpn,
-    MULE_IMAGE,
-    MULE_IMAGE_OVPN,
 )
 
 console = Console()

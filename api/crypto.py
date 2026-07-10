@@ -24,6 +24,7 @@ from cli.log import get_logger
 log = get_logger(__name__)
 
 _PREFIX = "fernet:"
+_BPREFIX = b"fernet:"
 _ENV_VAR = "SMG_SECRET_KEY"
 
 # Ensures the "no key configured" warning is emitted at most once per process.
@@ -102,4 +103,62 @@ def decrypt(value: str | None) -> str | None:
         return fernet.decrypt(token.encode("ascii")).decode("utf-8")
     except InvalidToken:
         log.error("Failed to decrypt secret — wrong %s? Returning None.", _ENV_VAR)
+        return None
+
+
+# ─── Binary variants (for BLOBs such as VPN config bodies) ────────────────────
+
+def is_encrypted_bytes(value: bytes | None) -> bool:
+    """True when a BLOB is a Smuggler-encrypted token (not legacy plaintext)."""
+    return bool(value) and bytes(value).startswith(_BPREFIX)
+
+
+def encrypt_bytes(plaintext: bytes | None) -> bytes | None:
+    """Encrypt a binary secret (e.g. a WireGuard/OpenVPN config) for storage.
+
+    Mirrors :func:`encrypt` for ``bytes``. Returns the input unchanged when it
+    is empty, already encrypted, or when no key is configured (degrades to
+    plaintext with the same one-time warning).
+    """
+    global _warned_no_key
+    if not plaintext:
+        return plaintext
+    if is_encrypted_bytes(plaintext):
+        return plaintext
+    fernet = _get_fernet()
+    if fernet is None:
+        if not _warned_no_key:
+            log.warning(
+                "%s is not set — secrets are stored in PLAINTEXT. "
+                "Set %s to enable encryption at rest.",
+                _ENV_VAR, _ENV_VAR,
+            )
+            _warned_no_key = True
+        return plaintext
+    return _BPREFIX + fernet.encrypt(bytes(plaintext))
+
+
+def decrypt_bytes(value: bytes | None) -> bytes | None:
+    """Decrypt a stored binary secret back to plaintext bytes.
+
+    Legacy plaintext BLOBs (no ``fernet:`` prefix) pass through unchanged.
+    Returns ``None`` when an encrypted value cannot be decrypted (missing/wrong
+    key) rather than raising.
+    """
+    if not value:
+        return value
+    if not is_encrypted_bytes(value):
+        return value
+    fernet = _get_fernet()
+    if fernet is None:
+        log.error(
+            "%s is not set but an encrypted secret was found — cannot decrypt.",
+            _ENV_VAR,
+        )
+        return None
+    token = bytes(value)[len(_BPREFIX):]
+    try:
+        return fernet.decrypt(token)
+    except InvalidToken:
+        log.error("Failed to decrypt config body — wrong %s? Returning None.", _ENV_VAR)
         return None
