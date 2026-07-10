@@ -10,8 +10,7 @@ on:
   pull_request:
     branches: [main, master]
 
-permissions:
-  contents: read
+# Permissions are declared per job (least privilege, explicit per job).
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -32,7 +31,7 @@ jobs:
       shell: ${{ steps.filter.outputs.shell }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
         id: filter
         with:
           filters: |
@@ -69,32 +68,43 @@ jobs:
   python:
     needs: changes
     if: needs.changes.outputs.python == 'true'
+    permissions:
+      contents: read
     uses: ./.github/workflows/python-ci.yml
 
   frontend:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
+    permissions:
+      contents: read
     uses: ./.github/workflows/frontend-ci.yml
 
   desktop:
     needs: changes
     if: needs.changes.outputs.desktop == 'true'
+    permissions:
+      contents: read
     uses: ./.github/workflows/desktop-ci.yml
 
   docker:
     needs: changes
     if: needs.changes.outputs.docker == 'true'
+    permissions:
+      contents: read
     uses: ./.github/workflows/docker-ci.yml
 
   shell:
     needs: changes
     if: needs.changes.outputs.shell == 'true'
+    permissions:
+      contents: read
     uses: ./.github/workflows/shell-ci.yml
 
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
     if: always()
+    permissions: {}
     needs: [changes, python, frontend, desktop, docker, shell]
     steps:
       - name: Verify no triggered job failed

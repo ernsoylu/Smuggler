@@ -88,15 +88,16 @@ def create_app() -> Flask:
         if token:
             provided = request.headers.get("X-Smuggler-Token", "")
             if not hmac.compare_digest(provided, token):
-                log.warning("Rejected request without valid API token: %s %s",
-                            request.method, request.path)
+                # Do not log the request path/method — they are user-controlled
+                # and would allow log forging (Sonar S5145).
+                log.warning("Rejected API request with missing or invalid token")
                 return {"error": "Unauthorized"}, 401
 
         if request.method in _MUTATING:
             origin = request.headers.get("Origin")
             if origin and cors_origins != "*" and origin not in cors_origins:
-                log.warning("Rejected cross-origin %s to %s (Origin=%s)",
-                            request.method, request.path, origin)
+                log.warning("Rejected cross-origin state-changing request "
+                            "(Origin not allow-listed)")
                 return {"error": "Cross-origin request refused"}, 403
         return None
 
