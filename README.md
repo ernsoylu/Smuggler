@@ -39,7 +39,7 @@ The fastest way to run Smuggler is via the included lifecycle script:
 - **Setup**: `./setup.sh` (installs deps and builds all 4 images).
 - **Tests**: `uv run pytest tests/` (347 passing tests).
 - **CI/CD**: Path-filtered GitHub Actions workflows (least-privilege permissions, concurrency-cancelled, dependency-cached):
-  - **Python CI**: `ruff` lint + `pytest` matrix (3.12, 3.13) with coverage.
+  - **Python CI**: `ruff` lint + `pytest` matrix (3.12, 3.13, 3.14) with coverage.
   - **Frontend CI**: `tsc` type-check, ESLint, `vitest`, and production build.
   - **Docker CI**: `hadolint` + cached build of all 4 images + `docker compose config` validation.
   - **Shell CI**: `shellcheck` over the mule kill-switch / leak-protection scripts and setup scripts.

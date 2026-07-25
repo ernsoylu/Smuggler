@@ -42,7 +42,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
+        # 3.12 is the floor (requires-python) and carries the coverage run;
+        # 3.14 is here because docker/Dockerfile.api is expected to move to a
+        # 3.14 base — production should not run an interpreter no job exercises.
+        python-version: ["3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
