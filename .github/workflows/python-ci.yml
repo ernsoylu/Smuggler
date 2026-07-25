@@ -34,7 +34,7 @@ jobs:
         run: uv sync --locked --no-build --all-extras --no-install-project
 
       - name: Ruff
-        run: uv run --no-sync ruff check --output-format=github .
+        run: uv run --no-sync --no-build ruff check --output-format=github .
 
   test:
     name: Test (Python ${{ matrix.python-version }})
@@ -70,10 +70,10 @@ jobs:
       - name: Run tests
         run: |
           if [ "${{ matrix.python-version }}" = "3.12" ]; then
-            uv run --no-sync pytest tests/ -q --tb=short \
+            uv run --no-sync --no-build pytest tests/ -q --tb=short \
               --cov=cli --cov=api --cov-report=term-missing --cov-report=xml
           else
-            uv run --no-sync pytest tests/ -q --tb=short
+            uv run --no-sync --no-build pytest tests/ -q --tb=short
           fi
         env:
           SMG_LOGGING: "false"

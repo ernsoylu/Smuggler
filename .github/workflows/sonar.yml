@@ -64,7 +64,7 @@ jobs:
 
       - name: Run Python tests with coverage
         if: steps.check.outputs.enabled == 'true'
-        run: uv run --no-sync pytest tests/ -q --tb=short --cov=cli --cov=api --cov-report=xml
+        run: uv run --no-sync --no-build pytest tests/ -q --tb=short --cov=cli --cov=api --cov-report=xml
         env:
           SMG_LOGGING: "false"
 

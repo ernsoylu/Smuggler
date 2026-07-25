@@ -34,7 +34,7 @@ jobs:
 
       - name: pip-audit
         # Pinned: an unpinned uvx resolves and executes whatever is newest.
-        run: uvx pip-audit@2.10.1 --strict --requirement requirements-lock.txt
+        run: uvx --no-build pip-audit@2.10.1 --strict --requirement requirements-lock.txt
 
   frontend-deps:
     name: Frontend dependencies (npm audit)
