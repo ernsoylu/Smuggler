@@ -1,4 +1,52 @@
 services:
+  # Filtered stand-in for /var/run/docker.sock. The API talks Docker API over
+  # TCP to this container instead of mounting the socket itself, so an RCE in
+  # Flask or a dependency no longer lands on the raw socket.
+  #
+  # IMPORTANT: this reduces surface, it is not a trust boundary. CONTAINERS +
+  # POST is inherently enough to create a privileged container and reach host
+  # root, and Smuggler cannot function without them. What it does buy is that
+  # images, volumes, secrets, configs, swarm, plugins, the system endpoints and
+  # container filesystem archive are all refused (default-deny; every
+  # capability below is off unless set to 1). Treat the host as trusted
+  # regardless — see SECURITY.md.
+  smuggler-docker-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+    container_name: smuggler-docker-proxy
+    environment:
+      # Read-only endpoints the SDK needs to connect and enumerate.
+      - PING=1
+      - VERSION=1
+      - CONTAINERS=1
+      - NETWORKS=1
+      # Mutating calls: create/start/stop/kill/remove a mule, attach it to the
+      # RPC network, and exec the in-container VPN health probes.
+      - POST=1
+      - EXEC=1
+      # Explicitly denied. IMAGES stays off because the API never builds or
+      # pulls — `smg build` runs on the host against the real socket.
+      - IMAGES=0
+      - VOLUMES=0
+      - SECRETS=0
+      - CONFIGS=0
+      - SWARM=0
+      - NODES=0
+      - SERVICES=0
+      - TASKS=0
+      - PLUGINS=0
+      - SYSTEM=0
+      - INFO=0
+      - AUTH=0
+      - BUILD=0
+      - COMMIT=0
+      - DISTRIBUTION=0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      # Only the API can reach it, and it has no route off the host.
+      - smuggler-docker
+    restart: unless-stopped
+
   smuggler-api:
     build:
       context: .
@@ -7,10 +55,13 @@ services:
     networks:
       # Reaches the UI (and is reached by it) over a normal bridge...
       - smuggler-net
-      # ...and reaches every mule's aria2 RPC over an internal network with no
+      # ...reaches every mule's aria2 RPC over an internal network with no
       # route off the host. This replaces network_mode: host, which put the
       # Docker-socket-holding control plane in the host's network namespace.
       - smuggler-rpc
+      # ...and reaches the Docker socket proxy. Deliberately a separate network
+      # from smuggler-rpc so mules cannot reach the proxy.
+      - smuggler-docker
     ports:
       # Published to loopback only. Gunicorn binds 0.0.0.0 *inside* the
       # container (a published port cannot reach a loopback-bound listener);
@@ -34,10 +85,15 @@ services:
       # Address mules by container name over smuggler-rpc rather than by their
       # published loopback port, which is only reachable from the host.
       - SMG_MULE_RPC_HOST=container
+      # Talk to the filtered proxy instead of mounting the socket. docker.from_env()
+      # picks this up, so no application code knows the difference.
+      - DOCKER_HOST=tcp://smuggler-docker-proxy:2375
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+      # No docker.sock here — see smuggler-docker-proxy above.
       - ${PWD}:${PWD}
     working_dir: ${PWD}
+    depends_on:
+      - smuggler-docker-proxy
     restart: unless-stopped
 
   smuggler-ui:
@@ -70,5 +126,12 @@ networks:
   # route, and this network can never provide one.
   smuggler-rpc:
     name: smuggler-rpc
+    driver: bridge
+    internal: true
+
+  # Carries only API -> docker-socket-proxy. Kept separate from smuggler-rpc so
+  # a compromised mule has no network path to the proxy.
+  smuggler-docker:
+    name: smuggler-docker
     driver: bridge
     internal: true

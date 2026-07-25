@@ -18,7 +18,7 @@ product Smuggler isn't.
 | 1 — Correctness bugs | **Done** | `8beced4` (backend), `62785d1` (frontend) |
 | 8 — Docs & hygiene | **Done** | `8beced4` |
 | 2 — Crypto hardening | **Done** — scrypt + MultiFernet rotation | `0d46579` |
-| 3 — Container/network | **3.1, 3.3, 3.4 done**; 3.2 (socket proxy) remaining | `ed6fc40`, `HEAD` |
+| 3 — Container/network | **Done** (3.1 networking, 3.2 socket proxy, 3.3 least-privilege, 3.4 image hygiene) | `ed6fc40`, `cff21d5`, `HEAD` |
 | 4 — Truthful deploy state | Not started | |
 | 5 — Supply chain & CI | Not started | |
 | 6 — UX gaps | Not started | |
@@ -32,9 +32,17 @@ leaking. Running that drill surfaced two further defects, both fixed: a
 kill-switch teardown exited `0` and overwrote its own recorded reason, and
 `--rpc-listen-all=false` (a critique "5-minute P0") would have broken every mule.
 
-**Not yet verified:** the OpenVPN tunnel end-to-end. The supplied
-`.ovpn` uses `auth-user-pass` and no credentials were provided, so testing
-stopped at endpoint pinning — which passed, including all 5 `remote` lines.
+The OpenVPN path was later verified end-to-end with real OpenVPN credentials
+(since purged): a mule deployed through the socket-proxied API reached a Finland exit node, the kill-switch armed against the pinned endpoint, the
+credential file was gone from disk after connect, and killing OpenVPN **restored
+the clear-net default route** — the exact F1 failure mode — yet egress was
+dropped rather than leaked and the mule was torn down with exit 1.
+
+Two further defects were found by running these drills and are fixed: the
+mule-hardening `PUID` defaulted to `os.getuid()`, which is root inside the API
+container and silently skipped the privilege drop (now derived from the
+downloads directory's owner); and `cap_drop: ALL` with only `NET_ADMIN` broke
+config reads, `setpriv` and the monitor's ability to kill a non-root aria2.
 
 ---
 

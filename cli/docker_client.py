@@ -45,12 +45,23 @@ MULE_CAPABILITIES = ("NET_ADMIN", "DAC_OVERRIDE", "SETUID", "SETGID", "KILL")
 MULE_MEM_LIMIT = os.environ.get("SMG_MULE_MEM_LIMIT", "1g")
 MULE_PIDS_LIMIT = int(os.environ.get("SMG_MULE_PIDS_LIMIT", "512"))
 
-# Ownership for files aria2 writes into the bind-mounted downloads directory.
-# Defaults to the invoking user so downloads are not root-owned on the host —
-# previously every file landed as uid 0 and could not be moved or deleted from
-# a file manager without sudo.
-MULE_PUID = int(os.environ.get("SMG_PUID", os.getuid()))
-MULE_PGID = int(os.environ.get("SMG_PGID", os.getgid()))
+def _download_owner(downloads_dir: Path) -> tuple[int, int]:
+    """uid/gid aria2 should run as, so downloads are not root-owned on the host.
+
+    Defaults to whoever owns the downloads directory rather than the current
+    process. ``os.getuid()`` is root inside the API container, which silently
+    skipped the privilege drop and recreated the very problem this solves —
+    files landing as uid 0, unmovable from a file manager without sudo.
+    ``SMG_PUID``/``SMG_PGID`` override it when both are set.
+    """
+    env_uid, env_gid = os.environ.get("SMG_PUID"), os.environ.get("SMG_PGID")
+    if env_uid and env_gid:
+        return int(env_uid), int(env_gid)
+    try:
+        st = downloads_dir.stat()
+        return st.st_uid, st.st_gid
+    except OSError:
+        return os.getuid(), os.getgid()
 
 
 def _rpc_over_container_network() -> bool:
@@ -251,12 +262,13 @@ def start_mule(
         str(downloads_dir): {"bind": "/downloads", "mode": "rw"},
     }
 
+    mule_uid, mule_gid = _download_owner(downloads_dir)
     environment: dict = {
         "ARIA2_SECRET": rpc_token,
         # aria2 drops to this uid/gid before downloading, so files on the host
         # belong to the user rather than root.
-        "PUID": str(MULE_PUID),
-        "PGID": str(MULE_PGID),
+        "PUID": str(mule_uid),
+        "PGID": str(mule_gid),
     }
     if vpn_type == "openvpn" and ovpn_username:
         environment["OVPN_USERNAME"] = ovpn_username

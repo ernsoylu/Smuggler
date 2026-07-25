@@ -599,12 +599,30 @@ class TestMuleHardening:
         assert k["mem_limit"] == "1g"
         assert k["pids_limit"] == 512
 
-    def test_passes_puid_pgid_so_downloads_are_not_root_owned(
-        self, mock_docker_client, mock_container
+    def test_puid_comes_from_the_downloads_owner_not_the_caller(
+        self, mock_docker_client, mock_container, tmp_path, monkeypatch
     ):
-        k = self._run_kwargs(mock_docker_client, mock_container)
-        assert k["environment"]["PUID"] == str(os.getuid())
-        assert k["environment"]["PGID"] == str(os.getgid())
+        # os.getuid() is root inside the API container, which silently skipped
+        # the privilege drop and left downloads root-owned on the host.
+        monkeypatch.delenv("SMG_PUID", raising=False)
+        monkeypatch.delenv("SMG_PGID", raising=False)
+        dl = tmp_path / "downloads"
+        dl.mkdir()
+        k = self._run_kwargs(mock_docker_client, mock_container, downloads_dir=dl)
+        st = dl.stat()
+        assert k["environment"]["PUID"] == str(st.st_uid)
+        assert k["environment"]["PGID"] == str(st.st_gid)
+
+    def test_explicit_puid_pgid_override_the_directory_owner(
+        self, mock_docker_client, mock_container, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("SMG_PUID", "4242")
+        monkeypatch.setenv("SMG_PGID", "4343")
+        dl = tmp_path / "downloads"
+        dl.mkdir()
+        k = self._run_kwargs(mock_docker_client, mock_container, downloads_dir=dl)
+        assert k["environment"]["PUID"] == "4242"
+        assert k["environment"]["PGID"] == "4343"
 
     def test_rpc_stays_published_on_loopback_only(
         self, mock_docker_client, mock_container

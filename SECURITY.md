@@ -60,12 +60,13 @@ because a poll interval hasn't elapsed.
 
 | Control | Mechanism |
 |--------|-----------|
-| **Loopback by default** | Compose publishes the API to `127.0.0.1:55555` and the UI to `127.0.0.1:8887`. Both bind all interfaces *inside* their container (a published port cannot reach a loopback-bound listener), so the port mapping is what keeps them off the LAN. The API holds the Docker socket, so it must not be exposed. |
+| **Loopback by default** | Compose publishes the API to `127.0.0.1:55555` and the UI to `127.0.0.1:8887`. Both bind all interfaces *inside* their container (a published port cannot reach a loopback-bound listener), so the port mapping is what keeps them off the LAN. The API can drive Docker (via the proxy below), so it must not be exposed. |
 | **No host networking** | The API and UI run on Docker bridge networks, not in the host's network namespace. `smuggler-net` carries UI↔API; `smuggler-rpc` is an **internal** network (no gateway, hence no default route and no egress) carrying only aria2 RPC between the API and the mules. Mules join it as a second interface, so the interface the kill-switch seals — the one holding the default route — is unchanged. |
 | **Token auth (mandatory in the compose topology)** | `setup.sh` generates `SMG_API_TOKEN` into `.env` and enables it, so every `/api/*` call needs a matching `X-Smuggler-Token` header (`api/app.py`). Only `/api/health` (exact path) and CORS preflight are exempt. Because mules share `smuggler-rpc` with the API they can open connections to it — something host networking used to prevent — so the API **refuses to start** without a token when `SMG_MULE_RPC_HOST=container`. The token is what stops a compromised mule from driving the Docker socket. |
 | **CSRF guard** | State-changing requests that carry a browser `Origin` outside the allow-list are refused (403), so a page the user visits cannot drive the local API. |
+| **Filtered Docker access** | The API reaches Docker through `smuggler-docker-proxy` (digest-pinned, socket mounted read-only) over an `internal` network, instead of mounting the socket itself. Only PING/VERSION/CONTAINERS/NETWORKS/POST/EXEC are enabled; images, volumes, secrets, swarm, plugins and the system endpoints return 403. Mules are on a different network and cannot reach the proxy. Surface reduction, **not** a trust boundary — see "The Docker socket" below. |
 | **Least-privilege mules** | Mules start from `cap_drop: ALL` and add back only `NET_ADMIN`, `DAC_OVERRIDE`, `SETUID`, `SETGID` and `KILL` — each verified load-bearing by running without it. **No `CAP_SYS_MODULE`** (host-kernel module loading) and **no `NET_RAW`** (packet crafting/sniffing). `no-new-privileges` blocks setuid escalation, and `mem_limit`/`pids_limit` bound a runaway or hostile download. The host must provide the `wireguard` module (`setup.sh` loads and persists it). OpenVPN mules add only `/dev/net/tun`. |
-| **Downloads are not root-owned** | aria2 drops to `PUID:PGID` (defaulting to the invoking user) via `setpriv` once the tunnel is up and the firewall is armed, so files land on the host owned by the user instead of uid 0. The mule refuses to start if that uid cannot write to `/downloads`. Root is still required for the setup phase — `ip`, `iptables`, `wg`/`openvpn` — and the kill-switch monitor keeps `CAP_KILL` so it can still tear down a non-root aria2. |
+| **Downloads are not root-owned** | aria2 drops to `PUID:PGID` via `setpriv` once the tunnel is up and the firewall is armed, so files land on the host owned by the user instead of uid 0. The default is taken from the **owner of the downloads directory**, not the calling process — inside the API container that process is root, which would silently skip the drop. Override with `SMG_PUID`/`SMG_PGID`. The mule refuses to start if that uid cannot write to `/downloads`. Root is still required for the setup phase — `ip`, `iptables`, `wg`/`openvpn` — and the kill-switch monitor keeps `CAP_KILL` so it can still tear down a non-root aria2. |
 | **Image provenance** | All four images pin their base by digest, not tag, so a rebuild cannot silently pull different content. Every image declares a `HEALTHCHECK`; a mule reports unhealthy as soon as `/tmp/ks_triggered` appears or its health file stops saying `healthy`. |
 | **aria2 RPC reachability** | The containerised API reaches each mule by container name over `smuggler-rpc`. A loopback publish (`127.0.0.1:<ephemeral>`) is kept because the `smg` CLI and `./start.sh debug` run on the host and talk to aria2 directly. Both paths are gated by a 192-bit random token (`secrets.token_urlsafe(24)`); the mule refuses to start if that token is missing or a placeholder. Sibling mules also sit on `smuggler-rpc`, so mule-to-mule RPC is gated by that per-mule token rather than by the firewall. |
 | **Input restriction** | `addUri` accepts `magnet:` URIs only (no `http`/`ftp`/`file` SSRF vector); file deletion is confined to the downloads root with a resolve-and-containment check. |
@@ -122,11 +123,28 @@ that terminates TLS and authenticates, and then:
 
 ### 4. The Docker socket
 
-The API container mounts `/var/run/docker.sock` because it manages mule
-containers — this makes the API process **host-root-equivalent.** It is mitigated
-by the loopback bind and optional token, not eliminated. Any remote-code-execution
-in the API or its dependencies escalates to host root, so keep the API off the LAN
-and keep dependencies patched.
+The API no longer mounts `/var/run/docker.sock`. It talks to
+`smuggler-docker-proxy` (Tecnativa's socket proxy, digest-pinned) over an
+`internal` network that only the API is attached to; the proxy holds the socket
+read-only and refuses everything not explicitly enabled. Allowed: `PING`,
+`VERSION`, `CONTAINERS`, `NETWORKS`, `POST`, `EXEC` — the exact set needed to
+create, start, stop, inspect and exec into mules and attach them to the RPC
+network. Refused (403): images, volumes, secrets, configs, swarm, nodes,
+services, tasks, plugins, build, commit, and the system/info endpoints. Mules
+sit on a different network and have no route to the proxy at all.
+
+**This narrows the surface; it is not a trust boundary.** `CONTAINERS` plus
+`POST` is inherently enough to create a container with an arbitrary bind mount
+or `privileged: true` and reach host root, and Smuggler cannot manage mules
+without them. So a remote-code-execution in the API or its dependencies is
+still, in the worst case, host root — it just no longer gets the unrestricted
+Docker API for free. The host remains a trusted, single-tenant component: keep
+the API off the LAN, keep the token enabled, and keep dependencies patched.
+
+A genuine boundary would need a purpose-built proxy that authorises each request
+against the `smuggler.mule` label and rejects container-create payloads carrying
+mounts, capabilities or `privileged`. That is tracked as future work, not
+something the off-the-shelf proxy provides.
 
 ---
 
