@@ -42,4 +42,9 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1
 
+# Redundant at runtime — the base image already defaults to uid 101 — but
+# stated explicitly so it is visible to static analysis (Sonar S6471) and to
+# anyone reading the file, rather than being an implicit property of the base.
+USER 101
+
 CMD ["nginx", "-g", "daemon off;"]
