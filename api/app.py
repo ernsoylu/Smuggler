@@ -9,11 +9,13 @@ from flask import Flask, request
 from flask_cors import CORS
 
 from cli.log import get_logger, log_file_path
+from api.crypto import encryption_enabled, weak_key_reason
 from api.mules import mules_bp
 from api.torrents import torrents_bp
 from api.stats import stats_bp
 from api.settings import settings_bp
 from api.configs import configs_bp
+from api.deployments import deployments_bp
 from api.watchdog import watchdog_bp, start_watchdog
 from api.database import init_db
 
@@ -45,8 +47,8 @@ def create_app() -> Flask:
     app = Flask(__name__)
 
     # Restrict cross-origin access. In production the frontend is served by nginx
-    # and proxies /api same-origin, so CORS is only needed for local dev / the
-    # desktop client. Override with SMG_CORS_ORIGINS (comma-separated, or "*").
+    # and proxies /api same-origin, so CORS is only needed for local dev.
+    # Override with SMG_CORS_ORIGINS (comma-separated, or "*").
     _origins_env = os.environ.get("SMG_CORS_ORIGINS", "").strip()
     if _origins_env == "*":
         cors_origins: object = "*"
@@ -64,24 +66,56 @@ def create_app() -> Flask:
     CORS(app, origins=cors_origins)
 
     # ── Access control ────────────────────────────────────────────────────────
-    # The API holds the Docker socket (host-root equivalent), so it must never be
+    # The API can drive Docker (via the socket proxy), so it must never be
     # openly reachable. Two layers, both fail-safe for existing local setups:
     #   1. Token auth (opt-in): when SMG_API_TOKEN is set, every /api/* call
     #      (except health + CORS preflight) must carry a matching X-Smuggler-Token.
     #   2. CSRF: state-changing requests carrying a browser Origin that is not in
     #      the allow-list are refused, so a page the user visits cannot drive the
-    #      local API. Non-browser clients (desktop, curl) send no Origin and pass.
-    if not os.environ.get("SMG_API_TOKEN", "").strip():
+    #      local API. Non-browser clients (the smg CLI, curl) send no Origin and pass.
+    _token = os.environ.get("SMG_API_TOKEN", "").strip()
+    if not _token:
+        # When mules are addressed over the shared internal RPC network, they can
+        # also open connections *to* this API — which holds the Docker socket.
+        # Host networking used to make that impossible (a container cannot reach
+        # the host's loopback), so in this topology the token is the control that
+        # replaces it and cannot be optional.
+        if os.environ.get("SMG_MULE_RPC_HOST", "").strip().lower() == "container":
+            raise RuntimeError(
+                "SMG_API_TOKEN must be set when SMG_MULE_RPC_HOST=container: mules "
+                "share a network with this API and could otherwise drive the Docker "
+                "socket unauthenticated. Run ./setup.sh to generate a token."
+            )
         log.warning(
             "SMG_API_TOKEN is not set — API requests are not authenticated. "
             "Keep the API bound to 127.0.0.1 (default) or set SMG_API_TOKEN."
         )
 
+    # Fail loudly at boot rather than on the first VPN config upload, which is
+    # where the missing key would otherwise surface as a 503.
+    if not encryption_enabled():
+        log.critical(
+            "SMG_SECRET_KEY is not set — VPN config uploads will be refused. "
+            "Run ./setup.sh to generate one, or set SMG_ALLOW_PLAINTEXT_SECRETS=1 "
+            "to store secrets unencrypted (not recommended)."
+        )
+    else:
+        _weak = weak_key_reason()
+        if _weak:
+            log.warning(
+                "SMG_SECRET_KEY looks weak (%s). scrypt makes guessing costly but "
+                "cannot rescue a trivial secret — prefer the key ./setup.sh "
+                "generates (openssl rand -base64 32).", _weak,
+            )
+
     _MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
+    # Exact paths, not a prefix: startswith("/api/health") would also exempt any
+    # future route that merely begins with those characters.
+    _UNAUTHENTICATED = {"/api/health", "/api/health/"}
 
     @app.before_request
     def _api_guard():
-        if request.method == "OPTIONS" or request.path.startswith("/api/health"):
+        if request.method == "OPTIONS" or request.path in _UNAUTHENTICATED:
             return None
 
         token = os.environ.get("SMG_API_TOKEN", "").strip()
@@ -106,6 +140,7 @@ def create_app() -> Flask:
     app.register_blueprint(stats_bp)
     app.register_blueprint(settings_bp)
     app.register_blueprint(configs_bp)
+    app.register_blueprint(deployments_bp)
     app.register_blueprint(watchdog_bp)
 
     @app.route("/api/health/", methods=["GET"])
@@ -124,11 +159,12 @@ def create_app() -> Flask:
         log.error("500: %s", e)
         return {"error": "Internal server error"}, 500
 
-    log.info("create_app: blueprints registered — mules, torrents, stats, settings, configs, watchdog")
+    log.info("create_app: blueprints registered — mules, torrents, stats, settings, configs, deployments, watchdog")
 
-    # Start the background VPN watchdog (daemon thread — survives app context)
-    # Skip in Werkzeug reloader child processes to avoid double-starting
-    if os.environ.get("WERKZEUG_RUN_MAIN") != "true" or not app.debug:
-        start_watchdog()
+    # Start the background VPN watchdog (daemon thread — survives app context).
+    # start_watchdog() is itself idempotent, which is what actually prevents a
+    # second thread; the old WERKZEUG_RUN_MAIN guard read app.debug before
+    # app.run() had set it and api/run.py disables the reloader anyway.
+    start_watchdog()
 
     return app

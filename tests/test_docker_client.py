@@ -386,6 +386,38 @@ class TestWaitForVpn:
             with pytest.raises(RuntimeError, match="timed out"):
                 wait_for_vpn(mock_docker_client, "smuggler-mule-test", timeout=1, poll_interval=0)
 
+    def test_falls_back_to_icanhazip_when_ipinfo_unavailable(self, mock_docker_client):
+        # ipinfo.io rate-limits aggressively; a deploy must not fail just because
+        # one metadata provider is unreachable.
+        container = self._running_container(b"")
+
+        def _exec(cmd, **kwargs):
+            if "ipinfo.io" in cmd:
+                return (22, b"")
+            return (0, b"9.9.9.9\n")
+
+        container.exec_run.side_effect = _exec
+        mock_docker_client.containers.get.return_value = container
+        with patch("cli.docker_client.time.sleep"), \
+             patch("cli.docker_client._wait_for_aria2"):
+            result = wait_for_vpn(mock_docker_client, "smuggler-mule-test", timeout=10)
+        assert result == {"ip": "9.9.9.9"}
+
+    def test_prefers_ipinfo_metadata_when_available(self, mock_docker_client):
+        container = self._running_container(b'{"ip":"1.2.3.4","country":"NZ"}')
+        mock_docker_client.containers.get.return_value = container
+        with patch("cli.docker_client._wait_for_aria2"):
+            result = wait_for_vpn(mock_docker_client, "smuggler-mule-test", timeout=10)
+        assert result["country"] == "NZ"
+
+    def test_times_out_when_both_probes_fail(self, mock_docker_client):
+        container = self._running_container(b"")
+        container.exec_run.return_value = (1, b"")
+        mock_docker_client.containers.get.return_value = container
+        with patch("cli.docker_client.time.sleep"):
+            with pytest.raises(RuntimeError, match="timed out"):
+                wait_for_vpn(mock_docker_client, "smuggler-mule-test", timeout=1, poll_interval=0)
+
 
 # ─── get_container_logs ──────────────────────────────────────────────────────
 
@@ -457,3 +489,143 @@ class TestCheckMuleVpnLeakDetection:
         # Tunnel proved healthy; a failed default-route probe must not be a leak.
         assert result["healthy"] is True
         assert result["kind"] == "healthy"
+
+
+class TestMuleRpcAddressing:
+    """RPC is reached differently depending on where the caller runs."""
+
+    def _mule(self):
+        c = MagicMock()
+        c.name = "smuggler-mule-abc"
+        c.short_id = "abc"
+        c.status = "running"
+        c.labels = {
+            "smuggler.mule": "true",
+            "smuggler.rpc_token": "tok",
+            "smuggler.rpc_port": "16800",
+            "smuggler.vpn_config": "vpn.conf",
+        }
+        from cli.docker_client import MuleInfo
+        return MuleInfo(c)
+
+    def test_host_mode_uses_published_loopback_port(self, monkeypatch):
+        monkeypatch.delenv("SMG_MULE_RPC_HOST", raising=False)
+        m = self._mule()
+        assert m.rpc_host == "localhost"
+        assert m.rpc_target_port == 16800
+        assert m.rpc_url == "http://localhost:16800/jsonrpc"
+
+    def test_container_mode_uses_container_name_and_internal_port(self, monkeypatch):
+        monkeypatch.setenv("SMG_MULE_RPC_HOST", "container")
+        m = self._mule()
+        assert m.rpc_host == "smuggler-mule-abc"
+        assert m.rpc_target_port == 6800
+        assert m.rpc_url == "http://smuggler-mule-abc:6800/jsonrpc"
+
+    def test_aria2_for_follows_the_same_addressing(self, monkeypatch):
+        from cli.docker_client import aria2_for
+        monkeypatch.setenv("SMG_MULE_RPC_HOST", "container")
+        assert "smuggler-mule-abc:6800" in aria2_for(self._mule()).url
+        monkeypatch.delenv("SMG_MULE_RPC_HOST", raising=False)
+        assert "localhost:16800" in aria2_for(self._mule()).url
+
+    def test_aria2_for_passes_timeout_through(self, monkeypatch):
+        from cli.docker_client import aria2_for
+        monkeypatch.delenv("SMG_MULE_RPC_HOST", raising=False)
+        assert aria2_for(self._mule(), timeout=5)._timeout == 5
+
+
+class TestAttachRpcNetwork:
+    def test_connects_mule_to_the_rpc_network(self, mock_docker_client):
+        from cli.docker_client import _attach_rpc_network
+        net = MagicMock()
+        mock_docker_client.networks.get.return_value = net
+        container = MagicMock()
+        _attach_rpc_network(mock_docker_client, container, "smuggler-mule-abc")
+        net.connect.assert_called_once_with(container)
+
+    def test_missing_network_is_not_fatal(self, mock_docker_client):
+        # A bare `smg` deploy with no compose stack must still work over the
+        # published loopback port.
+        from cli.docker_client import _attach_rpc_network
+        mock_docker_client.networks.get.side_effect = docker.errors.NotFound("nope")
+        _attach_rpc_network(mock_docker_client, MagicMock(), "smuggler-mule-abc")
+
+    def test_connect_failure_is_not_fatal(self, mock_docker_client):
+        from cli.docker_client import _attach_rpc_network
+        net = MagicMock()
+        net.connect.side_effect = docker.errors.APIError("boom")
+        mock_docker_client.networks.get.return_value = net
+        _attach_rpc_network(mock_docker_client, MagicMock(), "smuggler-mule-abc")
+
+
+class TestMuleHardening:
+    """Container-level restrictions applied to every mule."""
+
+    def _run_kwargs(self, mock_docker_client, mock_container, **kw):
+        with tempfile.NamedTemporaryFile(suffix=".conf", delete=False) as f:
+            f.write(b"[Interface]\n")
+            conf = f.name
+        try:
+            mock_docker_client.containers.run.return_value = mock_container
+            with patch("cli.docker_client._find_free_port", return_value=16800):
+                start_mule(mock_docker_client, conf, **kw)
+            return mock_docker_client.containers.run.call_args.kwargs
+        finally:
+            os.unlink(conf)
+
+    def test_drops_all_capabilities_then_adds_back_a_minimal_set(
+        self, mock_docker_client, mock_container
+    ):
+        k = self._run_kwargs(mock_docker_client, mock_container)
+        assert k["cap_drop"] == ["ALL"]
+        assert set(k["cap_add"]) == {
+            "NET_ADMIN", "DAC_OVERRIDE", "SETUID", "SETGID", "KILL",
+        }
+
+    def test_never_grants_host_kernel_or_raw_socket_capabilities(
+        self, mock_docker_client, mock_container
+    ):
+        k = self._run_kwargs(mock_docker_client, mock_container)
+        for forbidden in ("SYS_MODULE", "SYS_ADMIN", "NET_RAW", "SYS_PTRACE"):
+            assert forbidden not in k["cap_add"]
+
+    def test_blocks_privilege_escalation(self, mock_docker_client, mock_container):
+        k = self._run_kwargs(mock_docker_client, mock_container)
+        assert "no-new-privileges:true" in k["security_opt"]
+
+    def test_applies_resource_ceilings(self, mock_docker_client, mock_container):
+        k = self._run_kwargs(mock_docker_client, mock_container)
+        assert k["mem_limit"] == "1g"
+        assert k["pids_limit"] == 512
+
+    def test_puid_comes_from_the_downloads_owner_not_the_caller(
+        self, mock_docker_client, mock_container, tmp_path, monkeypatch
+    ):
+        # os.getuid() is root inside the API container, which silently skipped
+        # the privilege drop and left downloads root-owned on the host.
+        monkeypatch.delenv("SMG_PUID", raising=False)
+        monkeypatch.delenv("SMG_PGID", raising=False)
+        dl = tmp_path / "downloads"
+        dl.mkdir()
+        k = self._run_kwargs(mock_docker_client, mock_container, downloads_dir=dl)
+        st = dl.stat()
+        assert k["environment"]["PUID"] == str(st.st_uid)
+        assert k["environment"]["PGID"] == str(st.st_gid)
+
+    def test_explicit_puid_pgid_override_the_directory_owner(
+        self, mock_docker_client, mock_container, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("SMG_PUID", "4242")
+        monkeypatch.setenv("SMG_PGID", "4343")
+        dl = tmp_path / "downloads"
+        dl.mkdir()
+        k = self._run_kwargs(mock_docker_client, mock_container, downloads_dir=dl)
+        assert k["environment"]["PUID"] == "4242"
+        assert k["environment"]["PGID"] == "4343"
+
+    def test_rpc_stays_published_on_loopback_only(
+        self, mock_docker_client, mock_container
+    ):
+        k = self._run_kwargs(mock_docker_client, mock_container)
+        assert k["ports"]["6800/tcp"] == ("127.0.0.1", 16800)

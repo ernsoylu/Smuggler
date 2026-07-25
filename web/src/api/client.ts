@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Mule, Torrent, GlobalStats, IpInfo, VpnConfig, MuleHealth, WatchdogStatus, Peer, TorrentOptions } from './types';
+import type { Mule, Torrent, GlobalStats, IpInfo, VpnConfig, MuleHealth, WatchdogStatus, Peer, TorrentOptions, Deployment } from './types';
 
 const api = axios.create({ baseURL: '/api' });
 
@@ -111,6 +111,24 @@ export const deleteConfig = (id: number): Promise<void> =>
 
 export const deployMuleFromConfig = (configId: number, name?: string): Promise<Mule> =>
   api.post<Mule>(`/configs/${configId}/deploy`, { name }).then(r => r.data);
+
+export const setTorrentCategory = (infoHash: string, category: string): Promise<void> =>
+  api.put(`/torrents/category/${infoHash}`, { category }).then(() => undefined);
+
+// ── Deployments ───────────────────────────────────────────────────────────────
+
+/**
+ * Begin deploying a mule. Returns immediately with a job to poll — unlike
+ * deployMuleFromConfig, which blocks until the VPN is up.
+ */
+export const startDeployment = (configId: number, name?: string): Promise<Deployment> =>
+  api.post<Deployment>('/deployments/', { config_id: configId, name }).then(r => r.data);
+
+export const getDeployment = (id: string): Promise<Deployment> =>
+  api.get<Deployment>(`/deployments/${id}`).then(r => r.data);
+
+export const getDeployments = (): Promise<Deployment[]> =>
+  api.get<Deployment[]>('/deployments/').then(r => r.data);
 
 // ── Watchdog ──────────────────────────────────────────────────────────────────
 

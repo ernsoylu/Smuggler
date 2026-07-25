@@ -287,3 +287,36 @@ class TestWatchdogEvacuate:
             r = client.post("/api/watchdog/smuggler-mule-test/evacuate?kill=false")
         assert r.status_code == 200
         mock_ev.assert_called_once_with(mock_ev.call_args[0][0], "smuggler-mule-test", kill_after=False)
+
+
+class TestStartWatchdogIdempotence:
+    """start_watchdog() promises it will not start a second thread."""
+
+    def _reset(self):
+        wd._watchdog_thread = None
+
+    def test_second_call_does_not_start_another_thread(self):
+        self._reset()
+        try:
+            wd.start_watchdog()
+            first = wd._watchdog_thread
+            wd.start_watchdog()
+            assert wd._watchdog_thread is first
+        finally:
+            self._reset()
+
+    def test_restarts_when_previous_thread_died(self):
+        self._reset()
+
+        class _Dead:
+            ident = 1
+            def is_alive(self):
+                return False
+
+        try:
+            wd._watchdog_thread = _Dead()
+            wd.start_watchdog()
+            assert wd._watchdog_thread is not None
+            assert wd._watchdog_thread.is_alive()
+        finally:
+            self._reset()

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import shutil
 import subprocess
 import time
 import webbrowser
@@ -130,46 +128,6 @@ def build(vpn_type: str, context: str | None, tag: str | None) -> None:
     except (RuntimeError, FileNotFoundError) as exc:
         console.print(f"[red]Build failed:[/red] {exc}")
         raise SystemExit(1)
-
-
-@cli.command("client")
-@click.option("--no-build", is_flag=True, default=False,
-              help="Fail if the desktop jar is missing instead of building it.")
-def client(no_build: bool) -> None:
-    """Launch the desktop client (auto-starts the API container)."""
-    _ensure_api_up()
-
-    jars = sorted((_ROOT / "desktop" / "build" / "libs").glob("smuggler-desktop-*-all.jar"))
-    if not jars:
-        if no_build:
-            console.print("[red]Desktop jar not found.[/red] Run `./start.sh build desktop` first.")
-            raise SystemExit(1)
-        console.print("[yellow]…[/yellow] desktop jar missing — building (gradle shadowJar)")
-        gradlew = _ROOT / "desktop" / "gradlew"
-        if not gradlew.exists():
-            console.print("[red]desktop/gradlew not found.[/red]")
-            raise SystemExit(1)
-        try:
-            subprocess.run([str(gradlew), "shadowJar"], cwd=str(_ROOT / "desktop"), check=True)
-        except subprocess.CalledProcessError as exc:
-            console.print(f"[red]Gradle build failed:[/red] {exc}")
-            raise SystemExit(1)
-        jars = sorted((_ROOT / "desktop" / "build" / "libs").glob("smuggler-desktop-*-all.jar"))
-        if not jars:
-            console.print("[red]Build finished but no jar produced.[/red]")
-            raise SystemExit(1)
-
-    java = shutil.which("java")
-    if not java:
-        console.print("[red]`java` not on PATH.[/red] Install a JRE 21+ first.")
-        raise SystemExit(1)
-
-    jar = jars[-1]
-    console.print(f"[green]→[/green] launching desktop client: [bold]{jar.name}[/bold]")
-    env = {**os.environ, "SMG_API_URL": os.environ.get("SMG_API_URL", "http://127.0.0.1:55555")}
-    subprocess.Popen([java, "-jar", str(jar)], env=env,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     start_new_session=True)
 
 
 @cli.command("web")

@@ -15,6 +15,7 @@ import docker
 import docker.errors
 import docker.models.containers
 
+from cli.aria2_client import Aria2Client
 from cli.log import get_logger, log_safe
 
 log = get_logger(__name__)
@@ -23,6 +24,55 @@ MULE_LABEL = "smuggler.mule"
 MULE_IMAGE = "smuggler-mule:latest"
 MULE_IMAGE_OVPN = "smuggler-mule-ovpn:latest"
 ARIA2_INTERNAL_PORT = 6800
+
+# Internal Docker network shared by the API and every mule, carrying only aria2
+# RPC. Created by docker-compose; declared here because start_mule attaches to
+# it. It is an `internal` network — verified to have no default route, no DNS
+# egress and no raw IP egress — so it cannot become a leak path for a mule.
+MULE_RPC_NETWORK = os.environ.get("SMG_RPC_NETWORK", "smuggler-rpc")
+
+# Capabilities a mule actually needs, added back on top of cap_drop=ALL. Each is
+# load-bearing and was verified by running the container without it:
+#   NET_ADMIN     — create/configure wg0 or tun0 and install the kill-switch
+#   DAC_OVERRIDE  — read the host-owned VPN config bind-mounted at 0600
+#   SETUID/SETGID — setpriv drops aria2 to PUID:PGID
+#   KILL          — the root monitor signals aria2 once it runs as PUID
+# Notably absent: SYS_MODULE (host-kernel escape) and NET_RAW.
+MULE_CAPABILITIES = ("NET_ADMIN", "DAC_OVERRIDE", "SETUID", "SETGID", "KILL")
+
+# Resource ceilings for a mule. Generous for aria2 but finite, so one hostile
+# or runaway download cannot exhaust host memory or the PID table.
+MULE_MEM_LIMIT = os.environ.get("SMG_MULE_MEM_LIMIT", "1g")
+MULE_PIDS_LIMIT = int(os.environ.get("SMG_MULE_PIDS_LIMIT", "512"))
+
+def _download_owner(downloads_dir: Path) -> tuple[int, int]:
+    """uid/gid aria2 should run as, so downloads are not root-owned on the host.
+
+    Defaults to whoever owns the downloads directory rather than the current
+    process. ``os.getuid()`` is root inside the API container, which silently
+    skipped the privilege drop and recreated the very problem this solves —
+    files landing as uid 0, unmovable from a file manager without sudo.
+    ``SMG_PUID``/``SMG_PGID`` override it when both are set.
+    """
+    env_uid, env_gid = os.environ.get("SMG_PUID"), os.environ.get("SMG_PGID")
+    if env_uid and env_gid:
+        return int(env_uid), int(env_gid)
+    try:
+        st = downloads_dir.stat()
+        return st.st_uid, st.st_gid
+    except OSError:
+        return os.getuid(), os.getgid()
+
+
+def _rpc_over_container_network() -> bool:
+    """True when RPC should be addressed by container name instead of loopback.
+
+    The API sets this in docker-compose, where it shares ``MULE_RPC_NETWORK``
+    with the mules. Host-side callers — the ``smg`` CLI and ``start.sh debug``,
+    which run outside Docker — leave it unset and keep using the published
+    loopback port, which is why mules still publish one.
+    """
+    return os.environ.get("SMG_MULE_RPC_HOST", "").strip().lower() == "container"
 
 
 class MuleInfo:
@@ -45,8 +95,42 @@ class MuleInfo:
             self.config_id = None
 
     @property
+    def rpc_host(self) -> str:
+        """Host to dial for this mule's aria2 RPC.
+
+        In-container callers use the mule's container name over the internal RPC
+        network; host callers use the loopback-published port.
+        """
+        return self.name if _rpc_over_container_network() else "localhost"
+
+    @property
+    def rpc_target_port(self) -> int:
+        """Port that pairs with :attr:`rpc_host`.
+
+        Container-network callers hit aria2 directly on 6800; host callers go
+        through the published ephemeral port.
+        """
+        return ARIA2_INTERNAL_PORT if _rpc_over_container_network() else self.rpc_port
+
+    @property
     def rpc_url(self) -> str:
-        return f"http://localhost:{self.rpc_port}/jsonrpc"
+        return f"http://{self.rpc_host}:{self.rpc_target_port}/jsonrpc"
+
+
+def aria2_for(mule: MuleInfo, timeout: int | None = None) -> Aria2Client:
+    """Build an Aria2Client addressed correctly for where this process runs.
+
+    Centralised so the loopback-vs-container-network decision lives in exactly
+    one place rather than at each of the call sites that used to hardcode
+    ``host="localhost"``.
+    """
+    kwargs = {"timeout": timeout} if timeout is not None else {}
+    return Aria2Client(
+        host=mule.rpc_host,
+        port=mule.rpc_target_port,
+        token=mule.rpc_token,
+        **kwargs,
+    )
 
 
 def get_docker_client() -> docker.DockerClient:
@@ -62,6 +146,45 @@ def get_docker_client() -> docker.DockerClient:
         raise RuntimeError(
             f"Cannot connect to Docker daemon. Is Docker running?\n  {exc}"
         ) from exc
+
+
+def _attach_rpc_network(
+    client: docker.DockerClient,
+    container: docker.models.containers.Container,
+    name: str,
+) -> None:
+    """Attach a mule to the internal RPC network, if that network exists.
+
+    Added as a second interface *after* the container is created, so the mule
+    keeps its normal bridge as the default route — the kill-switch derives the
+    interface it seals from that default route, and an internal network never
+    provides one.
+
+    Best-effort by design: when the network is absent (a bare ``smg`` run with
+    no compose stack) the mule still works over its published loopback port, so
+    a missing network must not fail the deploy.
+    """
+    try:
+        network = client.networks.get(MULE_RPC_NETWORK)
+    except docker.errors.NotFound:
+        log.debug(
+            "_attach_rpc_network: network %s not present — mule %s will be "
+            "reachable over its published loopback port only",
+            MULE_RPC_NETWORK, log_safe(name),
+        )
+        return
+    except docker.errors.APIError as exc:
+        log.warning("_attach_rpc_network: could not look up %s — %s", MULE_RPC_NETWORK, exc)
+        return
+
+    try:
+        network.connect(container)
+        log.info("_attach_rpc_network: mule=%s joined %s", log_safe(name), MULE_RPC_NETWORK)
+    except docker.errors.APIError as exc:
+        log.warning(
+            "_attach_rpc_network: mule=%s could not join %s — %s",
+            log_safe(name), MULE_RPC_NETWORK, exc,
+        )
 
 
 def _find_free_port() -> int:
@@ -121,17 +244,16 @@ def start_mule(
     if vpn_type == "openvpn":
         image = MULE_IMAGE_OVPN
         container_config_path = "/etc/openvpn/client.ovpn"
-        cap_add = ["NET_ADMIN"]
+        cap_add = list(MULE_CAPABILITIES)
         sysctls: dict = {}
         # OpenVPN requires the host TUN/TAP device to create tun0 inside the container
         devices = ["/dev/net/tun:/dev/net/tun:rwm"]
     else:
         image = MULE_IMAGE
         container_config_path = "/etc/wireguard/wg0.conf"
-        # NET_ADMIN only — configuring an existing wg interface needs it, but we
-        # deliberately do NOT add SYS_MODULE (host-kernel module loading = escape
+        # Deliberately no SYS_MODULE (host-kernel module loading = escape
         # primitive). The host must have the wireguard module loaded already.
-        cap_add = ["NET_ADMIN"]
+        cap_add = list(MULE_CAPABILITIES)
         sysctls = {"net.ipv4.conf.all.src_valid_mark": "1"}
         devices = []
 
@@ -140,7 +262,14 @@ def start_mule(
         str(downloads_dir): {"bind": "/downloads", "mode": "rw"},
     }
 
-    environment: dict = {"ARIA2_SECRET": rpc_token}
+    mule_uid, mule_gid = _download_owner(downloads_dir)
+    environment: dict = {
+        "ARIA2_SECRET": rpc_token,
+        # aria2 drops to this uid/gid before downloading, so files on the host
+        # belong to the user rather than root.
+        "PUID": str(mule_uid),
+        "PGID": str(mule_gid),
+    }
     if vpn_type == "openvpn" and ovpn_username:
         environment["OVPN_USERNAME"] = ovpn_username
     if vpn_type == "openvpn" and ovpn_password:
@@ -160,15 +289,28 @@ def start_mule(
         "image": image,
         "name": worker_name,
         "detach": True,
+        # Start from nothing and add back only what is genuinely required,
+        # rather than inheriting Docker's default capability set. This still
+        # drops NET_RAW (packet crafting/sniffing), SYS_CHROOT, MKNOD, SETPCAP,
+        # SETFCAP, FOWNER, FSETID and AUDIT_WRITE.
+        "cap_drop": ["ALL"],
         "cap_add": cap_add,
+        # A mule processes untrusted peer traffic, so block the setuid/setcap
+        # escalation path outright.
+        "security_opt": ["no-new-privileges:true"],
         "volumes": volumes,
-        # Publish the aria2 RPC port on the loopback interface ONLY. The API
-        # (host network) reaches it via 127.0.0.1; binding to 0.0.0.0 would
-        # expose the token-gated RPC to the whole LAN.
+        # Publish the aria2 RPC port on the loopback interface ONLY. Host-side
+        # callers (the smg CLI, ./start.sh debug) reach it via 127.0.0.1;
+        # binding to 0.0.0.0 would expose the token-gated RPC to the whole LAN.
+        # Containerised callers prefer the internal RPC network attached below.
         "ports": {f"{ARIA2_INTERNAL_PORT}/tcp": ("127.0.0.1", host_port)},
         "environment": environment,
         "labels": labels,
         "restart_policy": {"Name": "unless-stopped"},
+        # Bound the blast radius of a runaway or hostile download. aria2 with a
+        # handful of torrents sits far below these.
+        "mem_limit": MULE_MEM_LIMIT,
+        "pids_limit": MULE_PIDS_LIMIT,
     }
     if sysctls:
         run_kwargs["sysctls"] = sysctls
@@ -185,6 +327,8 @@ def start_mule(
         log.error("start_mule: Docker API error — %s", exc)
         raise RuntimeError(f"Docker API error while starting mule: {exc}") from exc
 
+    _attach_rpc_network(client, container, worker_name)
+
     log.info("start_mule: container started id=%s name=%s", container.short_id, log_safe(worker_name))
     return MuleInfo(container)
 
@@ -196,9 +340,13 @@ def wait_for_vpn(
     poll_interval: int = 3,
 ) -> dict:
     """
-    Block until the mule's VPN is up and ipinfo.io responds.
+    Block until the mule's VPN is confirmed up.
 
-    Returns the parsed JSON dict from ipinfo.io on success.
+    Returns a dict of exit-node metadata. ipinfo.io is tried first for the rich
+    fields (city/region/country), falling back to icanhazip for a bare ``ip``:
+    proving the tunnel routes is the actual gate, and a single third party being
+    rate-limited must not be able to fail every deployment.
+
     Raises RuntimeError with container logs if the container exits or times out.
     """
     log.info("wait_for_vpn: waiting for VPN on mule=%s (timeout=%ds)", name_or_id, timeout)
@@ -226,32 +374,45 @@ def wait_for_vpn(
             time.sleep(poll_interval)
             continue
 
+        # Bind the probes to the tunnel interface so this startup check never
+        # egresses via eth0 (which would reveal the real IP to the probe endpoint
+        # before routing settles).
+        vpn_iface = "tun0" if mule.vpn_type == "openvpn" else "wg0"
+        info: dict | None = None
+
         try:
-            # Bind the probe to the tunnel interface so this startup check never
-            # egresses via eth0 (which would reveal the real IP to ipinfo.io
-            # before routing settles).
-            vpn_iface = "tun0" if mule.vpn_type == "openvpn" else "wg0"
             exit_code, output = mule.container.exec_run(
                 f"curl -sf --interface {vpn_iface} --max-time 8 https://ipinfo.io/json",
                 demux=False,
             )
             if exit_code == 0 and output:
                 info = json.loads(output.decode().strip())
-                log.info(
-                    "wait_for_vpn: VPN confirmed — mule=%s ip=%s country=%s",
-                    name_or_id, info.get("ip"), info.get("country"),
-                )
-                # VPN is up — now wait for aria2 to start accepting connections
-                _wait_for_aria2(mule, deadline)
-                return info
-            log.debug(
-                "wait_for_vpn: curl exit_code=%s output_len=%s — retrying",
-                exit_code, len(output) if output else 0,
-            )
         except (docker.errors.APIError, ValueError) as exc:
-            log.debug("wait_for_vpn: exec/parse error — %s", exc)
+            log.debug("wait_for_vpn: ipinfo exec/parse error — %s", exc)
 
-        last_error = "VPN not ready yet"
+        if not info or not info.get("ip"):
+            # ipinfo is unavailable or rate-limited — fall back to the plain-text
+            # probe. Less metadata, same proof that the tunnel is routing.
+            ip, reason = _probe_icanhazip(mule.container, vpn_iface)
+            if ip:
+                log.info(
+                    "wait_for_vpn: ipinfo unavailable, confirmed via icanhazip — "
+                    "mule=%s ip=%s", name_or_id, ip,
+                )
+                info = {"ip": ip}
+            else:
+                info = None
+                last_error = f"VPN not ready yet ({reason})"
+
+        if info:
+            log.info(
+                "wait_for_vpn: VPN confirmed — mule=%s ip=%s country=%s",
+                name_or_id, info.get("ip"), info.get("country"),
+            )
+            # VPN is up — now wait for aria2 to start accepting connections
+            _wait_for_aria2(mule, deadline)
+            return info
+
         time.sleep(poll_interval)
 
     log.error("wait_for_vpn: timed out after %ds for worker=%s", timeout, name_or_id)
@@ -268,22 +429,23 @@ def _wait_for_aria2(mule: MuleInfo, deadline: float, poll_interval: int = 2) -> 
     import requests as _requests
 
     log.info(
-        "_wait_for_aria2: waiting for aria2 on port=%d mule=%s",
-        mule.rpc_port, mule.name,
+        "_wait_for_aria2: waiting for aria2 at %s mule=%s", mule.rpc_url, mule.name,
     )
     while time.time() < deadline:
         try:
-            # Quick health-check via the host-mapped port — same path the API uses
+            # Same address the API itself will use — container name over the
+            # internal RPC network in the compose topology, published loopback
+            # port on the host. Hardcoding localhost here made this poll a no-op
+            # inside the API container, so deploys returned before aria2 was up.
             resp = _requests.post(
-                f"http://localhost:{mule.rpc_port}/jsonrpc",
+                mule.rpc_url,
                 json={"jsonrpc": "2.0", "id": "smuggler", "method": "aria2.getVersion",
                       "params": [f"token:{mule.rpc_token}"]},
                 timeout=3,
             )
             if resp.status_code == 200:
                 log.info(
-                    "_wait_for_aria2: aria2 ready on port=%d mule=%s",
-                    mule.rpc_port, mule.name,
+                    "_wait_for_aria2: aria2 ready at %s mule=%s", mule.rpc_url, mule.name,
                 )
                 return
         except _requests.exceptions.RequestException as exc:
@@ -292,8 +454,8 @@ def _wait_for_aria2(mule: MuleInfo, deadline: float, poll_interval: int = 2) -> 
 
     # Deadline exceeded — log and return; the caller's timeout will handle it
     log.warning(
-        "_wait_for_aria2: aria2 not ready before deadline mule=%s port=%d — continuing",
-        mule.name, mule.rpc_port,
+        "_wait_for_aria2: aria2 not ready before deadline mule=%s at %s — continuing",
+        mule.name, mule.rpc_url,
     )
 
 
@@ -526,6 +688,52 @@ def _probe_default_route_ip(container) -> tuple[str | None, str]:
     return None, "default-route probe returned unexpected body"
 
 
+_VALID_PHASES = ("starting", "configuring", "connecting", "deployed")
+
+
+def get_mule_phase(client: docker.DockerClient, name_or_id: str) -> dict:
+    """Read a mule's self-reported startup phase from ``/tmp/vpn_health.json``.
+
+    Cheap by design — a single ``cat`` inside the container, no network probe —
+    because deploy progress is polled every second or so. Use
+    :func:`check_mule_vpn` when you need an actual liveness verdict.
+
+    Returns ``{"phase", "status", "ip", "reason"}``. ``phase`` falls back to
+    ``"starting"`` while the container is coming up and the file does not exist
+    yet, which is the honest answer rather than an error.
+    """
+    unknown = {"phase": "starting", "status": "starting", "ip": None, "reason": ""}
+    try:
+        container = client.containers.get(name_or_id)
+    except docker.errors.NotFound:
+        return {**unknown, "reason": "container not created yet"}
+    except docker.errors.APIError as exc:
+        return {**unknown, "reason": f"docker error: {exc}"}
+
+    try:
+        exit_code, output = container.exec_run("cat /tmp/vpn_health.json", demux=False)
+    except docker.errors.APIError as exc:
+        # Normal while the container is still starting up.
+        return {**unknown, "reason": f"not readable yet: {exc}"}
+    if exit_code != 0 or not output:
+        return {**unknown, "reason": "health file not written yet"}
+
+    try:
+        data = json.loads(output.decode(errors="replace").strip())
+    except ValueError:
+        return {**unknown, "reason": "malformed health file"}
+
+    phase = data.get("phase") or "starting"
+    if phase not in _VALID_PHASES:
+        phase = "starting"
+    return {
+        "phase": phase,
+        "status": data.get("status") or "starting",
+        "ip": data.get("ip") or None,
+        "reason": data.get("reason") or "",
+    }
+
+
 def check_mule_vpn(client: docker.DockerClient, name_or_id: str) -> dict:
     """
     Verify that a running mule's traffic is still exiting through the VPN.
@@ -609,11 +817,11 @@ def check_mule_vpn(client: docker.DockerClient, name_or_id: str) -> dict:
 
 def _collect_source_downloads(client: docker.DockerClient, source_name: str) -> list[dict]:
     """Return the active + waiting download list from *source_name*, or [] on error."""
-    from cli.aria2_client import Aria2Client, Aria2Error  # local import avoids circular dep
+    from cli.aria2_client import Aria2Error  # local import avoids circular dep
 
     try:
         source = get_mule(client, source_name)
-        src_aria2 = Aria2Client("localhost", source.rpc_port, source.rpc_token, timeout=5)
+        src_aria2 = aria2_for(source, timeout=5)
         return src_aria2.tell_active() + src_aria2.tell_waiting()
     except (RuntimeError, Aria2Error) as exc:
         log.warning("evacuate_mule: cannot list torrents on source %s — %s", source_name, exc)
@@ -623,7 +831,7 @@ def _collect_source_downloads(client: docker.DockerClient, source_name: str) -> 
 def _migrate_downloads(downloads: list[dict], targets: list, report: dict) -> None:
     """Migrate each download to a healthy target mule (round-robin) and update *report*."""
     import urllib.parse as _up
-    from cli.aria2_client import Aria2Client, Aria2Error  # local import avoids circular dep
+    from cli.aria2_client import Aria2Error  # local import avoids circular dep
 
     for idx, dl in enumerate(downloads):
         gid = dl.get("gid", "?")
@@ -641,7 +849,7 @@ def _migrate_downloads(downloads: list[dict], targets: list, report: dict) -> No
             continue
 
         target = targets[idx % len(targets)]
-        tgt_aria2 = Aria2Client("localhost", target.rpc_port, target.rpc_token, timeout=5)
+        tgt_aria2 = aria2_for(target, timeout=5)
         try:
             new_gid = tgt_aria2.add_magnet(magnet)
             log.info("evacuate_mule: migrated gid=%s → %s new_gid=%s", gid, target.name, new_gid)

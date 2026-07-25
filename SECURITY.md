@@ -16,7 +16,7 @@ vulnerability.
   never fully established.
 - **DNS leaks** that reveal what a mule is resolving to the host's ISP/resolver.
 - **IPv6 leaks** around an IPv4-only tunnel.
-- **Unauthenticated control** of the stack (which holds the Docker socket).
+- **Unauthenticated control** of the stack (which can drive Docker).
 - **Secret exposure at rest** — WireGuard private keys, OpenVPN credentials.
 
 **Trust assumptions**
@@ -43,7 +43,8 @@ vulnerability.
 |--------|-----------|
 | **VPN-first** | aria2 does not start until the mule has verified an external IP through the tunnel (`worker_image*/startup.sh`, `cli/docker_client.wait_for_vpn`). |
 | **Full-tunnel routing** | WireGuard: `ip route replace default dev wg0`. OpenVPN: `--redirect-gateway def1` forces all traffic through `tun0` regardless of what the `.ovpn` ships (so a config lacking `redirect-gateway` cannot silently leak). |
-| **Firewall kill-switch** | Each mule installs `iptables` rules on the real NIC that permit only VPN transport to the pinned endpoint and aria2 RPC replies (`--sport 6800`), and **drop everything else**. If the tunnel dies, traffic is dropped, not leaked — independent of any timer. |
+| **Firewall kill-switch** | Each mule installs `iptables` rules on the real NIC that permit only VPN transport to the pinned endpoint(s) and aria2 RPC replies (`--sport 6800`), and **drop everything else**. If the tunnel dies, traffic is dropped, not leaked — independent of any timer. **Fail-closed:** if no endpoint can be resolved, or any rule fails to install, the mule aborts instead of starting unprotected. OpenVPN configs with several `remote` lines have every endpoint pinned, so failover is not blocked. |
+| **RPC ingress filter** | aria2's RPC must listen on the container interface (Docker's published port DNATs to it, and aria2 has no bind-address option), so `INPUT` rules restrict port 6800 on the real NIC to the Docker gateway — containers sharing the bridge cannot reach it. CORS is off (`--rpc-allow-origin-all=false`); the API proxies RPC server-side. |
 | **Real-egress verification** | Health checks probe both the tunnel interface *and* the default route (the path aria2 actually uses) and flag a leak on mismatch — closing the blind spot where an interface-bound check passes while real traffic egresses elsewhere (`check_mule_vpn`, both `startup.sh` monitors). |
 | **DNS lock** | `/etc/resolv.conf` is pinned to the VPN/public resolvers (reached through the tunnel) and Docker's embedded resolver (`127.0.0.11`) is firewalled, so a query can never egress via the host. |
 | **IPv6 block** | For IPv4-only tunnels, IPv6 egress on the real NIC is dropped (link-local excepted). |
@@ -59,13 +60,17 @@ because a poll interval hasn't elapsed.
 
 | Control | Mechanism |
 |--------|-----------|
-| **Loopback by default** | The API binds `SMG_API_BIND` (default `127.0.0.1:55555`) and the UI listens on `127.0.0.1:8887`. The API holds the Docker socket, so it is not reachable from the LAN unless deliberately exposed. |
-| **Optional token auth** | Setting `SMG_API_TOKEN` requires a matching `X-Smuggler-Token` header on every `/api/*` call (`api/app.py`). The web UI injects it via nginx; the desktop client sends it from the environment. Health checks and CORS preflight are exempt. |
+| **Loopback by default** | Compose publishes the API to `127.0.0.1:55555` and the UI to `127.0.0.1:8887`. Both bind all interfaces *inside* their container (a published port cannot reach a loopback-bound listener), so the port mapping is what keeps them off the LAN. The API can drive Docker (via the proxy below), so it must not be exposed. |
+| **No host networking** | The API and UI run on Docker bridge networks, not in the host's network namespace. `smuggler-net` carries UI↔API; `smuggler-rpc` is an **internal** network (no gateway, hence no default route and no egress) carrying only aria2 RPC between the API and the mules. Mules join it as a second interface, so the interface the kill-switch seals — the one holding the default route — is unchanged. |
+| **Token auth (mandatory in the compose topology)** | `setup.sh` generates `SMG_API_TOKEN` into `.env` and enables it, so every `/api/*` call needs a matching `X-Smuggler-Token` header (`api/app.py`). Only `/api/health` (exact path) and CORS preflight are exempt. Because mules share `smuggler-rpc` with the API they can open connections to it — something host networking used to prevent — so the API **refuses to start** without a token when `SMG_MULE_RPC_HOST=container`. The token is what stops a compromised mule from driving the Docker socket. |
 | **CSRF guard** | State-changing requests that carry a browser `Origin` outside the allow-list are refused (403), so a page the user visits cannot drive the local API. |
-| **Least-privilege mules** | WireGuard mules run with `NET_ADMIN` only — **no `CAP_SYS_MODULE`** (which would allow loading modules into the host kernel). The host must provide the `wireguard` module (`setup.sh` loads and persists it). OpenVPN mules add only `/dev/net/tun`. |
-| **aria2 RPC on loopback** | The per-mule RPC port is published to `127.0.0.1:<ephemeral>` and gated by a 192-bit random token (`secrets.token_urlsafe(24)`). |
+| **Filtered Docker access** | The API reaches Docker through `smuggler-docker-proxy` (digest-pinned, socket mounted read-only) over an `internal` network, instead of mounting the socket itself. Only PING/VERSION/CONTAINERS/NETWORKS/POST/EXEC are enabled; images, volumes, secrets, swarm, plugins and the system endpoints return 403. Mules are on a different network and cannot reach the proxy. Surface reduction, **not** a trust boundary — see "The Docker socket" below. |
+| **Least-privilege mules** | Mules start from `cap_drop: ALL` and add back only `NET_ADMIN`, `DAC_OVERRIDE`, `SETUID`, `SETGID` and `KILL` — each verified load-bearing by running without it. **No `CAP_SYS_MODULE`** (host-kernel module loading) and **no `NET_RAW`** (packet crafting/sniffing). `no-new-privileges` blocks setuid escalation, and `mem_limit`/`pids_limit` bound a runaway or hostile download. The host must provide the `wireguard` module (`setup.sh` loads and persists it). OpenVPN mules add only `/dev/net/tun`. |
+| **Downloads are not root-owned** | aria2 drops to `PUID:PGID` via `setpriv` once the tunnel is up and the firewall is armed, so files land on the host owned by the user instead of uid 0. The default is taken from the **owner of the downloads directory**, not the calling process — inside the API container that process is root, which would silently skip the drop. Override with `SMG_PUID`/`SMG_PGID`. The mule refuses to start if that uid cannot write to `/downloads`. Root is still required for the setup phase — `ip`, `iptables`, `wg`/`openvpn` — and the kill-switch monitor keeps `CAP_KILL` so it can still tear down a non-root aria2. |
+| **Image provenance** | All four images pin their base by digest, not tag, so a rebuild cannot silently pull different content. Every image declares a `HEALTHCHECK`; a mule reports unhealthy as soon as `/tmp/ks_triggered` appears or its health file stops saying `healthy`. |
+| **aria2 RPC reachability** | The containerised API reaches each mule by container name over `smuggler-rpc`. A loopback publish (`127.0.0.1:<ephemeral>`) is kept because the `smg` CLI and `./start.sh debug` run on the host and talk to aria2 directly. Both paths are gated by a 192-bit random token (`secrets.token_urlsafe(24)`); the mule refuses to start if that token is missing or a placeholder. Sibling mules also sit on `smuggler-rpc`, so mule-to-mule RPC is gated by that per-mule token rather than by the firewall. |
 | **Input restriction** | `addUri` accepts `magnet:` URIs only (no `http`/`ftp`/`file` SSRF vector); file deletion is confined to the downloads root with a resolve-and-containment check. |
-| **Encryption at rest** | OpenVPN passwords **and** VPN config bodies (WireGuard private keys, inline OpenVPN keys) are Fernet-encrypted, keyed off `SMG_SECRET_KEY` (`api/crypto.py`). Ciphertext carries a `fernet:` prefix; legacy plaintext rows are migrated in place on `init_db`. Encrypt/decrypt live in `api/database.py` so callers only ever see plaintext. |
+| **Encryption at rest** | OpenVPN passwords **and** VPN config bodies (WireGuard private keys, inline OpenVPN keys) are Fernet-encrypted, keyed off `SMG_SECRET_KEY` (`api/crypto.py`). Ciphertext carries a `fernet:` prefix; legacy plaintext rows are migrated in place on `init_db`. Encrypt/decrypt live in `api/database.py` so callers only ever see plaintext. **Fail-closed:** storing a secret with no key raises and the upload is refused with `503`; set `SMG_ALLOW_PLAINTEXT_SECRETS=1` to deliberately opt out. |
 
 ---
 
@@ -81,15 +86,25 @@ This key encrypts every stored VPN secret.
 - The key and the database live on the same host, so encryption-at-rest primarily
   defends against **database-only exfiltration** (e.g. a leaked backup), not
   against an attacker who already has host access.
-- The key derivation is an unsalted SHA-256 of `SMG_SECRET_KEY` (no stretching),
-  which is appropriate for the generated high-entropy value but weak for a
-  hand-chosen passphrase — keep the generated key.
+- Key derivation is **scrypt** (N=2¹⁴, r=8, p=1) over `SMG_SECRET_KEY` and
+  `SMG_SECRET_SALT`. The original scheme was an unsalted SHA-256, which could be
+  brute-forced at raw hash speed against a captured row; scrypt makes offline
+  guessing impractical even for a hand-chosen passphrase. The API still warns at
+  startup if the key looks weak — prefer the generated one.
+- Existing ciphertext keeps working: both keys live in a `MultiFernet`, and
+  `init_db` rotates SHA-256 rows onto scrypt in place on first start. The
+  rotation is idempotent and skips rows that are already current.
+- `SMG_SECRET_SALT` is written only for **fresh** installs, so upgrading an
+  existing deployment keeps using the built-in default salt and nothing becomes
+  unreadable. It is not secret, but like the key it must stay stable — losing or
+  changing either makes encrypted secrets unrecoverable. Back it up with `.env`.
 
-### 2. Enable the API token (recommended)
+### 2. The API token (enabled by default)
 
-Uncomment `SMG_API_TOKEN` in `.env` (a value is pre-generated in the comment).
+`setup.sh` generates `SMG_API_TOKEN` into `.env` and leaves it **active** — the
+API can drive Docker, so authenticating it is the safer default.
 `docker compose up` passes it to both the API and the UI, so the browser UI keeps
-working via nginx injection. For the desktop client, export the same value:
+working via nginx injection. For the `smg` CLI, export the same value:
 
 ```bash
 export SMG_API_TOKEN=...   # same value as .env
@@ -108,11 +123,28 @@ that terminates TLS and authenticates, and then:
 
 ### 4. The Docker socket
 
-The API container mounts `/var/run/docker.sock` because it manages mule
-containers — this makes the API process **host-root-equivalent.** It is mitigated
-by the loopback bind and optional token, not eliminated. Any remote-code-execution
-in the API or its dependencies escalates to host root, so keep the API off the LAN
-and keep dependencies patched.
+The API no longer mounts `/var/run/docker.sock`. It talks to
+`smuggler-docker-proxy` (Tecnativa's socket proxy, digest-pinned) over an
+`internal` network that only the API is attached to; the proxy holds the socket
+read-only and refuses everything not explicitly enabled. Allowed: `PING`,
+`VERSION`, `CONTAINERS`, `NETWORKS`, `POST`, `EXEC` — the exact set needed to
+create, start, stop, inspect and exec into mules and attach them to the RPC
+network. Refused (403): images, volumes, secrets, configs, swarm, nodes,
+services, tasks, plugins, build, commit, and the system/info endpoints. Mules
+sit on a different network and have no route to the proxy at all.
+
+**This narrows the surface; it is not a trust boundary.** `CONTAINERS` plus
+`POST` is inherently enough to create a container with an arbitrary bind mount
+or `privileged: true` and reach host root, and Smuggler cannot manage mules
+without them. So a remote-code-execution in the API or its dependencies is
+still, in the worst case, host root — it just no longer gets the unrestricted
+Docker API for free. The host remains a trusted, single-tenant component: keep
+the API off the LAN, keep the token enabled, and keep dependencies patched.
+
+A genuine boundary would need a purpose-built proxy that authorises each request
+against the `smuggler.mule` label and rejects container-create payloads carrying
+mounts, capabilities or `privileged`. That is tracked as future work, not
+something the off-the-shelf proxy provides.
 
 ---
 
@@ -133,13 +165,29 @@ docker exec <mule> curl -s --interface wg0 https://icanhazip.com    # tunnel (tu
 # 3. The kill-switch DROP is present on the real NIC
 docker exec <mule> iptables -S OUTPUT | grep -E 'sport 6800|DROP'
 
-# 4. DNS is locked and Docker's resolver is blocked
+# 4. RPC ingress is restricted to the Docker gateway, not the whole bridge
+docker exec <mule> iptables -S INPUT | grep 6800
+
+# 5. DNS is locked and Docker's resolver is blocked
 docker exec <mule> cat /etc/resolv.conf
 docker exec <mule> iptables -S OUTPUT | grep 127.0.0.11
 
-# 5. The control plane is not on the LAN (run from another host — must fail)
+# 6. The control plane is not on the LAN (run from another host — must fail)
 curl --max-time 3 http://<host-lan-ip>:55555/api/health/
 ```
+
+**Fail-closed drill** — confirm a mule that cannot arm its kill-switch refuses to
+run, rather than starting unprotected. Deploy a config whose `Endpoint` /
+`remote` hostname does not resolve:
+
+```bash
+# The container must exit non-zero; aria2 must never have started.
+docker logs <mule> | grep -E 'FATAL|kill-switch cannot be armed'
+docker exec <mule> pgrep aria2c            # must find nothing (container is gone)
+```
+
+The deploy is expected to fail with a clear error. Before this was enforced, the
+mule started with **no firewall at all** and only logged a warning.
 
 **Kill-switch drill** — bring the tunnel down and confirm downloads stop rather
 than leak, and that the mule is torn down:

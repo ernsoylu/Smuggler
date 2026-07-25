@@ -15,6 +15,9 @@ from api.crypto import (
     encryption_enabled,
     is_encrypted,
     is_encrypted_bytes,
+    needs_rekey,
+    rekey,
+    rekey_bytes,
 )
 from cli.log import get_logger, log_safe
 
@@ -39,6 +42,17 @@ CREATE TABLE IF NOT EXISTS vpn_configs (
     ovpn_password  TEXT,
     created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 );
+
+-- User-assigned category per torrent.
+--
+-- Keyed by info_hash, not gid: a gid is assigned by one mule's aria2 instance
+-- and changes when the watchdog evacuates a torrent to a different mule, which
+-- would silently orphan the label. info_hash follows the torrent.
+CREATE TABLE IF NOT EXISTS torrent_categories (
+    info_hash  TEXT PRIMARY KEY,
+    category   TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 # Migrations for existing databases that pre-date new columns
@@ -59,31 +73,15 @@ _DEFAULTS: dict[str, str] = {
 
 
 def _get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=5.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    # WAL lets readers run during a write, but concurrent *writers* still get an
+    # immediate SQLITE_BUSY without this. Gunicorn runs 8 threads alongside the
+    # watchdog, so writes to settings/state genuinely overlap.
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
-
-
-def _bump_state_version(conn: sqlite3.Connection) -> None:
-    """Monotonic counter the desktop client polls to detect external changes.
-
-    Must run inside the caller's transaction so readers never see a mutation
-    without the matching version bump.
-    """
-    row = conn.execute(
-        "SELECT value FROM settings WHERE key = 'state_version'"
-    ).fetchone()
-    try:
-        current = int(row["value"]) if row else 0
-    except (TypeError, ValueError):
-        current = 0
-    conn.execute(
-        "INSERT INTO settings (key, value) VALUES ('state_version', ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (str(current + 1),),
-    )
 
 
 def init_db() -> None:
@@ -109,6 +107,8 @@ def init_db() -> None:
     # Encrypt any legacy plaintext VPN config bodies (WireGuard private keys,
     # inline OpenVPN keys/certs) the same way.
     _encrypt_legacy_content(conn)
+    # Move any rows still under the old unsalted SHA-256 key onto scrypt.
+    _rekey_legacy_secrets(conn)
     conn.commit()
     conn.close()
     log.info("init_db: done")
@@ -162,6 +162,69 @@ def _encrypt_legacy_content(conn: sqlite3.Connection) -> None:
         log.info("init_db: encrypted %d legacy plaintext VPN config body/ies", migrated)
 
 
+def _rekey_legacy_secrets(conn: sqlite3.Connection) -> None:
+    """Rotate v1 (unsalted SHA-256) ciphertext onto the current scrypt key.
+
+    Rows already under the current key are left alone, so this is a no-op after
+    the first run. Runs inside ``init_db``'s transaction.
+    """
+    if not encryption_enabled():
+        return
+    rows = conn.execute(
+        "SELECT id, content, ovpn_password FROM vpn_configs"
+    ).fetchall()
+    rotated = 0
+    for r in rows:
+        updates: dict[str, Any] = {}
+        if needs_rekey(r["content"]):
+            updates["content"] = rekey_bytes(r["content"])
+        if needs_rekey(r["ovpn_password"]):
+            updates["ovpn_password"] = rekey(r["ovpn_password"])
+        if not updates:
+            continue
+        assignments = ", ".join(f"{col} = ?" for col in updates)
+        conn.execute(
+            f"UPDATE vpn_configs SET {assignments} WHERE id = ?",  # noqa: S608 - column names are literals above
+            (*updates.values(), r["id"]),
+        )
+        rotated += 1
+    if rotated:
+        log.info("init_db: re-keyed %d config(s) from SHA-256 onto scrypt", rotated)
+
+
+# ── Torrent categories ────────────────────────────────────────────────────────
+
+def get_torrent_categories() -> dict[str, str]:
+    """All ``info_hash -> category`` assignments.
+
+    Returned whole rather than per-torrent: the list endpoint fans out over
+    every mule concurrently, and one query beats N lookups inside that fan-out.
+    """
+    conn = _get_conn()
+    rows = conn.execute("SELECT info_hash, category FROM torrent_categories").fetchall()
+    conn.close()
+    return {r["info_hash"]: r["category"] for r in rows}
+
+
+def set_torrent_category(info_hash: str, category: str) -> None:
+    """Assign a category, or clear it when *category* is empty."""
+    conn = _get_conn()
+    cleaned = category.strip()
+    if cleaned:
+        conn.execute(
+            "INSERT INTO torrent_categories (info_hash, category, updated_at) "
+            "VALUES (?, ?, datetime('now')) "
+            "ON CONFLICT(info_hash) DO UPDATE SET category=excluded.category, "
+            "updated_at=excluded.updated_at",
+            (info_hash, cleaned),
+        )
+    else:
+        conn.execute("DELETE FROM torrent_categories WHERE info_hash = ?", (info_hash,))
+    conn.commit()
+    conn.close()
+    log.info("set_torrent_category: hash=%s category=%s", log_safe(info_hash), log_safe(cleaned) or "(cleared)")
+
+
 # ── Settings ──────────────────────────────────────────────────────────────────
 
 def get_all_settings() -> dict[str, str]:
@@ -192,8 +255,6 @@ def set_setting(key: str, value: str) -> None:
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         (key, value),
     )
-    if key != "state_version":
-        _bump_state_version(conn)
     conn.commit()
     conn.close()
 
@@ -206,7 +267,6 @@ def update_settings(data: dict[str, Any]) -> dict[str, str]:
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, str(value)),
         )
-    _bump_state_version(conn)
     conn.commit()
     conn.close()
     return get_all_settings()
@@ -267,7 +327,6 @@ def add_vpn_config(
         (name, filename, encrypt_bytes(content), vpn_type, int(requires_auth),
          ovpn_username, encrypt(ovpn_password)),
     )
-    _bump_state_version(conn)
     conn.commit()
     config_id = cur.lastrowid
     conn.close()
@@ -278,8 +337,6 @@ def add_vpn_config(
 def delete_vpn_config(config_id: int) -> bool:
     conn = _get_conn()
     cur = conn.execute("DELETE FROM vpn_configs WHERE id = ?", (config_id,))
-    if cur.rowcount > 0:
-        _bump_state_version(conn)
     conn.commit()
     deleted = cur.rowcount > 0
     conn.close()

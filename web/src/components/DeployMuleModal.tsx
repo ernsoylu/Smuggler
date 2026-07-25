@@ -1,66 +1,41 @@
-import { useState, useRef } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getConfigs, deployMuleFromConfig } from '../api/client';
+import { useModalA11y, modalA11yProps } from '../hooks/useModalA11y';
+import { useState } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { getConfigs } from '../api/client';
 import type { VpnConfig } from '../api/client';
-import { useNotifications } from '../context/NotificationContext';
+import { useDeployments } from '../context/DeploymentContext';
 import { X, Rocket, Shield, FileKey2 } from 'lucide-react';
 
 interface Props {
   onClose: () => void;
-  onDeployStart?: (configName: string, notificationId: string) => void;
 }
 
-export function DeployMuleModal({ onClose, onDeployStart }: Readonly<Props>) {
-  const qc = useQueryClient();
+export function DeployMuleModal({ onClose }: Readonly<Props>) {
   const [deployingId, setDeployingId] = useState<number | null>(null);
   const [error, setError] = useState('');
-  const { push: pushNotification, update: updateNotification } = useNotifications();
-  const deployingNotifIdRef = useRef<string | null>(null);
+  const { start } = useDeployments();
+  // Deployment is irreversible once started, so Escape is disabled while it runs.
+  const dialogRef = useModalA11y(deployingId ? undefined : onClose);
 
   const { data: configs = [], isLoading } = useQuery({
     queryKey: ['configs'],
     queryFn: getConfigs,
   });
 
+  // Kicks off the deployment and returns as soon as the job is accepted — the
+  // provider owns progress reporting from there, so closing this modal no
+  // longer abandons an in-flight deploy.
   const deploy = useMutation({
-    mutationFn: (config: VpnConfig) => {
+    mutationFn: async (config: VpnConfig) => {
       setDeployingId(config.id);
       setError('');
-      const notifId = pushNotification({
-        type: 'info',
-        title: `Deploying "${config.name}"`,
-        message: 'Starting VPN mule…',
-        progress: { current: 0, total: 4, label: 'STARTING' },
-      });
-      deployingNotifIdRef.current = notifId;
-      onDeployStart?.(config.name, notifId);
-      return deployMuleFromConfig(config.id);
+      return start(config.id, config.name);
     },
-    onSuccess: (_, config) => {
-      qc.invalidateQueries({ queryKey: ['workers'] });
-      qc.invalidateQueries({ queryKey: ['configs'] });
-      if (deployingNotifIdRef.current) {
-        updateNotification(deployingNotifIdRef.current, {
-          type: 'success',
-          title: `"${config.name}" deployed`,
-          message: 'Mule is live and VPN is connected.',
-          progress: undefined,
-        });
-        deployingNotifIdRef.current = null;
-      }
+    onSuccess: () => {
       setDeployingId(null);
       onClose();
     },
-    onError: (e: Error, config) => {
-      if (deployingNotifIdRef.current) {
-        updateNotification(deployingNotifIdRef.current, {
-          type: 'error',
-          title: `Failed to deploy "${config.name}"`,
-          message: e.message,
-          progress: undefined,
-        });
-        deployingNotifIdRef.current = null;
-      }
+    onError: (e: Error) => {
       setError(e.message);
       setDeployingId(null);
     },
@@ -78,10 +53,14 @@ export function DeployMuleModal({ onClose, onDeployStart }: Readonly<Props>) {
       />
 
       {/* Modal */}
-      <div className="relative bg-neutral-900 border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[80vh] overflow-hidden">
+      <div
+        ref={dialogRef}
+        {...modalA11yProps}
+        aria-labelledby="deploy-mule-title"
+        className="relative bg-neutral-900 border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[80vh] overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-white/5">
-          <h2 className="text-white font-bold text-xl tracking-tight flex items-center gap-2">
+          <h2 id="deploy-mule-title" className="text-white font-bold text-xl tracking-tight flex items-center gap-2">
             <Rocket size={22} className="text-blue-400" /> Deploy Mule
           </h2>
           <button

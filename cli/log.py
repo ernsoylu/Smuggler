@@ -1,12 +1,15 @@
 """
-Shared logging setup for DVD (CLI + API).
+Shared logging setup for Smuggler (CLI + API).
 
 Reads from environment / .env file:
-  DVD_LOGGING   true | false  (default: true)
-  DVD_LOG_LEVEL DEBUG | INFO | WARNING | ERROR  (default: INFO)
+  SMG_LOGGING   true | false  (default: true)
+  SMG_LOG_LEVEL DEBUG | INFO | WARNING | ERROR  (default: INFO)
+
+The pre-rebrand ``DVD_*`` names are still honoured as a fallback so existing
+.env files keep working.
 
 A single log file is created per process start:
-  logs/dvd_YYYY-MM-DD_HH-MM-SS.log
+  logs/smuggler_YYYY-MM-DD_HH-MM-SS.log
 """
 
 from __future__ import annotations
@@ -24,10 +27,16 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 _SESSION_TS = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 _LOGS_DIR = Path(__file__).resolve().parent.parent / "logs"
-_LOG_FILE = _LOGS_DIR / f"dvd_{_SESSION_TS}.log"
+_LOG_FILE = _LOGS_DIR / f"smuggler_{_SESSION_TS}.log"
 
-_ENABLED: bool = os.getenv("DVD_LOGGING", "true").strip().lower() not in ("false", "0", "no", "off")
-_LEVEL_STR: str = os.getenv("DVD_LOG_LEVEL", "INFO").strip().upper()
+
+def _env(name: str, default: str) -> str:
+    """Read SMG_<name>, falling back to the pre-rebrand DVD_<name>."""
+    return os.getenv(f"SMG_{name}") or os.getenv(f"DVD_{name}") or default
+
+
+_ENABLED: bool = _env("LOGGING", "true").strip().lower() not in ("false", "0", "no", "off")
+_LEVEL_STR: str = _env("LOG_LEVEL", "INFO").strip().upper()
 _LEVEL: int = getattr(logging, _LEVEL_STR, logging.INFO)
 
 _FMT = logging.Formatter(

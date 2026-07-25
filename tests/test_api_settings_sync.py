@@ -52,7 +52,7 @@ class TestApplySettingsToMule:
         mock_aria2 = MagicMock()
         with patch("api.settings_sync.get_docker_client"), \
              patch("api.settings_sync.get_mule", return_value=mule), \
-             patch("api.settings_sync.Aria2Client", return_value=mock_aria2):
+             patch("api.settings_sync.aria2_for", return_value=mock_aria2):
             result = apply_settings_to_mule("smuggler-mule-test", SETTINGS)
         assert result is True
         mock_aria2.change_global_option.assert_called_once()
@@ -67,7 +67,7 @@ class TestApplySettingsToMule:
         }
         with patch("api.settings_sync.get_docker_client"), \
              patch("api.settings_sync.get_mule", return_value=mule), \
-             patch("api.settings_sync.Aria2Client", return_value=mock_aria2):
+             patch("api.settings_sync.aria2_for", return_value=mock_aria2):
             apply_settings_to_mule("smuggler-mule-test", settings)
         called_opts = mock_aria2.change_global_option.call_args[0][0]
         assert called_opts["max-concurrent-downloads"] == "5"
@@ -80,7 +80,7 @@ class TestApplySettingsToMule:
         mock_aria2.change_global_option.side_effect = Aria2Error("RPC error")
         with patch("api.settings_sync.get_docker_client"), \
              patch("api.settings_sync.get_mule", return_value=mule), \
-             patch("api.settings_sync.Aria2Client", return_value=mock_aria2):
+             patch("api.settings_sync.aria2_for", return_value=mock_aria2):
             result = apply_settings_to_mule("smuggler-mule-test", SETTINGS)
         assert result is False
 
@@ -89,7 +89,7 @@ class TestApplySettingsToMule:
         mock_aria2 = MagicMock()
         with patch("api.settings_sync.get_docker_client"), \
              patch("api.settings_sync.get_mule", return_value=mule), \
-             patch("api.settings_sync.Aria2Client", return_value=mock_aria2), \
+             patch("api.settings_sync.aria2_for", return_value=mock_aria2), \
              patch("api.settings_sync.get_all_settings", return_value=SETTINGS) as mock_get:
             apply_settings_to_mule("smuggler-mule-test")
         mock_get.assert_called_once()
@@ -106,7 +106,7 @@ class TestSyncAllMules:
              patch("api.settings_sync.list_mules", return_value=[running, stopped]), \
              patch("api.settings_sync.get_all_settings", return_value=SETTINGS), \
              patch("api.settings_sync.get_mule", return_value=running), \
-             patch("api.settings_sync.Aria2Client", return_value=mock_aria2):
+             patch("api.settings_sync.aria2_for", return_value=mock_aria2):
             sync_all_mules()
         assert mock_aria2.change_global_option.call_count == 1
 
@@ -123,6 +123,6 @@ class TestSyncAllMules:
              patch("api.settings_sync.list_mules", return_value=mules), \
              patch("api.settings_sync.get_all_settings", return_value=SETTINGS), \
              patch("api.settings_sync.get_mule", side_effect=mules), \
-             patch("api.settings_sync.Aria2Client", return_value=mock_aria2):
+             patch("api.settings_sync.aria2_for", return_value=mock_aria2):
             sync_all_mules()
         assert mock_aria2.change_global_option.call_count == 3

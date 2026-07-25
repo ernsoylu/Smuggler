@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from api.database import get_all_settings
-from cli.docker_client import get_docker_client, list_mules, get_mule
-from cli.aria2_client import Aria2Client, Aria2Error
+from cli.docker_client import aria2_for, get_docker_client, list_mules, get_mule
+from cli.aria2_client import Aria2Error
 from cli.log import get_logger
 
 log = get_logger(__name__)
@@ -38,7 +38,7 @@ def apply_settings_to_mule(mule_name: str, settings: dict[str, str] | None = Non
         "max-overall-upload-limit": settings.get("max_upload_speed", "0"),
     }
 
-    aria2 = Aria2Client(host="localhost", port=w.rpc_port, token=w.rpc_token)
+    aria2 = aria2_for(w)
     try:
         aria2.change_global_option(aria2_options)
         log.info("apply_settings_to_mule: successfully synced mule=%s", mule_name)

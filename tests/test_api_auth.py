@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from api.app import create_app
 
 
@@ -44,6 +46,20 @@ class TestTokenAuth:
              patch("api.mules.list_mules", return_value=[]):
             assert c.get("/api/mules/").status_code == 200
 
+    def test_health_exemption_is_not_a_prefix_match(self, monkeypatch):
+        # The exemption must cover /api/health exactly, not everything that
+        # merely starts with it — otherwise a future /api/health-something route
+        # would be silently unauthenticated. 401 (guard ran) not 404 (routed).
+        c = _client(monkeypatch, token="sekret")
+        assert c.get("/api/healthz").status_code == 401
+        assert c.get("/api/health/secrets").status_code == 401
+
+    def test_health_still_exempt_with_and_without_trailing_slash(self, monkeypatch):
+        c = _client(monkeypatch, token="sekret")
+        assert c.get("/api/health/").status_code == 200
+        # Flask redirects the slashless form rather than 401-ing it.
+        assert c.get("/api/health").status_code in (200, 308)
+
 
 class TestCsrfOriginGuard:
     def test_cross_origin_mutation_refused(self, monkeypatch):
@@ -72,3 +88,26 @@ class TestCsrfOriginGuard:
              patch("api.settings.sync_all_mules"):
             r = c.post("/api/settings/", json={"max_download_speed": "0"})
         assert r.status_code != 403
+
+
+class TestContainerTopologyRequiresToken:
+    """Mules share the internal RPC network with the API, so they can open
+    connections to it. Host networking used to make that impossible."""
+
+    def test_refuses_to_start_without_token_when_mules_share_the_network(self, monkeypatch):
+        monkeypatch.delenv("SMG_API_TOKEN", raising=False)
+        monkeypatch.setenv("SMG_MULE_RPC_HOST", "container")
+        with pytest.raises(RuntimeError, match="SMG_API_TOKEN must be set"):
+            create_app()
+
+    def test_starts_with_token_in_container_topology(self, monkeypatch):
+        monkeypatch.setenv("SMG_API_TOKEN", "sekret")
+        monkeypatch.setenv("SMG_MULE_RPC_HOST", "container")
+        assert create_app() is not None
+
+    def test_tokenless_still_allowed_on_the_host(self, monkeypatch):
+        # ./start.sh debug and bare `smg` runs address mules over loopback and
+        # are not reachable by them, so the token stays optional there.
+        monkeypatch.delenv("SMG_API_TOKEN", raising=False)
+        monkeypatch.delenv("SMG_MULE_RPC_HOST", raising=False)
+        assert create_app() is not None

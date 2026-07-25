@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -10,8 +11,9 @@ from pathlib import Path
 from flask import Blueprint, request, jsonify
 
 from cli.log import get_logger, log_safe
-from cli.docker_client import get_docker_client, get_mule, list_mules
+from cli.docker_client import aria2_for, get_docker_client, get_mule, list_mules
 from cli.aria2_client import Aria2Client, Aria2Error
+from api.database import get_torrent_categories, set_torrent_category
 
 log = get_logger(__name__)
 torrents_bp = Blueprint("torrents", __name__, url_prefix="/api/torrents")
@@ -23,7 +25,7 @@ def _aria2_for(mule_name: str) -> Aria2Client:
     if w.status != "running":
         raise RuntimeError(f"Mule '{mule_name}' is not running (status={w.status})")
     log.debug("_aria2_for: mule=%s port=%d", log_safe(mule_name), w.rpc_port)
-    return Aria2Client(host="localhost", port=w.rpc_port, token=w.rpc_token)
+    return aria2_for(w)
 
 
 def _serialize_files(dl: dict) -> list[dict]:
@@ -115,7 +117,7 @@ def _all_downloads(aria2: Aria2Client, mule_name: str) -> list[dict]:
 def _downloads_for_mule(w) -> list[dict]:
     # Short timeout: this endpoint is polled by the UI, so one hung mule must
     # not block the whole request. Each mule issues 3 RPCs (active/waiting/stopped).
-    aria2 = Aria2Client(host="localhost", port=w.rpc_port, token=w.rpc_token, timeout=5)
+    aria2 = aria2_for(w, timeout=5)
     try:
         return _all_downloads(aria2, w.name)
     except Aria2Error as exc:
@@ -135,6 +137,9 @@ def list_all():
         with ThreadPoolExecutor(max_workers=min(len(mules), 16)) as pool:
             for items in pool.map(_downloads_for_mule, mules):
                 result.extend(items)
+    categories = get_torrent_categories()
+    for item in result:
+        item["category"] = categories.get(item["info_hash"], "")
     log.info("GET /api/torrents/: returning %d torrents", len(result))
     return jsonify(result)
 
@@ -152,11 +157,26 @@ def list_for_mule(mule_name: str):
         return jsonify({"error": str(exc)}), 404
     try:
         result = _all_downloads(aria2, mule_name)
+        categories = get_torrent_categories()
+        for item in result:
+            item["category"] = categories.get(item["info_hash"], "")
         log.info("GET /api/torrents/%s: returning %d torrents", safe, len(result))
         return jsonify(result)
     except Aria2Error as exc:
         log.exception("GET /api/torrents/%s: aria2 error", safe)
         return jsonify({"error": str(exc)}), 502
+
+
+def _safe_subdir(name: str) -> str:
+    """Reduce a magnet's ``dn`` to a single safe directory component.
+
+    ``dn`` is attacker-controlled. Replacing only ``/`` left ``..`` intact, so a
+    magnet named ".." resolved ``/downloads/..`` to the container root — enough
+    to overwrite the mule's own ``/etc/resolv.conf``, which is the DNS pin.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9 ._@()\[\]+-]", "_", (name or "").strip())
+    cleaned = cleaned.strip(". ")
+    return cleaned[:180]
 
 
 def _add_magnet(aria2: Aria2Client, mule_name: str):
@@ -179,8 +199,9 @@ def _add_magnet(aria2: Aria2Client, mule_name: str):
         dn = (qs.get("dn", [None])[0] or "").strip()
     except Exception:
         dn = ""
-    if dn:
-        options["dir"] = f"/downloads/{dn.replace('/', '_')}"
+    subdir = _safe_subdir(dn)
+    if subdir:
+        options["dir"] = f"/downloads/{subdir}"
     log.info("POST /api/torrents/%s: adding magnet uri=%s", safe, log_safe(magnet[:80]))
     try:
         gid = aria2.add_magnet(magnet, options=options or None)
@@ -436,6 +457,10 @@ def get_options(mule_name: str, gid: str):
         "max_download_speed": int(opts.get("max-download-limit", 0)),
         "max_upload_speed": int(opts.get("max-upload-limit", 0)),
         "max_connections": int(opts.get("max-connection-per-server", 1)),
+        # aria2 has no boolean "sequential" switch; head,tail piece priority is
+        # the equivalent it does support, and is what makes a partial download
+        # playable/previewable.
+        "prioritize_first_last": bool(opts.get("bt-prioritize-piece", "")),
     })
 
 
@@ -453,6 +478,11 @@ def set_options(mule_name: str, gid: str):
         aria2_opts["max-upload-limit"] = str(int(data["max_upload_speed"]))
     if "max_connections" in data:
         aria2_opts["max-connection-per-server"] = str(int(data["max_connections"]))
+    if "prioritize_first_last" in data:
+        # Empty string clears it — aria2 rejects an unset value here.
+        aria2_opts["bt-prioritize-piece"] = (
+            "head,tail" if data["prioritize_first_last"] else ""
+        )
     if not aria2_opts:
         return jsonify({"error": "No valid options provided"}), 400
     try:
@@ -489,3 +519,23 @@ def set_file_selection(mule_name: str, gid: str):
     except Aria2Error as exc:
         log.exception("PATCH /api/torrents/%s/%s/files: aria2 error", safe, safe_gid)
         return jsonify({"error": str(exc)}), 502
+
+
+# ─── PUT /api/torrents/category/<info_hash> ──────────────────────────────────
+
+@torrents_bp.put("/category/<info_hash>")
+def set_category(info_hash: str):
+    """Assign (or clear, with an empty string) a torrent's category.
+
+    Addressed by info_hash rather than mule/gid because the label has to
+    survive the watchdog evacuating a torrent onto a different mule.
+    """
+    log.info("PUT /api/torrents/category/%s", log_safe(info_hash))
+    data = request.get_json(silent=True) or {}
+    category = str(data.get("category", ""))
+    if len(category) > 64:
+        return jsonify({"error": "Category must be 64 characters or fewer"}), 400
+    if not re.fullmatch(r"[\w .&/+-]*", category):
+        return jsonify({"error": "Category contains unsupported characters"}), 400
+    set_torrent_category(info_hash, category)
+    return jsonify({"ok": True, "info_hash": info_hash, "category": category.strip()})

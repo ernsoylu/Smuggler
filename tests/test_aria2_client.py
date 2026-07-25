@@ -54,8 +54,23 @@ class TestTransport:
             body=requests.exceptions.ConnectionError("Connection refused"),
         )
         client = make_client()
-        with pytest.raises(Aria2Error, match="Cannot reach aria2"):
+        with pytest.raises(Aria2Error, match="Cannot reach the mule's aria2 RPC"):
             client.get_version()
+
+    @resp_lib.activate
+    def test_transport_error_does_not_leak_internal_url(self):
+        # The message reaches API clients verbatim, so it must not carry the
+        # mule's internal RPC endpoint.
+        resp_lib.add(
+            resp_lib.POST,
+            BASE_URL,
+            body=requests.exceptions.ConnectionError("Connection refused"),
+        )
+        client = make_client()
+        with pytest.raises(Aria2Error) as exc_info:
+            client.get_version()
+        assert BASE_URL not in str(exc_info.value)
+        assert "16800" not in str(exc_info.value)
 
     @resp_lib.activate
     def test_raises_aria2_error_on_http_error(self):

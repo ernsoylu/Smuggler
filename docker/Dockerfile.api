@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
@@ -22,7 +22,15 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 55555
 
+# /api/health is exempt from token auth, so this works whether or not
+# SMG_API_TOKEN is set. start-period covers init_db plus any legacy secret
+# re-encryption on first boot.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS "http://127.0.0.1:${SMG_API_PORT:-55555}/api/health/" || exit 1
+
 # Bind to loopback by default — the API holds the Docker socket and must not be
-# reachable from the LAN. Override SMG_API_BIND only behind an authenticated
-# reverse proxy. Shell form so the env var expands.
+# reachable from the LAN. docker-compose overrides this to 0.0.0.0 because a
+# published port cannot reach a loopback-bound listener; exposure is then
+# restricted by the 127.0.0.1 port mapping instead. Shell form so the env var
+# expands.
 CMD gunicorn --bind ${SMG_API_BIND:-127.0.0.1:55555} --workers 1 --threads 8 --timeout 180 main:app

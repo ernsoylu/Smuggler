@@ -113,62 +113,7 @@ else
     ok "Non-Linux host — WireGuard module handled by the Docker VM"
 fi
 
-# ── 3. Java 21+ ───────────────────────────────────────────────────────────────
-section "Java 21+ (for desktop app)"
-JAVA_OK=0
-if has java; then
-    JAVA_VER=$("java" -version 2>&1 | grep -oP '(?<=")\d+' | head -1)
-    if [[ "$JAVA_VER" -ge 21 ]]; then
-        JAVA_OK=1
-        ok "Java found: $(java -version 2>&1 | head -1)"
-    else
-        warn "Java found but version is too old (need 21+): $(java -version 2>&1 | head -1)"
-    fi
-fi
-
-if [[ "$JAVA_OK" -eq 0 ]]; then
-    warn "Java 21+ not found — installing..."
-    if [[ "$OS" == "linux" && "$PKG" == "apt" ]]; then
-        sudo apt-get update -qq
-        sudo apt-get install -y temurin-21-jdk
-        ok "Java 21 installed"
-    elif [[ "$OS" == "mac" ]]; then
-        brew tap homebrew/cask-versions
-        brew install --cask temurin21
-        ok "Java 21 installed via Homebrew"
-    else
-        error "Please install Java 21+ manually: https://adoptium.net/"
-    fi
-fi
-
-# ── 4. JavaFX Runtime ──────────────────────────────────────────────────────────
-section "JavaFX 21 Runtime (for desktop app)"
-if [[ "$OS" == "linux" ]]; then
-    # Check if javafx.controls module exists
-    if ! java --list-modules 2>&1 | grep -q "javafx.controls"; then
-        warn "JavaFX runtime components not found — installing..."
-        if [[ "$PKG" == "apt" ]]; then
-            sudo apt-get update -qq
-            sudo apt-get install -y openjfx libgtk-3-0 libxxf86vm1 libgl1 || sudo apt-get install -y openjfx libgtk-3-0
-            ok "JavaFX runtime and dependencies installed"
-        elif [[ "$PKG" == "dnf" ]]; then
-            sudo dnf install -y java-21-openjfx
-            ok "JavaFX runtime installed"
-        elif [[ "$PKG" == "pacman" ]]; then
-            sudo pacman -S --noconfirm openjfx
-            ok "JavaFX runtime installed"
-        else
-            error "Cannot auto-install JavaFX on $OS/$PKG. Install openjfx manually."
-        fi
-    else
-        ok "JavaFX runtime found"
-    fi
-elif [[ "$OS" == "mac" ]]; then
-    # On macOS, JavaFX comes bundled with most JDK distributions
-    ok "JavaFX runtime included with JDK"
-fi
-
-# ── 5. Python 3.12+ ───────────────────────────────────────────────────────────
+# ── 3. Python 3.12+ ───────────────────────────────────────────────────────────
 section "Python"
 PYTHON_OK=0
 for py in python3 python3.13 python3.12; do
@@ -197,7 +142,7 @@ if [[ "$PYTHON_OK" -eq 0 ]]; then
     fi
 fi
 
-# ── 6. uv ─────────────────────────────────────────────────────────────────────
+# ── 4. uv ─────────────────────────────────────────────────────────────────────
 section "uv (Python package manager)"
 export PATH="$HOME/.local/bin:$PATH"
 if ! has uv; then
@@ -209,13 +154,13 @@ else
     ok "uv found: $(uv --version)"
 fi
 
-# ── 7. Python dependencies ────────────────────────────────────────────────────
+# ── 5. Python dependencies ────────────────────────────────────────────────────
 section "Python dependencies"
 cd "$ROOT"
 uv sync --all-extras
 ok "Python dependencies installed"
 
-# ── 8. Node.js ────────────────────────────────────────────────────────────────
+# ── 6. Node.js ────────────────────────────────────────────────────────────────
 section "Node.js"
 export NVM_DIR="$HOME/.nvm"
 [[ -s "$NVM_DIR/nvm.sh" ]] && . "$NVM_DIR/nvm.sh"
@@ -250,19 +195,19 @@ if [[ "$NODE_OK" -eq 0 ]]; then
     fi
 fi
 
-# ── 9. npm dependencies ───────────────────────────────────────────────────────
+# ── 7. npm dependencies ───────────────────────────────────────────────────────
 section "Frontend dependencies (npm)"
 cd "$ROOT/web"
 npm ci --prefer-offline 2>/dev/null || npm install
 ok "npm dependencies installed"
 
-# ── 10. Create required directories ─────────────────────────────────────────
+# ── 8. Create required directories ─────────────────────────────────────────
 section "Directories"
 cd "$ROOT"
 mkdir -p downloads vpn_configs logs
 ok "downloads/, vpn_configs/, logs/ ready"
 
-# ── 11. .env file ───────────────────────────────────────────────────────────
+# ── 9. .env file ───────────────────────────────────────────────────────────
 section "Environment config"
 cd "$ROOT"
 gen_secret_key() {
@@ -272,35 +217,55 @@ gen_secret_key() {
 
 if [[ ! -f .env ]]; then
     SMG_KEY=$(gen_secret_key)
+    SMG_TOKEN=$(gen_secret_key)
+    SMG_SALT=$(gen_secret_key)
     cat > .env <<EOF
-DVD_LOGGING=true
-DVD_LOG_LEVEL=INFO
+SMG_LOGGING=true
+SMG_LOG_LEVEL=INFO
 # Secret key for encrypting stored secrets at rest — OpenVPN passwords AND VPN
 # config bodies (WireGuard private keys, inline OpenVPN keys). Keep this stable
 # and private — changing it makes existing encrypted secrets unrecoverable.
 # Leave empty to disable encryption (not recommended).
 SMG_SECRET_KEY=${SMG_KEY}
-# Optional API token. When set, every /api/* request must carry a matching
-# X-Smuggler-Token header (the web UI injects it automatically). Recommended if
-# you expose the API beyond loopback. Uncomment to enable:
-# SMG_API_TOKEN=$(gen_secret_key)
+# Per-deployment salt for the scrypt key derivation. Not secret, but it must
+# stay stable — changing it makes existing encrypted secrets unrecoverable.
+# Only written for fresh installs; existing deployments keep using the built-in
+# default salt, which is why setup never appends this to an existing .env.
+SMG_SECRET_SALT=${SMG_SALT}
+# API token, enabled by default. Every /api/* request must carry a matching
+# X-Smuggler-Token header; the web UI injects it automatically via nginx. The
+# API holds the Docker socket, so authenticating it is the safer default —
+# comment this out only if a local client cannot send the header.
+SMG_API_TOKEN=${SMG_TOKEN}
 EOF
-    ok ".env created with defaults (generated SMG_SECRET_KEY)"
-elif ! grep -q '^SMG_SECRET_KEY=' .env; then
-    {
-        echo ""
-        echo "# Secret key for encrypting stored secrets at rest (added by setup)."
-        echo "SMG_SECRET_KEY=$(gen_secret_key)"
-    } >> .env
-    ok ".env exists — appended a generated SMG_SECRET_KEY"
+    ok ".env created (generated SMG_SECRET_KEY and SMG_API_TOKEN)"
 else
-    ok ".env already exists — skipping"
+    if ! grep -q '^SMG_SECRET_KEY=' .env; then
+        {
+            echo ""
+            echo "# Secret key for encrypting stored secrets at rest (added by setup)."
+            echo "SMG_SECRET_KEY=$(gen_secret_key)"
+        } >> .env
+        ok ".env exists — appended a generated SMG_SECRET_KEY"
+    fi
+    # Only add a token if the operator has neither enabled nor deliberately
+    # commented one out, so re-running setup never overrides an opt-out.
+    if ! grep -qE '^\s*#?\s*SMG_API_TOKEN=' .env; then
+        {
+            echo ""
+            echo "# API token (added by setup). The API holds the Docker socket, so"
+            echo "# requests are authenticated by default. Comment out to disable."
+            echo "SMG_API_TOKEN=$(gen_secret_key)"
+        } >> .env
+        ok ".env exists — appended a generated SMG_API_TOKEN"
+    fi
+    ok ".env already exists — left existing values untouched"
 fi
 # .env holds the master encryption key — keep it owner-readable only.
 chmod 600 .env 2>/dev/null || true
 ok ".env permissions set to 600"
 
-# ── 12. Build WireGuard mule image ──────────────────────────────────────────
+# ── 10. Build WireGuard mule image ──────────────────────────────────────────
 section "Docker image: smuggler-mule (WireGuard)"
 cd "$ROOT"
 if ${DOCKER_CMD} image inspect smuggler-mule:latest &>/dev/null; then
@@ -312,7 +277,7 @@ else
     ok "smuggler-mule:latest built successfully"
 fi
 
-# ── 13. Build OpenVPN mule image ────────────────────────────────────────────
+# ── 11. Build OpenVPN mule image ────────────────────────────────────────────
 section "Docker image: smuggler-mule-ovpn (OpenVPN)"
 cd "$ROOT"
 if ${DOCKER_CMD} image inspect smuggler-mule-ovpn:latest &>/dev/null; then
@@ -336,7 +301,6 @@ else
     echo ""
     echo -e "  Start the app :  ${BOLD}./start.sh${RESET}"
     echo -e "  CLI help      :  ${BOLD}uv run smg --help${RESET}"
-    echo -e "  Desktop app   :  ${BOLD}desktop/gradlew -p desktop installDist && desktop/build/install/smuggler-desktop/bin/smuggler-desktop${RESET}"
     echo -e "  Add a VPN     :  drop a .conf or .ovpn file into ${BOLD}vpn_configs/${RESET}"
     echo ""
 fi

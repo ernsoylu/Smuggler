@@ -8,8 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 from flask import Blueprint, jsonify
 
 from cli.log import get_logger
-from cli.docker_client import get_docker_client, list_mules
-from cli.aria2_client import Aria2Client, Aria2Error
+from cli.docker_client import aria2_for, get_docker_client, list_mules
+from cli.aria2_client import Aria2Error
 from api.database import get_setting
 
 log = get_logger(__name__)
@@ -21,7 +21,7 @@ _POLL_TIMEOUT = 3
 
 
 def _mule_global_stat(w) -> dict | None:
-    aria2 = Aria2Client(host="localhost", port=w.rpc_port, token=w.rpc_token, timeout=_POLL_TIMEOUT)
+    aria2 = aria2_for(w, timeout=_POLL_TIMEOUT)
     try:
         return aria2.get_global_stat()
     except Aria2Error as exc:

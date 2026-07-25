@@ -8,6 +8,7 @@ from pathlib import Path
 
 from flask import Blueprint, request, jsonify
 
+from api.crypto import EncryptionUnavailable
 from api.database import list_vpn_configs, get_vpn_config, add_vpn_config, delete_vpn_config
 from cli.log import get_logger, log_safe
 from cli.docker_client import (
@@ -100,15 +101,22 @@ def upload_config():
     username = request.form.get("username", "").strip() or None
     password = request.form.get("password", "").strip() or None
 
-    config_id = add_vpn_config(
-        name=name,
-        filename=file.filename,
-        content=content,
-        vpn_type=vpn_type,
-        requires_auth=requires_auth,
-        ovpn_username=username,
-        ovpn_password=password,
-    )
+    try:
+        config_id = add_vpn_config(
+            name=name,
+            filename=file.filename,
+            content=content,
+            vpn_type=vpn_type,
+            requires_auth=requires_auth,
+            ovpn_username=username,
+            ovpn_password=password,
+        )
+    except EncryptionUnavailable as exc:
+        # The config body holds private keys, so storing it unencrypted is worse
+        # than refusing the upload. Surfaced as 503: the request is valid, the
+        # server is misconfigured.
+        log.error("POST /api/configs/: refusing upload — %s", exc)
+        return jsonify({"error": str(exc)}), 503
     log.info(
         "POST /api/configs/: created id=%d name=%s vpn_type=%s requires_auth=%s",
         config_id, log_safe(name), vpn_type, requires_auth,
@@ -132,43 +140,61 @@ def remove_config(config_id: int):
     return jsonify({"ok": True})
 
 
-@configs_bp.post("/<int:config_id>/deploy")
-def deploy_mule(config_id: int):
-    """Deploy a new mule using a stored VPN config.
+class DeployError(RuntimeError):
+    """A deploy failure carrying the HTTP status the caller should surface."""
 
-    JSON body (optional):
-      - name (str) — mule name override
+    def __init__(self, message: str, status: int = 500, **extra):
+        super().__init__(message)
+        self.status = status
+        self.extra = extra
+
+
+def check_deployable(config_id: int) -> dict:
+    """Validate that *config_id* can be deployed, returning the config row.
+
+    Raises :class:`DeployError` with the right status when it cannot. Split out
+    so the synchronous and asynchronous deploy paths reject the same cases with
+    the same messages, and so the async path can fail fast before spawning a
+    thread.
     """
-    log.info("POST /api/configs/%d/deploy", config_id)
-
     config = get_vpn_config(config_id)
     if not config:
-        return jsonify({"error": "Config not found"}), 404
+        raise DeployError("Config not found", 404)
 
-    # Guard: a config can back at most one active mule at a time.
+    # A config can back at most one active mule at a time.
     in_use = _config_id_to_mule().get(config_id)
     if in_use:
-        return jsonify({
-            "error": f"Config already in use by active mule '{in_use}'. "
-                     "Stop that mule first or deploy from a different config.",
-            "in_use_by_mule": in_use,
-        }), 409
+        raise DeployError(
+            f"Config already in use by active mule '{in_use}'. "
+            "Stop that mule first or deploy from a different config.",
+            409,
+            in_use_by_mule=in_use,
+        )
 
-    # Guard: OpenVPN configs that require credentials must have them stored
     if config.get("vpn_type") == "openvpn" and config.get("requires_auth"):
         if not config.get("ovpn_username") or not config.get("ovpn_password"):
-            return jsonify({
-                "error": "This OpenVPN config requires credentials. "
-                         "Delete and re-upload with username and password."
-            }), 400
+            raise DeployError(
+                "This OpenVPN config requires credentials. "
+                "Delete and re-upload with username and password.",
+                400,
+            )
+    return config
 
-    data = request.get_json(silent=True) or {}
-    mule_name = data.get("name") or None
 
+def perform_deploy(config_id: int, config: dict, mule_name: str | None = None,
+                   on_started=None) -> dict:
+    """Write the config to a temp file, start the mule, and wait for its VPN.
+
+    Shared by the synchronous endpoint and the async deployment job so the two
+    cannot drift. *on_started* is invoked with the container name as soon as it
+    exists, which lets the async path report a real phase while this blocks.
+    Raises :class:`DeployError` on failure; always removes the temp config.
+    """
     vpn_type = config.get("vpn_type", "wireguard")
     suffix = ".ovpn" if vpn_type == "openvpn" else ".conf"
 
-    smg_tmp_dir = Path(os.environ.get("SMG_HOST_ROOT", os.getcwd())) / "data" / "tmp"
+    host_root = Path(os.environ.get("SMG_HOST_ROOT", os.getcwd()))
+    smg_tmp_dir = host_root / "data" / "tmp"
     smg_tmp_dir.mkdir(parents=True, exist_ok=True)
 
     tmp = tempfile.NamedTemporaryFile(suffix=suffix, dir=smg_tmp_dir, delete=False)
@@ -178,37 +204,41 @@ def deploy_mule(config_id: int):
 
         client = get_docker_client()
         settings = read_settings()
-        downloads_dir = Path(settings.get("download_dir", str(Path(os.environ.get("SMG_HOST_ROOT", os.getcwd())) / "downloads")))
+        downloads_dir = Path(settings.get("download_dir", str(host_root / "downloads")))
         downloads_dir.mkdir(parents=True, exist_ok=True)
 
-        mule = start_mule(
-            client,
-            vpn_config_path=tmp.name,
-            name=mule_name,
-            downloads_dir=downloads_dir,
-            vpn_type=vpn_type,
-            ovpn_username=config.get("ovpn_username"),
-            ovpn_password=config.get("ovpn_password"),
-            config_id=config_id,
-        )
-        log.info(
-            "POST /api/configs/%d/deploy: container started name=%s vpn_type=%s",
-            config_id, mule.name, vpn_type,
-        )
+        try:
+            mule = start_mule(
+                client,
+                vpn_config_path=tmp.name,
+                name=mule_name,
+                downloads_dir=downloads_dir,
+                vpn_type=vpn_type,
+                ovpn_username=config.get("ovpn_username"),
+                ovpn_password=config.get("ovpn_password"),
+                config_id=config_id,
+            )
+        except (FileNotFoundError, RuntimeError) as exc:
+            raise DeployError(str(exc), 500) from exc
+
+        log.info("deploy config=%d: container started name=%s vpn_type=%s",
+                 config_id, mule.name, vpn_type)
+        if on_started:
+            on_started(mule.name)
 
         try:
             ip_info = wait_for_vpn(client, mule.name, timeout=90)
-            log.info("POST /api/configs/%d/deploy: VPN up ip=%s", config_id, ip_info.get("ip"))
+            log.info("deploy config=%d: VPN up ip=%s", config_id, ip_info.get("ip"))
             apply_settings_to_mule(mule.name, settings)
         except RuntimeError as exc:
-            log.error("POST /api/configs/%d/deploy: VPN failed — %s", config_id, exc)
+            log.error("deploy config=%d: VPN failed — %s", config_id, exc)
             try:
                 stop_mule(client, mule.name, remove=True)
             except RuntimeError:
                 pass
-            return jsonify({"error": str(exc)}), 502
+            raise DeployError(str(exc), 502) from exc
 
-        result = {
+        return {
             "name": mule.name,
             "id": mule.id,
             "status": mule.status,
@@ -217,13 +247,32 @@ def deploy_mule(config_id: int):
             "vpn_type": mule.vpn_type,
             "ip_info": ip_info,
         }
-        return jsonify(result), 201
-
-    except (FileNotFoundError, RuntimeError) as exc:
-        log.error("POST /api/configs/%d/deploy: error — %s", config_id, exc)
-        return jsonify({"error": str(exc)}), 500
     finally:
         try:
             os.unlink(tmp.name)
         except OSError:
             pass
+
+
+@configs_bp.post("/<int:config_id>/deploy")
+def deploy_mule(config_id: int):
+    """Deploy a new mule using a stored VPN config, blocking until it is up.
+
+    Kept for existing scripts and one-shot automation, where blocking until the
+    mule is actually up is the simpler contract. The web UI uses
+    ``POST /api/deployments/`` instead, which reports real progress rather than
+    blocking a request thread for up to 90 seconds. Both share
+    ``check_deployable`` and ``perform_deploy``, so they cannot drift.
+
+    JSON body (optional):
+      - name (str) — mule name override
+    """
+    log.info("POST /api/configs/%d/deploy", config_id)
+    data = request.get_json(silent=True) or {}
+    try:
+        config = check_deployable(config_id)
+        result = perform_deploy(config_id, config, data.get("name") or None)
+    except DeployError as exc:
+        log.error("POST /api/configs/%d/deploy: %s", config_id, exc)
+        return jsonify({"error": str(exc), **exc.extra}), exc.status
+    return jsonify(result), 201

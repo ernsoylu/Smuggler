@@ -1,3 +1,4 @@
+import { useModalA11y, modalA11yProps } from '../hooks/useModalA11y';
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getMules, addMagnet, addTorrentFile } from '../api/client';
@@ -11,28 +12,28 @@ export function AddTorrentModal({ onClose }: Readonly<Props>) {
   const qc = useQueryClient();
   const [mode, setMode] = useState<'magnet' | 'file'>('magnet');
   const [magnet, setMagnet] = useState('');
-  const [worker, setWorker] = useState('');
+  const [mule, setMule] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const { data: workers = [] } = useQuery({
-    queryKey: ['workers'],
+  const { data: mules = [] } = useQuery({
+    queryKey: ['mules'],
     queryFn: getMules,
     staleTime: 10_000,
   });
 
-  const runningWorkers = workers.filter(w => w.status === 'running');
+  const runningMules = mules.filter(w => w.status === 'running');
 
   const add = useMutation({
     mutationFn: async () => {
-      if (!worker) throw new Error('Select a mule');
+      if (!mule) throw new Error('Select a mule');
       if (mode === 'magnet') {
         if (!magnet.trim()) throw new Error('Paste a magnet link');
-        return addMagnet(worker, magnet.trim());
+        return addMagnet(mule, magnet.trim());
       } else {
         if (!file) throw new Error('Choose a .torrent file');
-        return addTorrentFile(worker, file);
+        return addTorrentFile(mule, file);
       }
     },
     onSuccess: () => {
@@ -41,6 +42,8 @@ export function AddTorrentModal({ onClose }: Readonly<Props>) {
     },
     onError: (e: Error) => setError(e.message),
   });
+  // Escape is disabled mid-submit so a stray keypress cannot orphan the request.
+  const dialogRef = useModalA11y(add.isPending ? undefined : onClose);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -53,9 +56,13 @@ export function AddTorrentModal({ onClose }: Readonly<Props>) {
       />
       
       {/* Modal */}
-      <div className="relative bg-neutral-900 border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl flex flex-col gap-6 animate-in fade-in zoom-in-95 duration-200">
+      <div
+        ref={dialogRef}
+        {...modalA11yProps}
+        aria-labelledby="add-torrent-title"
+        className="relative bg-neutral-900 border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl flex flex-col gap-6 animate-in fade-in zoom-in-95 duration-200">
         <div className="flex items-center justify-between">
-          <h2 className="text-white font-bold text-xl tracking-tight">Add Torrent</h2>
+          <h2 id="add-torrent-title" className="text-white font-bold text-xl tracking-tight">Add Torrent</h2>
           <button 
             className="p-1.5 text-neutral-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors" 
             onClick={onClose}
@@ -117,25 +124,25 @@ export function AddTorrentModal({ onClose }: Readonly<Props>) {
                 {file ? (
                   <p className="text-sm font-medium text-blue-400">{file.name}</p>
                 ) : (
-                  <p className="text-sm text-neutral-500">Click or drag a .torrent file here</p>
+                  <p className="text-sm text-neutral-500">Click to choose a .torrent file — or drop one anywhere</p>
                 )}
               </label>
             </>
           )}
         </div>
 
-        {/* Worker selector */}
+        {/* Mule selector */}
         <div className="flex flex-col gap-2">
           <label htmlFor="add-torrent-mule" className="text-sm font-medium text-neutral-400">Routing Mule</label>
           <div className="relative">
             <select
               id="add-torrent-mule"
               className="w-full appearance-none bg-neutral-950 border border-white/10 rounded-xl text-sm text-neutral-200 p-3.5 pr-10 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-medium"
-              value={worker}
-              onChange={e => { setWorker(e.target.value); setError(''); }}
+              value={mule}
+              onChange={e => { setMule(e.target.value); setError(''); }}
             >
               <option value="" disabled className="text-neutral-500">— select a mule —</option>
-              {runningWorkers.map(w => (
+              {runningMules.map(w => (
                 <option key={w.name} value={w.name}>
                   {w.name} {w.ip_info ? `(${w.ip_info.country})` : ''}
                 </option>
@@ -145,7 +152,7 @@ export function AddTorrentModal({ onClose }: Readonly<Props>) {
                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
             </div>
           </div>
-          {runningWorkers.length === 0 && (
+          {runningMules.length === 0 && (
             <p className="text-xs font-medium text-orange-400 mt-1 flex items-center gap-1.5">
                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                No running mules — deploy one first.
@@ -166,7 +173,7 @@ export function AddTorrentModal({ onClose }: Readonly<Props>) {
           <button
             className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-sm text-white font-bold shadow-lg shadow-blue-500/25 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
             onClick={() => add.mutate()}
-            disabled={add.isPending || runningWorkers.length === 0}
+            disabled={add.isPending || runningMules.length === 0}
           >
             {add.isPending ? (
                <>

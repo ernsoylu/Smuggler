@@ -1,0 +1,29 @@
+# Trivy findings that are deliberate here, with the reason. Anything not listed
+# below is expected to fail CI — do not add entries without a justification.
+
+# DS002 / DS-0002 — "Image user should not be 'root'"
+#
+# Both spellings are listed deliberately: Trivy renamed this check's ID between
+# releases (DS002 in 0.58.x, DS-0002 in newer builds). Listing only one makes
+# the suppression silently stop working the day the scanner is upgraded.
+#
+# All four images intentionally start as root, and three of them cannot do
+# otherwise:
+#
+#   worker_image/, worker_image_ovpn/ — the startup script must be root to
+#     create the tunnel interface, replace the default route and install the
+#     iptables kill-switch. A USER directive would break the no-leak guarantee
+#     outright. It does not *stay* root: aria2, the only process that handles
+#     untrusted torrent data, is dropped to PUID:PGID with setpriv once the
+#     tunnel is up and the firewall is armed (see SECURITY.md, "Downloads are
+#     not root-owned"), and the container runs with cap_drop: ALL plus a
+#     five-capability add-back.
+#
+#   docker/Dockerfile.api — needs to read the bind-mounted project directory
+#     and talk to the Docker socket proxy. Worth revisiting: it is the one image
+#     where a non-root USER is plausible, tracked in AUDIT-RESPONSE.md.
+#
+#   docker/Dockerfile.web — stock nginx image; its entrypoint drops to the
+#     nginx user for workers after binding.
+DS002
+DS-0002

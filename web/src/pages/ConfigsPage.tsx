@@ -1,48 +1,25 @@
 import { useRef, useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getConfigs, getMules, uploadConfig, deleteConfig, deployMuleFromConfig } from '../api/client';
-import type { VpnConfig } from '../api/types';
+import { getConfigs, getMules, uploadConfig, deleteConfig } from '../api/client';
+import type { VpnConfig, DeployPhase } from '../api/types';
 import { useNotifications } from '../context/NotificationContext';
+import { useDeployments, type DeploymentView } from '../context/DeploymentContext';
 import {
   FileUp, Trash2, Rocket, Shield, Plus, FileKey2, Lock, KeyRound, Eye, EyeOff,
 } from 'lucide-react';
 
-type DeployStage = 'STARTING' | 'CONFIGURING' | 'CONNECTING' | 'DEPLOYED';
 type VpnType = 'wireguard' | 'openvpn';
 
-interface DeployingMule {
-  configId: number;
-  configName: string;
-  stage: DeployStage;
-  startedAt: number;
-  error?: string;
-}
-
-const STAGE_ORDER: DeployStage[] = ['STARTING', 'CONFIGURING', 'CONNECTING', 'DEPLOYED'];
-
-const STAGE_COLORS: Record<DeployStage, { bg: string; text: string; ring: string }> = {
-  STARTING:     { bg: 'bg-amber-500/10',   text: 'text-amber-400',   ring: 'ring-amber-500/20' },
-  CONFIGURING:  { bg: 'bg-orange-500/10',  text: 'text-orange-400',  ring: 'ring-orange-500/20' },
-  CONNECTING:   { bg: 'bg-blue-500/10',    text: 'text-blue-400',    ring: 'ring-blue-500/20' },
-  DEPLOYED:     { bg: 'bg-emerald-500/10', text: 'text-emerald-400', ring: 'ring-emerald-500/20' },
+const PHASE_COLORS: Record<DeployPhase, { bg: string; text: string; ring: string }> = {
+  starting:    { bg: 'bg-amber-500/10',   text: 'text-amber-400',   ring: 'ring-amber-500/20' },
+  configuring: { bg: 'bg-orange-500/10',  text: 'text-orange-400',  ring: 'ring-orange-500/20' },
+  connecting:  { bg: 'bg-blue-500/10',    text: 'text-blue-400',    ring: 'ring-blue-500/20' },
+  deployed:    { bg: 'bg-emerald-500/10', text: 'text-emerald-400', ring: 'ring-emerald-500/20' },
 };
 
+const FAILED_COLORS = { bg: 'bg-red-500/10', text: 'text-red-400', ring: 'ring-red-500/20' };
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function stepDeployStages(prev: DeployingMule[]): DeployingMule[] {
-  const now = Date.now();
-  return prev.map(m => {
-    if (m.stage === 'DEPLOYED' || m.error) return m;
-    const elapsed = now - m.startedAt;
-    if (elapsed >= 8000) return { ...m, stage: 'CONNECTING' as DeployStage };
-    if (elapsed >= 3000) return { ...m, stage: 'CONFIGURING' as DeployStage };
-    return { ...m, stage: 'STARTING' as DeployStage };
-  });
-}
-
-function removeDeployedMules(prev: DeployingMule[]): DeployingMule[] {
-  return prev.filter(m => m.stage !== 'DEPLOYED');
-}
 
 function detectVpnType(filename: string): VpnType {
   return filename.toLowerCase().endsWith('.ovpn') ? 'openvpn' : 'wireguard';
@@ -160,7 +137,7 @@ function ConfigCard({
 function ConfigSection({
   title,
   configs,
-  deployingMules,
+  deployments,
   inUseConfigIds,
   onDeploy,
   onDelete,
@@ -168,7 +145,7 @@ function ConfigSection({
 }: Readonly<{
   title: string;
   configs: VpnConfig[];
-  deployingMules: DeployingMule[];
+  deployments: DeploymentView[];
   inUseConfigIds: Set<number>;
   onDeploy: (id: number, name: string) => void;
   onDelete: (id: number) => void;
@@ -185,8 +162,8 @@ function ConfigSection({
             cfg={cfg}
             onDeploy={() => onDeploy(cfg.id, cfg.name)}
             onDelete={() => onDelete(cfg.id)}
-            isDeploying={deployingMules.some(
-              m => m.configId === cfg.id && !m.error && m.stage !== 'DEPLOYED'
+            isDeploying={deployments.some(
+              d => d.config_id === cfg.id && d.state === 'running'
             )}
             isDeleting={deletingId === cfg.id}
             isInUse={inUseConfigIds.has(cfg.id)}
@@ -215,7 +192,7 @@ export function ConfigsPage() {
   const [error, setError] = useState('');
 
   // Deploy progress state
-  const [deployingMules, setDeployingMules] = useState<DeployingMule[]>([]);
+  const { deployments, start, clearFinished } = useDeployments();
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const { data: configs = [], isLoading } = useQuery({
@@ -291,46 +268,20 @@ export function ConfigsPage() {
 
   // ── Deploy logic ────────────────────────────────────────────────────────────
 
+  // Clear finished cards a few seconds after the last one settles. Progress and
+  // notifications are owned by DeploymentProvider, which polls the mule's real
+  // phase rather than guessing from elapsed time.
   useEffect(() => {
-    if (deployingMules.length === 0) return;
-    const timer = setInterval(() => {
-      setDeployingMules(stepDeployStages);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [deployingMules.length]);
-
-  useEffect(() => {
-    const deployed = deployingMules.filter(m => m.stage === 'DEPLOYED');
-    if (deployed.length === 0) return;
-    const timer = setTimeout(() => {
-      setDeployingMules(removeDeployedMules);
-    }, 4000);
+    const settled = deployments.filter(d => d.state !== 'running');
+    if (settled.length === 0) return;
+    const timer = setTimeout(clearFinished, 4000);
     return () => clearTimeout(timer);
-  }, [deployingMules]);
+  }, [deployments, clearFinished]);
 
-  const handleDeploy = async (configId: number, configName: string) => {
-    const newMule: DeployingMule = { configId, configName, stage: 'STARTING', startedAt: Date.now() };
-    setDeployingMules(prev => [...prev, newMule]);
-    pushNotification({ type: 'info', title: `Deploying "${configName}"`, message: 'Starting VPN mule…' });
-    try {
-      await deployMuleFromConfig(configId);
-      qc.invalidateQueries({ queryKey: ['mules'] });
-      setDeployingMules(prev =>
-        prev.map(m => m.configId === configId && m.startedAt === newMule.startedAt
-          ? { ...m, stage: 'DEPLOYED' as DeployStage } : m
-        )
-      );
-      pushNotification({ type: 'success', title: `"${configName}" deployed`, message: 'Mule is live and VPN is connected.' });
-    } catch (e) {
-      const err = e as { response?: { data?: { error?: string } }; message?: string };
-      const errMsg = err.response?.data?.error || err.message || 'Deploy failed';
-      setDeployingMules(prev =>
-        prev.map(m => m.configId === configId && m.startedAt === newMule.startedAt
-          ? { ...m, error: errMsg } : m
-        )
-      );
-      pushNotification({ type: 'error', title: `Failed to deploy "${configName}"`, message: errMsg });
-    }
+  const handleDeploy = (configId: number, configName: string) => {
+    start(configId, configName).catch(() => {
+      /* the provider has already surfaced this as a notification */
+    });
   };
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -484,29 +435,30 @@ export function ConfigsPage() {
       </div>
 
       {/* ── Deploying Mule Cards ── */}
-      {deployingMules.length > 0 && (
+      {deployments.length > 0 && (
         <div className="mb-8 max-w-3xl">
           <h3 className="text-sm font-bold text-white tracking-tight mb-3 flex items-center gap-2">
             <Rocket size={14} className="text-blue-400" /> Deploying
           </h3>
           <div className="space-y-3">
-            {deployingMules.map((m) => {
-              const sc = m.error
-                ? { bg: 'bg-red-500/10', text: 'text-red-400', ring: 'ring-red-500/20' }
-                : STAGE_COLORS[m.stage];
-              const stageIdx = STAGE_ORDER.indexOf(m.stage);
-              const progressPct = m.error ? 0 : ((stageIdx + 1) / STAGE_ORDER.length) * 100;
+            {deployments.map((m) => {
+              const failed = m.state === 'failed';
+              const done = m.state === 'succeeded';
+              const sc = failed ? FAILED_COLORS : PHASE_COLORS[m.phase];
+              const progressPct = failed
+                ? 0
+                : ((m.phase_index + 1) / m.phase_count) * 100;
               return (
-                <div key={m.configId} className={`p-4 rounded-xl border transition-all ${sc.bg} ${sc.ring} ring-1`}>
+                <div key={m.id} className={`p-4 rounded-xl border transition-all ${sc.bg} ${sc.ring} ring-1`}>
                   <div className="flex items-center justify-between gap-4 mb-3">
                     <div className="flex items-center gap-3">
-                      {!m.error && m.stage !== 'DEPLOYED' && (
+                      {!failed && !done && (
                         <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                       )}
-                      {m.error && (
+                      {failed && (
                         <div className="w-5 h-5 rounded-full bg-red-500/20 flex items-center justify-center text-red-400 text-xs font-bold">!</div>
                       )}
-                      {!m.error && m.stage === 'DEPLOYED' && (
+                      {!failed && done && (
                         <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center">
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400"><polyline points="20 6 9 17 4 12" /></svg>
                         </div>
@@ -514,10 +466,10 @@ export function ConfigsPage() {
                       <span className="text-sm font-semibold text-white">{m.configName}</span>
                     </div>
                     <span className={`text-xs font-bold uppercase tracking-wider ${sc.text}`}>
-                      {m.error ? 'FAILED' : m.stage}
+                      {failed ? 'FAILED' : m.phase}
                     </span>
                   </div>
-                  {!m.error && (
+                  {!failed && (
                     <div className="w-full h-1 bg-black/20 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-1000 ease-out"
@@ -525,7 +477,10 @@ export function ConfigsPage() {
                       />
                     </div>
                   )}
-                  {m.error && <p className="text-xs text-red-300 mt-1">{m.error}</p>}
+                  {failed && <p className="text-xs text-red-300 mt-1">{m.error}</p>}
+                  {!failed && !done && (
+                    <p className="text-xs text-neutral-400 mt-2">{m.detail}</p>
+                  )}
                 </div>
               );
             })}
@@ -558,7 +513,7 @@ export function ConfigsPage() {
           <ConfigSection
             title="WireGuard"
             configs={wireguardConfigs}
-            deployingMules={deployingMules}
+            deployments={deployments}
             inUseConfigIds={inUseConfigIds}
             onDeploy={handleDeploy}
             onDelete={id => remove.mutate(id)}
@@ -567,7 +522,7 @@ export function ConfigsPage() {
           <ConfigSection
             title="OpenVPN"
             configs={openvpnConfigs}
-            deployingMules={deployingMules}
+            deployments={deployments}
             inUseConfigIds={inUseConfigIds}
             onDeploy={handleDeploy}
             onDelete={id => remove.mutate(id)}

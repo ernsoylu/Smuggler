@@ -73,6 +73,8 @@ export interface Torrent {
   mode: string;
   error_code: string;
   error_message: string;
+  /** User-assigned category, or '' when unset. */
+  category: string;
   files: TorrentFile[];
   is_metadata?: boolean;
 }
@@ -92,6 +94,9 @@ export interface TorrentOptions {
   max_download_speed: number;
   max_upload_speed: number;
   max_connections: number;
+  /** aria2 bt-prioritize-piece=head,tail — fetch the ends first so a partial
+   *  download is previewable. aria2 has no true sequential mode. */
+  prioritize_first_last: boolean;
 }
 
 export interface GlobalStats {
@@ -113,4 +118,28 @@ export interface VpnConfig {
   vpn_type: 'wireguard' | 'openvpn';
   requires_auth: boolean;
   in_use_by_mule?: string | null;
+}
+
+// ── Deployments ───────────────────────────────────────────────────────────────
+
+/** Phases a mule reports as it starts up, in order. */
+export type DeployPhase = 'starting' | 'configuring' | 'connecting' | 'deployed';
+
+/**
+ * An in-flight (or finished) mule deployment. `phase` is what the mule itself
+ * wrote to /tmp/vpn_health.json, not an animation.
+ */
+export interface Deployment {
+  id: string;
+  config_id: number;
+  state: 'running' | 'succeeded' | 'failed';
+  phase: DeployPhase;
+  phase_index: number;
+  phase_count: number;
+  detail: string;
+  mule: string | null;
+  result: Mule | null;
+  error: string | null;
+  started_at: number;
+  finished_at: number | null;
 }

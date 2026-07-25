@@ -22,6 +22,14 @@ def with_key(monkeypatch):
 @pytest.fixture
 def without_key(monkeypatch):
     monkeypatch.delenv("SMG_SECRET_KEY", raising=False)
+    monkeypatch.delenv("SMG_ALLOW_PLAINTEXT_SECRETS", raising=False)
+
+
+@pytest.fixture
+def without_key_plaintext_allowed(monkeypatch):
+    """No key, but the operator has explicitly opted in to plaintext storage."""
+    monkeypatch.delenv("SMG_SECRET_KEY", raising=False)
+    monkeypatch.setenv("SMG_ALLOW_PLAINTEXT_SECRETS", "1")
 
 
 # ─── round-trip ─────────────────────────────────────────────────────────────
@@ -80,10 +88,19 @@ class TestNoKey:
     def test_encryption_disabled(self, without_key):
         assert crypto.encryption_enabled() is False
 
-    def test_encrypt_returns_plaintext(self, without_key):
+    def test_encrypt_raises_without_key(self, without_key):
+        # Fail closed: silently persisting a credential in the clear is worse
+        # than refusing to store it.
+        with pytest.raises(crypto.EncryptionUnavailable):
+            crypto.encrypt("secret")
+
+    def test_encrypt_returns_plaintext_when_explicitly_allowed(
+        self, without_key_plaintext_allowed
+    ):
         assert crypto.encrypt("secret") == "secret"
 
     def test_decrypt_plaintext_passthrough(self, without_key):
+        # Reads stay tolerant so legacy plaintext rows keep working.
         assert crypto.decrypt("secret") == "secret"
 
     def test_decrypt_encrypted_without_key_returns_none(self, with_key, monkeypatch):
@@ -141,7 +158,15 @@ class TestEncryptionAtRest:
         # ...but callers transparently get plaintext back.
         assert db.get_vpn_config(config_id)["ovpn_password"] == "s3cr3t"
 
-    def test_password_stored_plaintext_without_key(self, without_key, temp_db):
+    def test_storing_config_refused_without_key(self, without_key, temp_db):
+        with pytest.raises(crypto.EncryptionUnavailable):
+            db.add_vpn_config(
+                "ovpn", "v.ovpn", b"client\n", "openvpn", True, "user", "s3cr3t"
+            )
+
+    def test_password_stored_plaintext_when_explicitly_allowed(
+        self, without_key_plaintext_allowed, temp_db
+    ):
         config_id = db.add_vpn_config(
             "ovpn", "v.ovpn", b"client\n", "openvpn", True, "user", "s3cr3t"
         )
@@ -181,7 +206,16 @@ class TestBytesRoundTrip:
         assert once == twice
         assert crypto.decrypt_bytes(twice) == b"data"
 
-    def test_without_key_passthrough(self, without_key):
+    def test_encrypt_bytes_raises_without_key(self, without_key):
+        with pytest.raises(crypto.EncryptionUnavailable):
+            crypto.encrypt_bytes(b"data")
+
+    def test_decrypt_bytes_passthrough_without_key(self, without_key):
+        assert crypto.decrypt_bytes(b"data") == b"data"
+
+    def test_without_key_passthrough_when_explicitly_allowed(
+        self, without_key_plaintext_allowed
+    ):
         assert crypto.encrypt_bytes(b"data") == b"data"
         assert crypto.decrypt_bytes(b"data") == b"data"
 
@@ -196,7 +230,15 @@ class TestConfigBodyAtRest:
         assert b"PrivateKey=xyz" not in raw
         assert db.get_vpn_config(cid)["content"] == b"[Interface]\nPrivateKey=xyz\n"
 
-    def test_content_plaintext_without_key(self, without_key, temp_db):
+    def test_content_storage_refused_without_key(self, without_key, temp_db):
+        # The config body carries the WireGuard private key, so this must not
+        # fall through to plaintext.
+        with pytest.raises(crypto.EncryptionUnavailable):
+            db.add_vpn_config("wg", "wg0.conf", b"[Interface]\n", "wireguard")
+
+    def test_content_plaintext_when_explicitly_allowed(
+        self, without_key_plaintext_allowed, temp_db
+    ):
         cid = db.add_vpn_config("wg", "wg0.conf", b"[Interface]\n", "wireguard")
         assert _raw_content(temp_db, cid) == b"[Interface]\n"
         assert db.get_vpn_config(cid)["content"] == b"[Interface]\n"
@@ -246,3 +288,120 @@ class TestLegacyMigration:
             raw = _raw_password(db_file, 1)
             assert raw.startswith("fernet:")
             assert db.get_vpn_config(1)["ovpn_password"] == "legacy-pw"
+
+
+# ─── v1 (SHA-256) → v2 (scrypt) migration ────────────────────────────────────
+
+def _v1_token(secret: str, plaintext: str) -> str:
+    """Build ciphertext exactly as the pre-scrypt code would have written it."""
+    from cryptography.fernet import Fernet
+    f = Fernet(crypto._derive_v1(secret))
+    return "fernet:" + f.encrypt(plaintext.encode("utf-8")).decode("ascii")
+
+
+def _v1_token_bytes(secret: str, plaintext: bytes) -> bytes:
+    from cryptography.fernet import Fernet
+    f = Fernet(crypto._derive_v1(secret))
+    return b"fernet:" + f.encrypt(plaintext)
+
+
+class TestLegacyKeyCompatibility:
+    def test_v1_ciphertext_still_decrypts(self, with_key):
+        assert crypto.decrypt(_v1_token(KEY, "old-secret")) == "old-secret"
+
+    def test_v1_bytes_still_decrypt(self, with_key):
+        assert crypto.decrypt_bytes(_v1_token_bytes(KEY, b"old-body")) == b"old-body"
+
+    def test_new_writes_are_not_readable_with_the_v1_key_alone(self, with_key):
+        from cryptography.fernet import Fernet, InvalidToken
+        token = crypto.encrypt("fresh")[len("fernet:"):]
+        with pytest.raises(InvalidToken):
+            Fernet(crypto._derive_v1(KEY)).decrypt(token.encode("ascii"))
+
+    def test_needs_rekey_true_for_v1_false_for_v2(self, with_key):
+        assert crypto.needs_rekey(_v1_token(KEY, "x")) is True
+        assert crypto.needs_rekey(crypto.encrypt("x")) is False
+
+    def test_needs_rekey_ignores_plaintext_and_empty(self, with_key):
+        assert crypto.needs_rekey("not-encrypted") is False
+        assert crypto.needs_rekey(None) is False
+        assert crypto.needs_rekey(b"") is False
+
+    def test_needs_rekey_false_for_undecryptable(self, monkeypatch):
+        monkeypatch.setenv("SMG_SECRET_KEY", "one-key-here-long")
+        stale = _v1_token("a-totally-different-key", "x")
+        monkeypatch.setenv("SMG_SECRET_KEY", "another-key-here-long")
+        assert crypto.needs_rekey(stale) is False
+
+    def test_rekey_preserves_plaintext_and_upgrades(self, with_key):
+        rotated = crypto.rekey(_v1_token(KEY, "old-secret"))
+        assert crypto.decrypt(rotated) == "old-secret"
+        assert crypto.needs_rekey(rotated) is False
+
+
+class TestSaltFallback:
+    def test_default_salt_rows_survive_adding_a_salt(self, monkeypatch):
+        # A deployment that later gains SMG_SECRET_SALT must still read rows
+        # written under the built-in default salt.
+        monkeypatch.setenv("SMG_SECRET_KEY", KEY)
+        monkeypatch.delenv("SMG_SECRET_SALT", raising=False)
+        token = crypto.encrypt("written-before-salt")
+
+        monkeypatch.setenv("SMG_SECRET_SALT", "a-brand-new-per-deployment-salt")
+        assert crypto.decrypt(token) == "written-before-salt"
+
+    def test_different_salts_produce_different_keys(self, monkeypatch):
+        monkeypatch.setenv("SMG_SECRET_KEY", KEY)
+        monkeypatch.setenv("SMG_SECRET_SALT", "salt-one")
+        a = crypto._derive_v2(KEY, crypto._configured_salt())
+        monkeypatch.setenv("SMG_SECRET_SALT", "salt-two")
+        b = crypto._derive_v2(KEY, crypto._configured_salt())
+        assert a != b
+
+
+class TestInitDbRekeys:
+    def test_init_db_rotates_v1_rows_in_place(self, with_key, temp_db):
+        cid = db.add_vpn_config(
+            "ovpn", "v.ovpn", b"client\n", "openvpn", True, "user", "s3cr3t"
+        )
+        # Rewrite both columns as the old scheme would have stored them.
+        conn = sqlite3.connect(str(temp_db))
+        conn.execute(
+            "UPDATE vpn_configs SET content = ?, ovpn_password = ? WHERE id = ?",
+            (_v1_token_bytes(KEY, b"client\n"), _v1_token(KEY, "s3cr3t"), cid),
+        )
+        conn.commit()
+        conn.close()
+
+        db.init_db()
+
+        raw_pw = _raw_password(temp_db, cid)
+        assert crypto.needs_rekey(raw_pw) is False, "password not rotated"
+        assert db.get_vpn_config(cid)["ovpn_password"] == "s3cr3t"
+        assert db.get_vpn_config(cid)["content"] == b"client\n"
+
+    def test_init_db_rekey_is_idempotent(self, with_key, temp_db):
+        cid = db.add_vpn_config("wg", "wg0.conf", b"[Interface]\n", "wireguard")
+        before = _raw_content(temp_db, cid)
+        db.init_db()
+        assert _raw_content(temp_db, cid) == before, "rewrote an already-current row"
+
+
+class TestWeakKeyDetection:
+    def test_short_key_flagged(self, monkeypatch):
+        monkeypatch.setenv("SMG_SECRET_KEY", "short")
+        assert "16" in (crypto.weak_key_reason() or "")
+
+    def test_low_variety_key_flagged(self, monkeypatch):
+        monkeypatch.setenv("SMG_SECRET_KEY", "aaaaaaaaaaaaaaaaaaaa")
+        assert "distinct" in (crypto.weak_key_reason() or "")
+
+    def test_generated_key_is_fine(self, monkeypatch):
+        import base64 as _b64
+        import os as _os
+        monkeypatch.setenv("SMG_SECRET_KEY", _b64.b64encode(_os.urandom(32)).decode())
+        assert crypto.weak_key_reason() is None
+
+    def test_no_key_is_not_reported_as_weak(self, monkeypatch):
+        monkeypatch.delenv("SMG_SECRET_KEY", raising=False)
+        assert crypto.weak_key_reason() is None

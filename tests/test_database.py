@@ -11,8 +11,14 @@ import api.database as db
 
 
 @pytest.fixture(autouse=True)
-def temp_db(tmp_path):
-    """Patch DB_PATH to a fresh temp file for every test."""
+def temp_db(tmp_path, monkeypatch):
+    """Patch DB_PATH to a fresh temp file for every test.
+
+    A key is set because storing a secret without one now raises — these tests
+    cover storage behaviour, not encryption policy, and a configured key is the
+    production state (setup.sh always generates one).
+    """
+    monkeypatch.setenv("SMG_SECRET_KEY", "test-database-secret")
     db_file = tmp_path / "test_smuggler.db"
     with patch.object(db, "DB_PATH", db_file):
         db.init_db()
