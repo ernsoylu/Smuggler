@@ -10,6 +10,32 @@ contains one "5-minute P0" that would break the application and several
 "missing" features that already exist. C#1 is largely inapplicable — it audits a
 product Smuggler isn't.
 
+## Status
+
+| Phase | State | Commit |
+|---|---|---|
+| 0 — Fail closed | **Done**, verified against a real WireGuard tunnel | `939c7e8` |
+| 1 — Correctness bugs | **Done** | `8beced4` (backend), `62785d1` (frontend) |
+| 8 — Docs & hygiene | **Done** | `8beced4` |
+| 2 — Crypto hardening | Not started — next | |
+| 3 — Container/network | Not started | |
+| 4 — Truthful deploy state | Not started | |
+| 5 — Supply chain & CI | Not started | |
+| 6 — UX gaps | Not started | |
+| 7 — Decisions | Open | |
+
+Phase 0 was verified with a real WireGuard config: the mule's exit IP
+differs from the host's, the dual probe matches, kill-switch and RPC-ingress
+rules install with the real endpoint, RPC is reachable from the host but times
+out from a bridge-peer container, and tearing down `wg0` drops egress instead of
+leaking. Running that drill surfaced two further defects, both fixed: a
+kill-switch teardown exited `0` and overwrote its own recorded reason, and
+`--rpc-listen-all=false` (a critique "5-minute P0") would have broken every mule.
+
+**Not yet verified:** the OpenVPN tunnel end-to-end. The supplied
+`.ovpn` uses `auth-user-pass` and no credentials were provided, so testing
+stopped at endpoint pinning — which passed, including all 5 `remote` lines.
+
 ---
 
 ## Part 1 — Evaluation
