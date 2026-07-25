@@ -15,6 +15,7 @@ from api.torrents import torrents_bp
 from api.stats import stats_bp
 from api.settings import settings_bp
 from api.configs import configs_bp
+from api.deployments import deployments_bp
 from api.watchdog import watchdog_bp, start_watchdog
 from api.database import init_db
 
@@ -65,7 +66,7 @@ def create_app() -> Flask:
     CORS(app, origins=cors_origins)
 
     # ── Access control ────────────────────────────────────────────────────────
-    # The API holds the Docker socket (host-root equivalent), so it must never be
+    # The API can drive Docker (via the socket proxy), so it must never be
     # openly reachable. Two layers, both fail-safe for existing local setups:
     #   1. Token auth (opt-in): when SMG_API_TOKEN is set, every /api/* call
     #      (except health + CORS preflight) must carry a matching X-Smuggler-Token.
@@ -139,6 +140,7 @@ def create_app() -> Flask:
     app.register_blueprint(stats_bp)
     app.register_blueprint(settings_bp)
     app.register_blueprint(configs_bp)
+    app.register_blueprint(deployments_bp)
     app.register_blueprint(watchdog_bp)
 
     @app.route("/api/health/", methods=["GET"])
@@ -157,7 +159,7 @@ def create_app() -> Flask:
         log.error("500: %s", e)
         return {"error": "Internal server error"}, 500
 
-    log.info("create_app: blueprints registered — mules, torrents, stats, settings, configs, watchdog")
+    log.info("create_app: blueprints registered — mules, torrents, stats, settings, configs, deployments, watchdog")
 
     # Start the background VPN watchdog (daemon thread — survives app context).
     # start_watchdog() is itself idempotent, which is what actually prevents a

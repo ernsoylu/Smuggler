@@ -688,6 +688,52 @@ def _probe_default_route_ip(container) -> tuple[str | None, str]:
     return None, "default-route probe returned unexpected body"
 
 
+_VALID_PHASES = ("starting", "configuring", "connecting", "deployed")
+
+
+def get_mule_phase(client: docker.DockerClient, name_or_id: str) -> dict:
+    """Read a mule's self-reported startup phase from ``/tmp/vpn_health.json``.
+
+    Cheap by design — a single ``cat`` inside the container, no network probe —
+    because deploy progress is polled every second or so. Use
+    :func:`check_mule_vpn` when you need an actual liveness verdict.
+
+    Returns ``{"phase", "status", "ip", "reason"}``. ``phase`` falls back to
+    ``"starting"`` while the container is coming up and the file does not exist
+    yet, which is the honest answer rather than an error.
+    """
+    unknown = {"phase": "starting", "status": "starting", "ip": None, "reason": ""}
+    try:
+        container = client.containers.get(name_or_id)
+    except docker.errors.NotFound:
+        return {**unknown, "reason": "container not created yet"}
+    except docker.errors.APIError as exc:
+        return {**unknown, "reason": f"docker error: {exc}"}
+
+    try:
+        exit_code, output = container.exec_run("cat /tmp/vpn_health.json", demux=False)
+    except docker.errors.APIError as exc:
+        # Normal while the container is still starting up.
+        return {**unknown, "reason": f"not readable yet: {exc}"}
+    if exit_code != 0 or not output:
+        return {**unknown, "reason": "health file not written yet"}
+
+    try:
+        data = json.loads(output.decode(errors="replace").strip())
+    except ValueError:
+        return {**unknown, "reason": "malformed health file"}
+
+    phase = data.get("phase") or "starting"
+    if phase not in _VALID_PHASES:
+        phase = "starting"
+    return {
+        "phase": phase,
+        "status": data.get("status") or "starting",
+        "ip": data.get("ip") or None,
+        "reason": data.get("reason") or "",
+    }
+
+
 def check_mule_vpn(client: docker.DockerClient, name_or_id: str) -> dict:
     """
     Verify that a running mule's traffic is still exiting through the VPN.

@@ -34,12 +34,24 @@ log()  { echo "[$(date -u +%T)] $*"; return; }
 warn() { echo "[$(date -u +%T)] WARN  $*"; return; }
 err()  { echo "[$(date -u +%T)] ERROR $*" >&2; return; }
 
-# ─── Health status file (read by host watchdog) ───────────────────────────────
+# ─── Health status file (read by host watchdog + deploy progress) ─────────────
+# PHASE tracks how far startup has actually got, so the UI can show real
+# progress instead of guessing from elapsed time. It only advances during
+# startup; once the tunnel is verified it stays at "deployed".
+PHASE="starting"
+
 write_health() {
     local status="$1" ip="${2:-}" reason="${3:-}"
-    printf '{"status":"%s","ip":"%s","reason":"%s","ts":"%s"}\n' \
-        "$status" "$ip" "$reason" "$(date -u +%FT%TZ)" \
+    printf '{"status":"%s","phase":"%s","ip":"%s","reason":"%s","ts":"%s"}\n' \
+        "$status" "$PHASE" "$ip" "$reason" "$(date -u +%FT%TZ)" \
         > /tmp/vpn_health.json
+    return
+}
+
+set_phase() {
+    PHASE="$1"
+    log "phase → $1"
+    write_health "starting" "" "${2:-$1}"
     return
 }
 write_health "starting" "" "initialising"
@@ -148,6 +160,7 @@ while [[ "${SECONDS}" -lt "${DEADLINE}" ]]; do
     if ip link show "${VPN_IFACE}" &>/dev/null; then
         TUN_UP=1
         log "${VPN_IFACE} interface is up"
+        set_phase configuring "tunnel interface up, applying DNS and routing"
         break
     fi
     if ! kill -0 "${OVPN_PID}" 2>/dev/null; then
@@ -243,6 +256,7 @@ arm_or_die -A INPUT -i "${ORIG_DEV}" -p tcp --dport 6800 -j DROP
 
 log "Kill-switch armed: only VPN endpoints ${REMOTE_IPS[*]} + RPC allowed on ${ORIG_DEV}"
 log "RPC ingress restricted to gateway ${ORIG_GW}"
+set_phase connecting "kill-switch armed, verifying the tunnel"
 
 # ─── 7. Remove credentials from disk ────────────────────────────────────────
 cleanup_creds
@@ -297,6 +311,7 @@ if echo "${EXT_IP}" | grep -qP '^(172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|10\.)
 fi
 
 log "VPN active — External IP: ${EXT_IP}  Country: ${EXT_COUNTRY}"
+PHASE="deployed"
 write_health "healthy" "${EXT_IP}" "VPN verified at startup"
 
 # ─── 9. Start aria2 ─────────────────────────────────────────────────────────

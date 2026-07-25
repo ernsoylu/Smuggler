@@ -114,3 +114,27 @@ export interface VpnConfig {
   requires_auth: boolean;
   in_use_by_mule?: string | null;
 }
+
+// ── Deployments ───────────────────────────────────────────────────────────────
+
+/** Phases a mule reports as it starts up, in order. */
+export type DeployPhase = 'starting' | 'configuring' | 'connecting' | 'deployed';
+
+/**
+ * An in-flight (or finished) mule deployment. `phase` is what the mule itself
+ * wrote to /tmp/vpn_health.json, not an animation.
+ */
+export interface Deployment {
+  id: string;
+  config_id: number;
+  state: 'running' | 'succeeded' | 'failed';
+  phase: DeployPhase;
+  phase_index: number;
+  phase_count: number;
+  detail: string;
+  mule: string | null;
+  result: Mule | null;
+  error: string | null;
+  started_at: number;
+  finished_at: number | null;
+}

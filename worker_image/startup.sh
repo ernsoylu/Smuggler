@@ -34,12 +34,24 @@ log()  { echo "[$(date -u +%T)] $*"; return; }
 warn() { echo "[$(date -u +%T)] WARN  $*"; return; }
 err()  { echo "[$(date -u +%T)] ERROR $*" >&2; return; }
 
-# ─── Health status file (read by host watchdog) ───────────────────────────────
+# ─── Health status file (read by host watchdog + deploy progress) ─────────────
+# PHASE tracks how far startup has actually got, so the UI can show real
+# progress instead of guessing from elapsed time. It only advances during
+# startup; once the tunnel is verified it stays at "deployed".
+PHASE="starting"
+
 write_health() {
     local status="$1" ip="${2:-}" reason="${3:-}"
-    printf '{"status":"%s","ip":"%s","reason":"%s","ts":"%s"}\n' \
-        "$status" "$ip" "$reason" "$(date -u +%FT%TZ)" \
+    printf '{"status":"%s","phase":"%s","ip":"%s","reason":"%s","ts":"%s"}\n' \
+        "$status" "$PHASE" "$ip" "$reason" "$(date -u +%FT%TZ)" \
         > /tmp/vpn_health.json
+    return
+}
+
+set_phase() {
+    PHASE="$1"
+    log "phase → $1"
+    write_health "starting" "" "${2:-$1}"
     return
 }
 write_health "starting" "" "initialising"
@@ -103,6 +115,7 @@ rm -f "${WG_CONF_STRIPPED}"
 [[ -n "${WG_ADDR6}" ]] && ip -6 address add "${WG_ADDR6}" dev "${WG_IFACE}" 2>/dev/null || true
 ip link set mtu 1280 up dev "${WG_IFACE}"
 log "Interface ${WG_IFACE} is up (MTU 1280)"
+set_phase configuring "tunnel interface up, applying DNS and routing"
 
 # ─── 4. Block IPv6 outbound unless WG config carries IPv6 ──────────────────
 # Prevents IPv6 leak when WireGuard only tunnels IPv4.
@@ -209,6 +222,7 @@ arm_or_die -A INPUT -i "${ORIG_DEV}" -p tcp --dport 6800 -j DROP
 
 log "Kill-switch armed: only WG endpoint ${WG_EP_IP} + RPC allowed on ${ORIG_DEV}"
 log "RPC ingress restricted to gateway ${ORIG_GW}"
+set_phase connecting "kill-switch armed, waiting for the tunnel to come up"
 
 # ─── 7. Verify external connectivity through VPN ────────────────────────────
 log "Verifying VPN connectivity through ${WG_IFACE}..."
@@ -287,6 +301,7 @@ if echo "${EXT_IP}" | grep -qP '^(172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|10\.)
 fi
 
 log "VPN active — External IP: ${EXT_IP}  Country: ${EXT_COUNTRY}"
+PHASE="deployed"
 write_health "healthy" "${EXT_IP}" "VPN verified at startup"
 
 # ─── 8. Start aria2 ─────────────────────────────────────────────────────────
