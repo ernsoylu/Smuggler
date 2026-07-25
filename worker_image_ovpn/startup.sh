@@ -19,6 +19,10 @@
 set -euo pipefail
 
 ARIA2_SECRET="${ARIA2_SECRET:-}"
+# uid/gid aria2 runs as. Defaults to root only when the caller supplies nothing
+# (cli/docker_client always does), which keeps a bare `docker run` working.
+PUID="${PUID:-0}"
+PGID="${PGID:-0}"
 OVPN_CONF="/etc/openvpn/client.ovpn"
 VPN_IFACE="tun0"
 VPN_CHECK_TIMEOUT=30      # seconds to wait for ipinfo.io response
@@ -301,8 +305,33 @@ write_health "healthy" "${EXT_IP}" "VPN verified at startup"
 # unreachable and aria2 has no bind-address option. Ingress is constrained by
 # the INPUT rules armed in 6b instead. CORS stays off — the Flask API proxies
 # RPC server-side, so no browser ever talks to aria2 directly.
+# ─── Privilege drop for aria2 ────────────────────────────────────────────────
+# Everything above needs root (ip, iptables, wg/openvpn). aria2 itself needs no
+# capabilities once the tunnel is up, and running it as root made every
+# downloaded file root-owned on the host. Resolve the prefix here so a failure
+# is reported before aria2 starts rather than as a confusing write error later.
+ARIA2_PREFIX=()
+if [[ "${PUID}" != "0" ]]; then
+    if ! command -v setpriv >/dev/null 2>&1; then
+        err "FATAL: setpriv missing — cannot drop privileges to ${PUID}:${PGID}."
+        write_health "dead" "" "setpriv unavailable for privilege drop"
+        exit 1
+    fi
+    if ! setpriv --reuid="${PUID}" --regid="${PGID}" --clear-groups \
+         test -w /downloads 2>/dev/null; then
+        err "FATAL: uid ${PUID} cannot write to /downloads."
+        err "Set SMG_PUID/SMG_PGID to a user that owns the downloads directory."
+        write_health "dead" "" "downloads not writable by uid ${PUID}"
+        exit 1
+    fi
+    ARIA2_PREFIX=(setpriv --reuid="${PUID}" --regid="${PGID}" --clear-groups --)
+    log "aria2 will run as ${PUID}:${PGID} (downloads stay user-owned)"
+else
+    warn "PUID unset — aria2 runs as root and downloads will be root-owned"
+fi
+
 log "Starting aria2 RPC daemon (RPC ingress firewalled to ${ORIG_GW})..."
-aria2c \
+"${ARIA2_PREFIX[@]}" aria2c \
     --dir=/downloads \
     --enable-rpc=true \
     --rpc-listen-all=true \

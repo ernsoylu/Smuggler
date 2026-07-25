@@ -557,3 +557,57 @@ class TestAttachRpcNetwork:
         net.connect.side_effect = docker.errors.APIError("boom")
         mock_docker_client.networks.get.return_value = net
         _attach_rpc_network(mock_docker_client, MagicMock(), "smuggler-mule-abc")
+
+
+class TestMuleHardening:
+    """Container-level restrictions applied to every mule."""
+
+    def _run_kwargs(self, mock_docker_client, mock_container, **kw):
+        with tempfile.NamedTemporaryFile(suffix=".conf", delete=False) as f:
+            f.write(b"[Interface]\n")
+            conf = f.name
+        try:
+            mock_docker_client.containers.run.return_value = mock_container
+            with patch("cli.docker_client._find_free_port", return_value=16800):
+                start_mule(mock_docker_client, conf, **kw)
+            return mock_docker_client.containers.run.call_args.kwargs
+        finally:
+            os.unlink(conf)
+
+    def test_drops_all_capabilities_then_adds_back_a_minimal_set(
+        self, mock_docker_client, mock_container
+    ):
+        k = self._run_kwargs(mock_docker_client, mock_container)
+        assert k["cap_drop"] == ["ALL"]
+        assert set(k["cap_add"]) == {
+            "NET_ADMIN", "DAC_OVERRIDE", "SETUID", "SETGID", "KILL",
+        }
+
+    def test_never_grants_host_kernel_or_raw_socket_capabilities(
+        self, mock_docker_client, mock_container
+    ):
+        k = self._run_kwargs(mock_docker_client, mock_container)
+        for forbidden in ("SYS_MODULE", "SYS_ADMIN", "NET_RAW", "SYS_PTRACE"):
+            assert forbidden not in k["cap_add"]
+
+    def test_blocks_privilege_escalation(self, mock_docker_client, mock_container):
+        k = self._run_kwargs(mock_docker_client, mock_container)
+        assert "no-new-privileges:true" in k["security_opt"]
+
+    def test_applies_resource_ceilings(self, mock_docker_client, mock_container):
+        k = self._run_kwargs(mock_docker_client, mock_container)
+        assert k["mem_limit"] == "1g"
+        assert k["pids_limit"] == 512
+
+    def test_passes_puid_pgid_so_downloads_are_not_root_owned(
+        self, mock_docker_client, mock_container
+    ):
+        k = self._run_kwargs(mock_docker_client, mock_container)
+        assert k["environment"]["PUID"] == str(os.getuid())
+        assert k["environment"]["PGID"] == str(os.getgid())
+
+    def test_rpc_stays_published_on_loopback_only(
+        self, mock_docker_client, mock_container
+    ):
+        k = self._run_kwargs(mock_docker_client, mock_container)
+        assert k["ports"]["6800/tcp"] == ("127.0.0.1", 16800)

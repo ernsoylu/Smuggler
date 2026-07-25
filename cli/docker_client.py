@@ -31,6 +31,27 @@ ARIA2_INTERNAL_PORT = 6800
 # egress and no raw IP egress — so it cannot become a leak path for a mule.
 MULE_RPC_NETWORK = os.environ.get("SMG_RPC_NETWORK", "smuggler-rpc")
 
+# Capabilities a mule actually needs, added back on top of cap_drop=ALL. Each is
+# load-bearing and was verified by running the container without it:
+#   NET_ADMIN     — create/configure wg0 or tun0 and install the kill-switch
+#   DAC_OVERRIDE  — read the host-owned VPN config bind-mounted at 0600
+#   SETUID/SETGID — setpriv drops aria2 to PUID:PGID
+#   KILL          — the root monitor signals aria2 once it runs as PUID
+# Notably absent: SYS_MODULE (host-kernel escape) and NET_RAW.
+MULE_CAPABILITIES = ("NET_ADMIN", "DAC_OVERRIDE", "SETUID", "SETGID", "KILL")
+
+# Resource ceilings for a mule. Generous for aria2 but finite, so one hostile
+# or runaway download cannot exhaust host memory or the PID table.
+MULE_MEM_LIMIT = os.environ.get("SMG_MULE_MEM_LIMIT", "1g")
+MULE_PIDS_LIMIT = int(os.environ.get("SMG_MULE_PIDS_LIMIT", "512"))
+
+# Ownership for files aria2 writes into the bind-mounted downloads directory.
+# Defaults to the invoking user so downloads are not root-owned on the host —
+# previously every file landed as uid 0 and could not be moved or deleted from
+# a file manager without sudo.
+MULE_PUID = int(os.environ.get("SMG_PUID", os.getuid()))
+MULE_PGID = int(os.environ.get("SMG_PGID", os.getgid()))
+
 
 def _rpc_over_container_network() -> bool:
     """True when RPC should be addressed by container name instead of loopback.
@@ -212,17 +233,16 @@ def start_mule(
     if vpn_type == "openvpn":
         image = MULE_IMAGE_OVPN
         container_config_path = "/etc/openvpn/client.ovpn"
-        cap_add = ["NET_ADMIN"]
+        cap_add = list(MULE_CAPABILITIES)
         sysctls: dict = {}
         # OpenVPN requires the host TUN/TAP device to create tun0 inside the container
         devices = ["/dev/net/tun:/dev/net/tun:rwm"]
     else:
         image = MULE_IMAGE
         container_config_path = "/etc/wireguard/wg0.conf"
-        # NET_ADMIN only — configuring an existing wg interface needs it, but we
-        # deliberately do NOT add SYS_MODULE (host-kernel module loading = escape
+        # Deliberately no SYS_MODULE (host-kernel module loading = escape
         # primitive). The host must have the wireguard module loaded already.
-        cap_add = ["NET_ADMIN"]
+        cap_add = list(MULE_CAPABILITIES)
         sysctls = {"net.ipv4.conf.all.src_valid_mark": "1"}
         devices = []
 
@@ -231,7 +251,13 @@ def start_mule(
         str(downloads_dir): {"bind": "/downloads", "mode": "rw"},
     }
 
-    environment: dict = {"ARIA2_SECRET": rpc_token}
+    environment: dict = {
+        "ARIA2_SECRET": rpc_token,
+        # aria2 drops to this uid/gid before downloading, so files on the host
+        # belong to the user rather than root.
+        "PUID": str(MULE_PUID),
+        "PGID": str(MULE_PGID),
+    }
     if vpn_type == "openvpn" and ovpn_username:
         environment["OVPN_USERNAME"] = ovpn_username
     if vpn_type == "openvpn" and ovpn_password:
@@ -251,7 +277,15 @@ def start_mule(
         "image": image,
         "name": worker_name,
         "detach": True,
+        # Start from nothing and add back only what is genuinely required,
+        # rather than inheriting Docker's default capability set. This still
+        # drops NET_RAW (packet crafting/sniffing), SYS_CHROOT, MKNOD, SETPCAP,
+        # SETFCAP, FOWNER, FSETID and AUDIT_WRITE.
+        "cap_drop": ["ALL"],
         "cap_add": cap_add,
+        # A mule processes untrusted peer traffic, so block the setuid/setcap
+        # escalation path outright.
+        "security_opt": ["no-new-privileges:true"],
         "volumes": volumes,
         # Publish the aria2 RPC port on the loopback interface ONLY. Host-side
         # callers (the smg CLI, ./start.sh debug) reach it via 127.0.0.1;
@@ -261,6 +295,10 @@ def start_mule(
         "environment": environment,
         "labels": labels,
         "restart_policy": {"Name": "unless-stopped"},
+        # Bound the blast radius of a runaway or hostile download. aria2 with a
+        # handful of torrents sits far below these.
+        "mem_limit": MULE_MEM_LIMIT,
+        "pids_limit": MULE_PIDS_LIMIT,
     }
     if sysctls:
         run_kwargs["sysctls"] = sysctls

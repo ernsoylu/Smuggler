@@ -18,7 +18,7 @@ product Smuggler isn't.
 | 1 — Correctness bugs | **Done** | `8beced4` (backend), `62785d1` (frontend) |
 | 8 — Docs & hygiene | **Done** | `8beced4` |
 | 2 — Crypto hardening | **Done** — scrypt + MultiFernet rotation | `0d46579` |
-| 3 — Container/network | Not started — next | |
+| 3 — Container/network | **3.1, 3.3, 3.4 done**; 3.2 (socket proxy) remaining | `ed6fc40`, `HEAD` |
 | 4 — Truthful deploy state | Not started | |
 | 5 — Supply chain & CI | Not started | |
 | 6 — UX gaps | Not started | |
