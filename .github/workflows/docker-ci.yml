@@ -20,7 +20,7 @@ jobs:
           - worker_image/Dockerfile
           - worker_image_ovpn/Dockerfile
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: hadolint
         uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
         with:
@@ -48,7 +48,7 @@ jobs:
             context: worker_image_ovpn
             file: worker_image_ovpn/Dockerfile
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -67,12 +67,13 @@ jobs:
     name: Validate docker-compose
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Render & validate compose config
         run: docker compose config --quiet
         env:
           # Compose substitutes these; provide harmless defaults so `config`
-          # doesn't warn about unset variables during validation.
+          # doesn't warn about unset variables during validation. SMG_API_BIND
+          # is no longer among them — compose sets it explicitly now.
           SMG_SECRET_KEY: ""
+          SMG_SECRET_SALT: ""
           SMG_API_TOKEN: ""
-          SMG_API_BIND: "127.0.0.1:55555"

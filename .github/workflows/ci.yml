@@ -29,8 +29,9 @@ jobs:
       desktop: ${{ steps.filter.outputs.desktop }}
       docker: ${{ steps.filter.outputs.docker }}
       shell: ${{ steps.filter.outputs.shell }}
+      security: ${{ steps.filter.outputs.security }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3
         id: filter
         with:
@@ -63,6 +64,19 @@ jobs:
             shell:
               - '**/*.sh'
               - '.github/workflows/shell-ci.yml'
+              - '.github/workflows/ci.yml'
+            security:
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'requirements.txt'
+              - 'web/package.json'
+              - 'web/package-lock.json'
+              - 'docker/**'
+              - 'worker_image/**'
+              - 'worker_image_ovpn/**'
+              - 'docker-compose.yml'
+              - '.trivyignore'
+              - '.github/workflows/security-ci.yml'
               - '.github/workflows/ci.yml'
 
   python:
@@ -100,24 +114,33 @@ jobs:
       contents: read
     uses: ./.github/workflows/shell-ci.yml
 
+  security:
+    needs: changes
+    if: needs.changes.outputs.security == 'true'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/security-ci.yml
+
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
     if: always()
     permissions: {}
-    needs: [changes, python, frontend, desktop, docker, shell]
+    needs: [changes, python, frontend, desktop, docker, shell, security]
     steps:
       - name: Verify no triggered job failed
         run: |
           echo "changes=${{ needs.changes.result }}"
           echo "python=${{ needs.python.result }}   frontend=${{ needs.frontend.result }}"
           echo "desktop=${{ needs.desktop.result }} docker=${{ needs.docker.result }} shell=${{ needs.shell.result }}"
+          echo "security=${{ needs.security.result }}"
           for r in "${{ needs.changes.result }}" \
                    "${{ needs.python.result }}" \
                    "${{ needs.frontend.result }}" \
                    "${{ needs.desktop.result }}" \
                    "${{ needs.docker.result }}" \
-                   "${{ needs.shell.result }}"; do
+                   "${{ needs.shell.result }}" \
+                   "${{ needs.security.result }}"; do
             # Allowed outcomes: success (ran & passed) or skipped (area unchanged).
             if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
               echo "::error::A required CI job did not pass (result: $r)."

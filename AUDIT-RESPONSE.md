@@ -20,7 +20,7 @@ product Smuggler isn't.
 | 2 — Crypto hardening | **Done** — scrypt + MultiFernet rotation | `0d46579` |
 | 3 — Container/network | **Done** (3.1 networking, 3.2 socket proxy, 3.3 least-privilege, 3.4 image hygiene) | `ed6fc40`, `cff21d5`, `HEAD` |
 | 4 — Truthful deploy state | **Done** — async deploy + real mule-reported phases | `HEAD` |
-| 5 — Supply chain & CI | Not started | |
+| 5 — Supply chain & CI | **Done** — scanners, SBOM, Dependabot, action pinning | `HEAD` |
 | 6 — UX gaps | Not started | |
 | 7 — Decisions | Open | |
 

@@ -44,7 +44,10 @@ The fastest way to run Smuggler is via the included lifecycle script:
   - **Desktop CI**: Java 21 / Gradle build and Shadow JAR artifact.
   - **Docker CI**: `hadolint` + cached build of all 4 images + `docker compose config` validation.
   - **Shell CI**: `shellcheck` over the mule kill-switch / leak-protection scripts and setup scripts.
+  - **Security CI**: `pip-audit` on the resolved Python lock file, `npm audit` (production advisories fail; build-tooling advisories are reported), Trivy CVE scans of all four images, Trivy IaC misconfiguration scanning, and a CycloneDX SBOM artifact. Also runs weekly on a schedule, because a dependency advisory can land without anyone touching the code.
   - **SonarQube Cloud**: analysis + quality gate (auto-skips until `SONAR_TOKEN` is set).
+
+  Dependabot keeps Python, npm, Gradle, GitHub Actions and the digest-pinned base images current — scanning reports a CVE, Dependabot is what closes it. All actions are SHA-pinned.
 
   A single `ci.yml` orchestrator detects which areas a change touches and invokes only those reusable workflows, ending in one always-running **CI Gate** job.
 
