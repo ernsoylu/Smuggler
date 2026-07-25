@@ -16,7 +16,7 @@ vulnerability.
   never fully established.
 - **DNS leaks** that reveal what a mule is resolving to the host's ISP/resolver.
 - **IPv6 leaks** around an IPv4-only tunnel.
-- **Unauthenticated control** of the stack (which holds the Docker socket).
+- **Unauthenticated control** of the stack (which can drive Docker).
 - **Secret exposure at rest** — WireGuard private keys, OpenVPN credentials.
 
 **Trust assumptions**
@@ -102,7 +102,7 @@ This key encrypts every stored VPN secret.
 ### 2. The API token (enabled by default)
 
 `setup.sh` generates `SMG_API_TOKEN` into `.env` and leaves it **active** — the
-API holds the Docker socket, so authenticating it is the safer default.
+API can drive Docker, so authenticating it is the safer default.
 `docker compose up` passes it to both the API and the UI, so the browser UI keeps
 working via nginx injection. For the desktop client, export the same value:
 

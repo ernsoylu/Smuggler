@@ -19,7 +19,7 @@
 - **Private Key Safety**: Credentials and keys are never stored on disk inside the containers beyond the handshake phase, and VPN config bodies + OpenVPN passwords are encrypted at rest (Fernet, keyed off `SMG_SECRET_KEY`).
 
 ## Security & Access
-- **Loopback by default**: Compose publishes the API to `127.0.0.1:55555` and the UI to `127.0.0.1:8887`. Neither runs in the host's network namespace — they sit on Docker bridge networks, with aria2 RPC carried over an `internal` network that has no route off the host. The API holds the Docker socket, so it must not be exposed to the LAN; widen the published port only behind an authenticated reverse proxy.
+- **Loopback by default**: Compose publishes the API to `127.0.0.1:55555` and the UI to `127.0.0.1:8887`. Neither runs in the host's network namespace — they sit on Docker bridge networks, with aria2 RPC carried over an `internal` network that has no route off the host. The API can drive Docker through a filtered socket proxy (it no longer mounts the socket itself), so it must still not be exposed to the LAN; widen the published port only behind an authenticated reverse proxy.
 - **Optional API token**: Set `SMG_API_TOKEN` in `.env` to require an `X-Smuggler-Token` header on every `/api/*` call. The web UI injects it automatically; the desktop client reads it from the environment.
 - **CSRF-guarded**: State-changing requests carrying a browser `Origin` outside the allow-list are refused.
 - **Least privilege**: WireGuard mules run with `NET_ADMIN` only (no `CAP_SYS_MODULE`) — `setup.sh` loads the `wireguard` module on the host instead.
