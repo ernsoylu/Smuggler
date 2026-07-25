@@ -35,9 +35,21 @@ dev = [
 target-version = "py312"
 line-length = 100
 extend-exclude = [".venv", "web"]
-# Lint rules are ruff's default set (pyflakes F + pycodestyle E4/E7/E9): unused
-# imports, undefined names, and real syntax/style errors. Kept conservative so
-# the gate is meaningful rather than noisy; expand `lint.select` over time.
+
+[tool.ruff.lint]
+# Pinned explicitly rather than relying on ruff's defaults.
+#
+# This *is* ruff's historical default set — pyflakes F plus pycodestyle
+# E4/E7/E9: unused imports, undefined names, and real syntax/style errors. It
+# is spelled out because "the default" is not a stable contract: ruff 0.16
+# widened its defaults substantially, which turned a clean tree into 51
+# findings on a routine patch bump and would have silently changed the gate
+# without anyone choosing to.
+#
+# Kept deliberately conservative so a failure means something. Widen this list
+# when you want more coverage — as a decision, not as a side effect of an
+# upgrade.
+select = ["E4", "E7", "E9", "F"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["cli", "api"]
