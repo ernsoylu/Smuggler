@@ -20,9 +20,9 @@
 
 ## Security & Access
 - **Loopback by default**: Compose publishes the API to `127.0.0.1:55555` and the UI to `127.0.0.1:8887`. Neither runs in the host's network namespace — they sit on Docker bridge networks, with aria2 RPC carried over an `internal` network that has no route off the host. The API can drive Docker through a filtered socket proxy (it no longer mounts the socket itself), so it must still not be exposed to the LAN; widen the published port only behind an authenticated reverse proxy.
-- **Optional API token**: Set `SMG_API_TOKEN` in `.env` to require an `X-Smuggler-Token` header on every `/api/*` call. The web UI injects it automatically; the desktop client reads it from the environment.
+- **API token (on by default)**: `setup.sh` generates `SMG_API_TOKEN` into `.env`, requiring an `X-Smuggler-Token` header on every `/api/*` call. The web UI injects it automatically; the desktop client reads it from the environment. It is **mandatory** under Docker Compose, where mules share a network with the API.
 - **CSRF-guarded**: State-changing requests carrying a browser `Origin` outside the allow-list are refused.
-- **Least privilege**: WireGuard mules run with `NET_ADMIN` only (no `CAP_SYS_MODULE`) — `setup.sh` loads the `wireguard` module on the host instead.
+- **Least privilege**: Mules start from `cap_drop: ALL` and add back only the five capabilities they need (no `CAP_SYS_MODULE`, no `NET_RAW`), run with `no-new-privileges` and memory/PID ceilings, and drop aria2 to your uid so downloads are not root-owned. `setup.sh` loads the `wireguard` module on the host instead.
 
 ## Quick Start (Docker Compose)
 The fastest way to run Smuggler is via the included lifecycle script:
@@ -37,7 +37,7 @@ The fastest way to run Smuggler is via the included lifecycle script:
 ## Development
 - **Local Debug**: `./start.sh debug` (Vite + Flask with hot-reload).
 - **Setup**: `./setup.sh` (installs deps and builds all 4 images).
-- **Tests**: `uv run pytest tests/` (315 passing tests).
+- **Tests**: `uv run pytest tests/` (347 passing tests).
 - **CI/CD**: Path-filtered GitHub Actions workflows (least-privilege permissions, concurrency-cancelled, dependency-cached):
   - **Python CI**: `ruff` lint + `pytest` matrix (3.12, 3.13) with coverage.
   - **Frontend CI**: `tsc` type-check, ESLint, `vitest`, and production build.
