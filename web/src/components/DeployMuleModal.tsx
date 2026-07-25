@@ -1,3 +1,4 @@
+import { useModalA11y, modalA11yProps } from '../hooks/useModalA11y';
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { getConfigs } from '../api/client';
@@ -13,6 +14,8 @@ export function DeployMuleModal({ onClose }: Readonly<Props>) {
   const [deployingId, setDeployingId] = useState<number | null>(null);
   const [error, setError] = useState('');
   const { start } = useDeployments();
+  // Deployment is irreversible once started, so Escape is disabled while it runs.
+  const dialogRef = useModalA11y(deployingId ? undefined : onClose);
 
   const { data: configs = [], isLoading } = useQuery({
     queryKey: ['configs'],
@@ -50,10 +53,14 @@ export function DeployMuleModal({ onClose }: Readonly<Props>) {
       />
 
       {/* Modal */}
-      <div className="relative bg-neutral-900 border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[80vh] overflow-hidden">
+      <div
+        ref={dialogRef}
+        {...modalA11yProps}
+        aria-labelledby="deploy-mule-title"
+        className="relative bg-neutral-900 border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[80vh] overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-white/5">
-          <h2 className="text-white font-bold text-xl tracking-tight flex items-center gap-2">
+          <h2 id="deploy-mule-title" className="text-white font-bold text-xl tracking-tight flex items-center gap-2">
             <Rocket size={22} className="text-blue-400" /> Deploy Mule
           </h2>
           <button

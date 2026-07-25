@@ -1,3 +1,4 @@
+import { useModalA11y, modalA11yProps } from '../hooks/useModalA11y';
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getMules, addMagnet, addTorrentFile } from '../api/client';
@@ -41,6 +42,8 @@ export function AddTorrentModal({ onClose }: Readonly<Props>) {
     },
     onError: (e: Error) => setError(e.message),
   });
+  // Escape is disabled mid-submit so a stray keypress cannot orphan the request.
+  const dialogRef = useModalA11y(add.isPending ? undefined : onClose);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -53,9 +56,13 @@ export function AddTorrentModal({ onClose }: Readonly<Props>) {
       />
       
       {/* Modal */}
-      <div className="relative bg-neutral-900 border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl flex flex-col gap-6 animate-in fade-in zoom-in-95 duration-200">
+      <div
+        ref={dialogRef}
+        {...modalA11yProps}
+        aria-labelledby="add-torrent-title"
+        className="relative bg-neutral-900 border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl flex flex-col gap-6 animate-in fade-in zoom-in-95 duration-200">
         <div className="flex items-center justify-between">
-          <h2 className="text-white font-bold text-xl tracking-tight">Add Torrent</h2>
+          <h2 id="add-torrent-title" className="text-white font-bold text-xl tracking-tight">Add Torrent</h2>
           <button 
             className="p-1.5 text-neutral-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors" 
             onClick={onClose}
@@ -117,7 +124,7 @@ export function AddTorrentModal({ onClose }: Readonly<Props>) {
                 {file ? (
                   <p className="text-sm font-medium text-blue-400">{file.name}</p>
                 ) : (
-                  <p className="text-sm text-neutral-500">Click or drag a .torrent file here</p>
+                  <p className="text-sm text-neutral-500">Click to choose a .torrent file — or drop one anywhere</p>
                 )}
               </label>
             </>

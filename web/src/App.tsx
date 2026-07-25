@@ -7,6 +7,8 @@ import { StatusFooter } from './components/StatusFooter';
 import { NotificationBell } from './components/NotificationBell';
 import { NotificationProvider } from './context/NotificationContext';
 import { DeploymentProvider } from './context/DeploymentContext';
+import { TorrentDropZone } from './components/TorrentDropZone';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { LayoutDashboard, Server, Settings, FileKey2 } from 'lucide-react';
 
 type Page = 'torrents' | 'mules' | 'configs' | 'settings';
@@ -61,14 +63,20 @@ export default function App() {
 
       {/* Page content — pb-14 to clear the fixed footer */}
       <main className="flex-1 w-full max-w-7xl mx-auto pb-14">
+        {/* Keyed by page so switching tabs clears a previous page's error. */}
+        <ErrorBoundary key={page}>
         {page === 'torrents' && <TorrentsPage />}
         {page === 'mules'  && <MulesPage />}
         {page === 'configs'  && <ConfigsPage />}
         {page === 'settings' && <SettingsPage />}
+        </ErrorBoundary>
       </main>
 
       {/* Persistent status bar + graph footer */}
       <StatusFooter />
+
+      {/* Window-wide .torrent drop target */}
+      <TorrentDropZone />
     </div>
     </DeploymentProvider>
     </NotificationProvider>

@@ -21,7 +21,7 @@ product Smuggler isn't.
 | 3 — Container/network | **Done** (3.1 networking, 3.2 socket proxy, 3.3 least-privilege, 3.4 image hygiene) | `ed6fc40`, `cff21d5`, `HEAD` |
 | 4 — Truthful deploy state | **Done** — async deploy + real mule-reported phases | `HEAD` |
 | 5 — Supply chain & CI | **Done** — scanners, SBOM, Dependabot, action pinning | `HEAD` |
-| 6 — UX gaps | Not started | |
+| 6 — UX gaps | **Partial** — items 1–6 done; routing, theme, palette, SSE, categories, sequential priority outstanding | `HEAD` |
 | 7 — Decisions | Open | |
 
 Phase 0 was verified with a real WireGuard config: the mule's exit IP

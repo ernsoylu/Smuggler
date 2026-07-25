@@ -466,9 +466,11 @@ function OptionsTab({ torrent, isVisible }: Readonly<{ torrent: Torrent; isVisib
 
 interface Props {
   torrent: Torrent;
+  selected?: boolean;
+  onToggleSelected?: () => void;
 }
 
-export function TorrentRow({ torrent }: Readonly<Props>) {
+export function TorrentRow({ torrent, selected = false, onToggleSelected }: Readonly<Props>) {
   const qc = useQueryClient();
   const [showConfirm, setShowConfirm] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -501,7 +503,17 @@ export function TorrentRow({ torrent }: Readonly<Props>) {
 
   return (
     <React.Fragment>
-      <tr className="group hover:bg-white/[0.02] transition-colors">
+      <tr className={`group transition-colors ${selected ? 'bg-blue-500/[0.07]' : 'hover:bg-white/[0.02]'}`}>
+        {/* Bulk selection */}
+        <td className="pl-6 pr-2 py-4 w-10">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelected}
+            aria-label={`Select ${torrent.name}`}
+            className="w-4 h-4 rounded accent-blue-600 cursor-pointer"
+          />
+        </td>
         {/* Name */}
         <td className="px-6 py-4 max-w-[260px] relative">
           <div className={`absolute left-0 top-0 bottom-0 w-1 ${v.line} opacity-0 group-hover:opacity-100 transition-opacity rounded-r-sm`} />
@@ -618,7 +630,7 @@ export function TorrentRow({ torrent }: Readonly<Props>) {
       {/* Expanded Detail Panel with Tabs */}
       {isExpanded && (
         <tr className="bg-neutral-950/40">
-          <td colSpan={9} className="p-0 border-t border-white/5 shadow-inner">
+          <td colSpan={10} className="p-0 border-t border-white/5 shadow-inner">
             {/* Tab bar */}
             <div className="flex items-center gap-1 px-14 pt-3 border-b border-white/5">
               {TABS.map(tab => (

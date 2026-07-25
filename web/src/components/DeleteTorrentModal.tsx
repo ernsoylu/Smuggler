@@ -1,3 +1,4 @@
+import { useModalA11y, modalA11yProps } from '../hooks/useModalA11y';
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Trash2, X } from 'lucide-react';
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export function DeleteTorrentModal({ isOpen, onClose, onConfirm, isPending, torrentName }: Readonly<Props>) {
+  const dialogRef = useModalA11y(isPending ? undefined : onClose, isOpen);
   const [deleteFiles, setDeleteFiles] = useState(false);
 
   // Reset the checkbox when the modal (re)opens — the render-phase "previous
@@ -35,14 +37,18 @@ export function DeleteTorrentModal({ isOpen, onClose, onConfirm, isPending, torr
       />
 
       {/* Modal */}
-      <div className="relative bg-neutral-900 border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl flex flex-col gap-6">
+      <div
+        ref={dialogRef}
+        {...modalA11yProps}
+        aria-labelledby="delete-torrent-title"
+        className="relative bg-neutral-900 border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl flex flex-col gap-6">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center text-red-500 shrink-0">
               <Trash2 size={20} />
             </div>
             <div>
-              <h2 className="text-white font-bold text-lg tracking-tight">Delete Torrent</h2>
+              <h2 id="delete-torrent-title" className="text-white font-bold text-lg tracking-tight">Delete Torrent</h2>
               <p className="text-xs text-neutral-400 mt-0.5">Are you sure you want to remove this?</p>
             </div>
           </div>
