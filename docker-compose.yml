@@ -104,8 +104,9 @@ services:
     networks:
       - smuggler-net
     ports:
-      # nginx listens on :80 in the container; loopback-only on the host.
-      - "127.0.0.1:8887:80"
+      # nginx listens on :8080 in the container (unprivileged image);
+      # loopback-only on the host.
+      - "127.0.0.1:8887:8080"
     environment:
       # Injected into the proxied X-Smuggler-Token header so the same-origin UI
       # authenticates to a token-gated API. Only SMG_* vars are substituted.

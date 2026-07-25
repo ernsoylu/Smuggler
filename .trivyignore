@@ -23,7 +23,7 @@
 #     and talk to the Docker socket proxy. Worth revisiting: it is the one image
 #     where a non-root USER is plausible, tracked in AUDIT-RESPONSE.md.
 #
-#   docker/Dockerfile.web — stock nginx image; its entrypoint drops to the
-#     nginx user for workers after binding.
+#   docker/Dockerfile.web — no longer applies: it uses nginx-unprivileged and
+#     runs as uid 101. Listed only because api/ and the mules still need root.
 DS002
 DS-0002

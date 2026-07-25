@@ -6,7 +6,9 @@ server {
     # it to 127.0.0.1:8887 on the host. The API this proxies to holds the Docker
     # socket, so the UI (and therefore the control plane) must not be reachable
     # from the LAN. Front it with an authenticated reverse proxy for remote access.
-    listen 80;
+    # 8080, not 80: the image runs unprivileged (uid 101) and cannot bind
+    # a port below 1024.
+    listen 8080;
     server_name _;
 
     root /usr/share/nginx/html;
