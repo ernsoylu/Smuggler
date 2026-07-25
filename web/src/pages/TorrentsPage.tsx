@@ -2,13 +2,14 @@ import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getAllTorrents, pauseTorrent, resumeTorrent, removeTorrent } from '../api/client';
 import { TorrentRow } from '../components/TorrentRow';
-import { AddTorrentModal } from '../components/AddTorrentModal';
 import {
   filterTorrents, sortTorrents, nextSort, paginate, totalPages, statusCounts,
-  torrentKey, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE,
+  torrentKey, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE, categoriesOf,
+  ALL_CATEGORIES, UNCATEGORISED,
   type FilterStatus, type SortKey, type SortState,
 } from '../lib/torrentList';
-import { Plus, Search, X, ArrowUp, ArrowDown, Pause, Play, Trash2 } from 'lucide-react';
+import { useUiActions } from '../context/UiActionsContext';
+import { Plus, Search, X, ArrowUp, ArrowDown, Pause, Play, Trash2, Tag } from 'lucide-react';
 
 const COLUMNS: { key: SortKey | null; label: string; align?: string }[] = [
   { key: 'name',     label: 'Name' },
@@ -24,12 +25,13 @@ const COLUMNS: { key: SortKey | null; label: string; align?: string }[] = [
 
 export function TorrentsPage() {
   const qc = useQueryClient();
-  const [showModal, setShowModal] = useState(false);
+  const { openAddTorrent } = useUiActions();
   const [filter, setFilter] = useState<FilterStatus>('all');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortState | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+  const [category, setCategory] = useState<string>(ALL_CATEGORIES);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const { data: torrents = [], isLoading } = useQuery({
@@ -40,8 +42,13 @@ export function TorrentsPage() {
 
   const counts = useMemo(() => statusCounts(torrents), [torrents]);
   const visible = useMemo(
-    () => sortTorrents(filterTorrents(torrents, filter, search), sort),
-    [torrents, filter, search, sort],
+    () => sortTorrents(filterTorrents(torrents, filter, search, category), sort),
+    [torrents, filter, search, category, sort],
+  );
+  const categories = useMemo(() => categoriesOf(torrents), [torrents]);
+  const hasUncategorised = useMemo(
+    () => torrents.some(x => !(x.category ?? '').trim()),
+    [torrents],
   );
   const pageCount = totalPages(visible.length, pageSize);
   const rows = paginate(visible, page, pageSize);
@@ -51,6 +58,7 @@ export function TorrentsPage() {
   const handleSearch = (q: string) => { setSearch(q); resetPage(); };
   const handleSort = (key: SortKey) => { setSort(s => nextSort(s, key)); resetPage(); };
   const handlePageSize = (n: number) => { setPageSize(n); resetPage(); };
+  const handleCategory = (c: string) => { setCategory(c); resetPage(); };
 
   // ── Bulk selection ──────────────────────────────────────────────────────────
   // Selection is keyed by mule:gid and intersected with what is currently
@@ -110,7 +118,7 @@ export function TorrentsPage() {
         </div>
         <button
           className="flex items-center gap-2 py-2 px-5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-sm text-white font-semibold shadow-lg shadow-blue-500/20 transition-all active:scale-95"
-          onClick={() => setShowModal(true)}
+          onClick={openAddTorrent}
         >
           <Plus size={18} strokeWidth={2.5}/> Add Torrent
         </button>
@@ -140,7 +148,24 @@ export function TorrentsPage() {
             ))}
           </div>
 
-          <div className="relative md:ml-auto w-full md:w-72">
+          {(categories.length > 0 || category !== ALL_CATEGORIES) && (
+            <label className="flex items-center gap-2 md:ml-auto">
+              <Tag size={14} className="text-neutral-500 shrink-0" />
+              <span className="sr-only">Filter by category</span>
+              <select
+                aria-label="Filter by category"
+                value={category}
+                onChange={e => handleCategory(e.target.value)}
+                className="bg-neutral-900/50 border border-white/5 rounded-xl text-sm text-neutral-200 py-2 pl-3 pr-8 focus:outline-none focus:border-blue-500/50"
+              >
+                <option value={ALL_CATEGORIES}>All categories</option>
+                {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                {hasUncategorised && <option value={UNCATEGORISED}>Uncategorised</option>}
+              </select>
+            </label>
+          )}
+
+          <div className={`relative w-full md:w-72 ${categories.length > 0 || category !== ALL_CATEGORIES ? '' : 'md:ml-auto'}`}>
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
             <input
               type="search"
@@ -261,11 +286,17 @@ export function TorrentsPage() {
                   <tr>
                     <td colSpan={10} className="px-6 py-12 text-center">
                        <p className="text-neutral-400 font-medium">
-                         {search
-                           ? `No torrents match "${search}".`
-                           : filter === 'all'
+                         {(() => {
+                           if (search) return `No torrents match "${search}".`;
+                           if (category !== ALL_CATEGORIES) {
+                             return category
+                               ? `No torrents in "${category}".`
+                               : 'No uncategorised torrents.';
+                           }
+                           return filter === 'all'
                              ? 'No torrents are currently added.'
-                             : `No ${filter} torrents found.`}
+                             : `No ${filter} torrents found.`;
+                         })()}
                        </p>
                     </td>
                   </tr>
@@ -326,7 +357,6 @@ export function TorrentsPage() {
           </div>
         </div>
       </div>
-      {showModal && <AddTorrentModal onClose={() => setShowModal(false)} />}
     </div>
   );
 }

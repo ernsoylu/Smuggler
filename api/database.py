@@ -42,6 +42,17 @@ CREATE TABLE IF NOT EXISTS vpn_configs (
     ovpn_password  TEXT,
     created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 );
+
+-- User-assigned category per torrent.
+--
+-- Keyed by info_hash, not gid: a gid is assigned by one mule's aria2 instance
+-- and changes when the watchdog evacuates a torrent to a different mule, which
+-- would silently orphan the label. info_hash follows the torrent.
+CREATE TABLE IF NOT EXISTS torrent_categories (
+    info_hash  TEXT PRIMARY KEY,
+    category   TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 # Migrations for existing databases that pre-date new columns
@@ -199,6 +210,40 @@ def _rekey_legacy_secrets(conn: sqlite3.Connection) -> None:
         rotated += 1
     if rotated:
         log.info("init_db: re-keyed %d config(s) from SHA-256 onto scrypt", rotated)
+
+
+# ── Torrent categories ────────────────────────────────────────────────────────
+
+def get_torrent_categories() -> dict[str, str]:
+    """All ``info_hash -> category`` assignments.
+
+    Returned whole rather than per-torrent: the list endpoint fans out over
+    every mule concurrently, and one query beats N lookups inside that fan-out.
+    """
+    conn = _get_conn()
+    rows = conn.execute("SELECT info_hash, category FROM torrent_categories").fetchall()
+    conn.close()
+    return {r["info_hash"]: r["category"] for r in rows}
+
+
+def set_torrent_category(info_hash: str, category: str) -> None:
+    """Assign a category, or clear it when *category* is empty."""
+    conn = _get_conn()
+    cleaned = category.strip()
+    if cleaned:
+        conn.execute(
+            "INSERT INTO torrent_categories (info_hash, category, updated_at) "
+            "VALUES (?, ?, datetime('now')) "
+            "ON CONFLICT(info_hash) DO UPDATE SET category=excluded.category, "
+            "updated_at=excluded.updated_at",
+            (info_hash, cleaned),
+        )
+    else:
+        conn.execute("DELETE FROM torrent_categories WHERE info_hash = ?", (info_hash,))
+    _bump_state_version(conn)
+    conn.commit()
+    conn.close()
+    log.info("set_torrent_category: hash=%s category=%s", log_safe(info_hash), log_safe(cleaned) or "(cleared)")
 
 
 # ── Settings ──────────────────────────────────────────────────────────────────

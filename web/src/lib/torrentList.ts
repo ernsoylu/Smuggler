@@ -37,10 +37,34 @@ export function filterTorrents(
   torrents: Torrent[],
   status: FilterStatus,
   query: string,
+  category: string = ALL_CATEGORIES,
 ): Torrent[] {
   return torrents.filter(
-    t => (status === 'all' || t.status === status) && matchesSearch(t, query),
+    t =>
+      (status === 'all' || t.status === status) &&
+      matchesCategory(t, category) &&
+      matchesSearch(t, query),
   );
+}
+
+/** Sentinel for "don't filter by category" — distinct from the empty string,
+ *  which is a real value meaning "uncategorised". */
+export const ALL_CATEGORIES = '\u0000all';
+export const UNCATEGORISED = '';
+
+export function matchesCategory(torrent: Torrent, category: string): boolean {
+  if (category === ALL_CATEGORIES) return true;
+  return (torrent.category ?? '') === category;
+}
+
+/** Distinct categories present, sorted, excluding the uncategorised bucket. */
+export function categoriesOf(torrents: Torrent[]): string[] {
+  const set = new Set<string>();
+  for (const t of torrents) {
+    const c = (t.category ?? '').trim();
+    if (c) set.add(c);
+  }
+  return [...set].sort((a, b) => a.localeCompare(b));
 }
 
 /** Value a column sorts on. Strings compare with localeCompare, numbers numerically. */

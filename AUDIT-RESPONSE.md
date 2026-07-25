@@ -21,8 +21,19 @@ product Smuggler isn't.
 | 3 — Container/network | **Done** (3.1 networking, 3.2 socket proxy, 3.3 least-privilege, 3.4 image hygiene) | `ed6fc40`, `cff21d5`, `HEAD` |
 | 4 — Truthful deploy state | **Done** — async deploy + real mule-reported phases | `HEAD` |
 | 5 — Supply chain & CI | **Done** — scanners, SBOM, Dependabot, action pinning | `HEAD` |
-| 6 — UX gaps | **Partial** — items 1–6 done; routing, theme, palette, SSE, categories, sequential priority outstanding | `HEAD` |
+| 6 — UX gaps | **Done** — one deliberate deviation: SSE not built, see note below | `66b7c97`, `HEAD` |
 | 7 — Decisions | Open | |
+
+**Phase 6 deviation — SSE.** The plan called for replacing the 2-second polling
+with server-sent events. Not done, deliberately. TanStack Query already gates
+`refetchInterval` on window focus (`queryObserver.js:215`:
+`refetchIntervalInBackground || focusManager.isFocused()`), so polling stops
+whenever the tab is not focused — the waste the critique identified is largely
+already absent. Against that, SSE on the current `gunicorn --workers 1
+--threads 8` would hold one thread per open tab for the life of the connection,
+so a handful of tabs could starve the pool that serves ordinary requests. That
+is a real regression risk traded for latency nobody can perceive on localhost.
+Revisit only alongside an async worker class.
 
 Phase 0 was verified with a real WireGuard config: the mule's exit IP
 differs from the host's, the dual probe matches, kill-switch and RPC-ingress

@@ -3,6 +3,7 @@ import type { Torrent, Mule } from '../api/types'
 import {
   filterTorrents, matchesSearch, sortTorrents, nextSort, paginate, totalPages,
   statusCounts, torrentKey, leastLoadedMule, DEFAULT_PAGE_SIZE,
+  categoriesOf, ALL_CATEGORIES, UNCATEGORISED,
 } from './torrentList'
 
 const t = (over: Partial<Torrent> = {}): Torrent => ({
@@ -12,7 +13,7 @@ const t = (over: Partial<Torrent> = {}): Torrent => ({
   connections: 7, info_hash: 'h', is_seed: false, save_path: '/downloads',
   piece_length: 1, num_pieces: 1, eta: 60, ratio: 0.5, tracker: '',
   comment: '', creation_date: 0, mode: '', error_code: '', error_message: '',
-  files: [], is_metadata: false,
+  files: [], is_metadata: false, category: '',
   ...over,
 }) as Torrent
 
@@ -168,5 +169,42 @@ describe('leastLoadedMule', () => {
 
   it('ignores torrents belonging to unknown mules', () => {
     expect(leastLoadedMule([m('a')], [t({ mule: 'ghost' })])?.name).toBe('a')
+  })
+})
+
+describe('category filtering', () => {
+  const list = [
+    t({ gid: '1', name: 'a', category: 'Linux' }),
+    t({ gid: '2', name: 'b', category: 'Music' }),
+    t({ gid: '3', name: 'c', category: '' }),
+  ]
+
+  it('ALL_CATEGORIES is a sentinel distinct from uncategorised', () => {
+    expect(ALL_CATEGORIES).not.toBe(UNCATEGORISED)
+    expect(filterTorrents(list, 'all', '', ALL_CATEGORIES)).toHaveLength(3)
+  })
+
+  it('filters to one category', () => {
+    expect(filterTorrents(list, 'all', '', 'Linux').map(x => x.gid)).toEqual(['1'])
+  })
+
+  it('the empty string selects only uncategorised torrents', () => {
+    expect(filterTorrents(list, 'all', '', UNCATEGORISED).map(x => x.gid)).toEqual(['3'])
+  })
+
+  it('combines with status and search', () => {
+    const mixed = [
+      t({ gid: '1', name: 'alpha', category: 'Linux', status: 'active' }),
+      t({ gid: '2', name: 'alpine', category: 'Linux', status: 'paused' }),
+    ]
+    expect(filterTorrents(mixed, 'paused', 'alp', 'Linux').map(x => x.gid)).toEqual(['2'])
+  })
+
+  it('categoriesOf lists distinct categories, sorted, without the blank', () => {
+    expect(categoriesOf(list)).toEqual(['Linux', 'Music'])
+  })
+
+  it('categoriesOf tolerates torrents with no category field', () => {
+    expect(categoriesOf([t({ category: undefined as unknown as string })])).toEqual([])
   })
 })

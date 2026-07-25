@@ -73,6 +73,8 @@ export interface Torrent {
   mode: string;
   error_code: string;
   error_message: string;
+  /** User-assigned category, or '' when unset. */
+  category: string;
   files: TorrentFile[];
   is_metadata?: boolean;
 }
@@ -92,6 +94,9 @@ export interface TorrentOptions {
   max_download_speed: number;
   max_upload_speed: number;
   max_connections: number;
+  /** aria2 bt-prioritize-piece=head,tail — fetch the ends first so a partial
+   *  download is previewable. aria2 has no true sequential mode. */
+  prioritize_first_last: boolean;
 }
 
 export interface GlobalStats {

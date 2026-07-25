@@ -710,3 +710,60 @@ class TestSafeSubdir:
 
     def test_length_is_bounded(self):
         assert len(_safe_subdir("x" * 500)) <= 180
+
+
+class TestTorrentCategories:
+    """Categories are keyed by info_hash so they survive mule evacuation."""
+
+    def test_set_and_read_back(self, tmp_path, monkeypatch):
+        import api.database as db
+        monkeypatch.setenv("SMG_SECRET_KEY", "cat-test-secret-key")
+        monkeypatch.setattr(db, "DB_PATH", tmp_path / "cat.db")
+        db.init_db()
+        db.set_torrent_category("abc123", "Linux ISOs")
+        assert db.get_torrent_categories() == {"abc123": "Linux ISOs"}
+
+    def test_reassign_overwrites(self, tmp_path, monkeypatch):
+        import api.database as db
+        monkeypatch.setattr(db, "DB_PATH", tmp_path / "cat.db")
+        db.init_db()
+        db.set_torrent_category("abc123", "First")
+        db.set_torrent_category("abc123", "Second")
+        assert db.get_torrent_categories()["abc123"] == "Second"
+
+    def test_empty_category_clears_the_row(self, tmp_path, monkeypatch):
+        import api.database as db
+        monkeypatch.setattr(db, "DB_PATH", tmp_path / "cat.db")
+        db.init_db()
+        db.set_torrent_category("abc123", "Temp")
+        db.set_torrent_category("abc123", "   ")
+        assert db.get_torrent_categories() == {}
+
+    def test_whitespace_is_trimmed(self, tmp_path, monkeypatch):
+        import api.database as db
+        monkeypatch.setattr(db, "DB_PATH", tmp_path / "cat.db")
+        db.init_db()
+        db.set_torrent_category("h", "  Movies  ")
+        assert db.get_torrent_categories()["h"] == "Movies"
+
+
+class TestSetCategoryEndpoint:
+    def test_rejects_overlong_category(self, client):
+        r = client.put("/api/torrents/category/abc", json={"category": "x" * 65})
+        assert r.status_code == 400
+
+    def test_rejects_unsupported_characters(self, client):
+        r = client.put("/api/torrents/category/abc", json={"category": "drop<script>"})
+        assert r.status_code == 400
+
+    def test_accepts_a_normal_category(self, client):
+        with patch("api.torrents.set_torrent_category") as setter:
+            r = client.put("/api/torrents/category/abc", json={"category": "Linux ISOs"})
+        assert r.status_code == 200
+        setter.assert_called_once_with("abc", "Linux ISOs")
+
+    def test_empty_category_is_allowed_and_clears(self, client):
+        with patch("api.torrents.set_torrent_category") as setter:
+            r = client.put("/api/torrents/category/abc", json={"category": ""})
+        assert r.status_code == 200
+        setter.assert_called_once_with("abc", "")

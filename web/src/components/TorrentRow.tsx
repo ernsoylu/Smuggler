@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   removeTorrent, pauseTorrent, resumeTorrent,
   getTorrentPeers, getTorrentOptions, setTorrentOptions, setFileSelection,
+  setTorrentCategory,
 } from '../api/client';
 import type { Torrent, Peer, TorrentOptions } from '../api/types';
 import {
@@ -132,8 +133,51 @@ function StatusTab({ torrent }: Readonly<{ torrent: Torrent }>) {
   );
 }
 
+function CategoryEditor({ torrent }: Readonly<{ torrent: Torrent }>) {
+  const qc = useQueryClient();
+  const [value, setValue] = useState(torrent.category ?? '');
+  const save = useMutation({
+    mutationFn: () => setTorrentCategory(torrent.info_hash, value.trim()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['torrents'] }),
+  });
+  const dirty = value.trim() !== (torrent.category ?? '');
+
+  return (
+    <div className="flex items-end gap-2">
+      <div className="flex-1">
+        <label htmlFor={`cat-${torrent.gid}`} className="text-neutral-500 font-semibold uppercase tracking-wider block mb-1 text-[10px]">
+          Category
+        </label>
+        <input
+          id={`cat-${torrent.gid}`}
+          type="text"
+          value={value}
+          maxLength={64}
+          placeholder="Uncategorised"
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && dirty) save.mutate(); }}
+          className="w-full bg-neutral-950 border border-white/10 rounded-lg text-xs text-neutral-200 px-2.5 py-1.5 placeholder:text-neutral-600 focus:outline-none focus:border-blue-500/50"
+        />
+      </div>
+      <button
+        onClick={() => save.mutate()}
+        disabled={!dirty || save.isPending}
+        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+          dirty && !save.isPending
+            ? 'bg-blue-600 hover:bg-blue-500 text-white'
+            : 'bg-neutral-800 text-neutral-600 cursor-not-allowed'
+        }`}
+      >
+        {save.isPending ? 'Saving…' : 'Set'}
+      </button>
+    </div>
+  );
+}
+
 function DetailsTab({ torrent }: Readonly<{ torrent: Torrent }>) {
   return (
+    <div className="flex flex-col gap-3">
+    <CategoryEditor torrent={torrent} />
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
       <div className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5">
         <span className="text-neutral-500 font-semibold uppercase tracking-wider block mb-0.5">Total Size</span>
@@ -177,6 +221,7 @@ function DetailsTab({ torrent }: Readonly<{ torrent: Torrent }>) {
           <span className="text-neutral-300 text-[11px]">{torrent.comment}</span>
         </div>
       )}
+    </div>
     </div>
   );
 }
@@ -443,6 +488,23 @@ function OptionsTab({ torrent, isVisible }: Readonly<{ torrent: Torrent; isVisib
           />
         </div>
       </div>
+      <label className="flex items-start gap-3 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          className="mt-0.5 w-4 h-4 rounded accent-blue-600 cursor-pointer"
+          checked={localOpts.prioritize_first_last ?? current.prioritize_first_last ?? false}
+          onChange={e => setLocalOpts(o => ({ ...o, prioritize_first_last: e.target.checked }))}
+        />
+        <span>
+          <span className="block text-xs font-medium text-neutral-300">
+            Prioritise first &amp; last pieces
+          </span>
+          <span className="block text-[11px] text-neutral-500 mt-0.5">
+            Fetches the ends of each file first, so a partial download can be previewed.
+            aria2 has no true sequential mode; this is the equivalent it supports.
+          </span>
+        </span>
+      </label>
       <div className="flex items-center gap-3">
         <button
           onClick={() => save.mutate()}

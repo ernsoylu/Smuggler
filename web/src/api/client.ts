@@ -112,6 +112,9 @@ export const deleteConfig = (id: number): Promise<void> =>
 export const deployMuleFromConfig = (configId: number, name?: string): Promise<Mule> =>
   api.post<Mule>(`/configs/${configId}/deploy`, { name }).then(r => r.data);
 
+export const setTorrentCategory = (infoHash: string, category: string): Promise<void> =>
+  api.put(`/torrents/category/${infoHash}`, { category }).then(() => undefined);
+
 // ── Deployments ───────────────────────────────────────────────────────────────
 
 /**

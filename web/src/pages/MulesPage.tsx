@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getMules, getWatchdogStatus, triggerWatchdogSweep, evacuateMule } from '../api/client';
 import type { WatchdogStatus } from '../api/types';
 import { MuleCard } from '../components/MuleCard';
-import { DeployMuleModal } from '../components/DeployMuleModal';
 import { useNotifications } from '../context/NotificationContext';
+import { useUiActions } from '../context/UiActionsContext';
 import { ShieldCheck, Rocket, Shield, ShieldAlert, ShieldOff, RefreshCw, LogOut } from 'lucide-react';
 
 function WatchdogPanel({ watchdog }: Readonly<{ watchdog: WatchdogStatus | undefined }>) {
@@ -113,7 +113,7 @@ function WatchdogPanel({ watchdog }: Readonly<{ watchdog: WatchdogStatus | undef
 }
 
 export function MulesPage() {
-  const [showModal, setShowModal] = useState(false);
+  const { openDeployMule } = useUiActions();
   const { push: pushNotification } = useNotifications();
   const prevUnhealthyRef = useRef<Set<string>>(new Set());
 
@@ -142,7 +142,6 @@ export function MulesPage() {
     prevUnhealthyRef.current = new Set(unhealthy.map(m => m.name));
   }, [watchdog, pushNotification]);
 
-  const handleModalClose = () => setShowModal(false);
 
   return (
     <div className="p-6 md:p-8">
@@ -153,7 +152,7 @@ export function MulesPage() {
         </div>
         <button
           className="flex items-center gap-2 py-2.5 px-6 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-sm text-white font-semibold shadow-lg shadow-blue-500/20 transition-all active:scale-95"
-          onClick={() => setShowModal(true)}
+          onClick={openDeployMule}
         >
           <Rocket size={16} /> Deploy Mule
         </button>
@@ -188,9 +187,6 @@ export function MulesPage() {
         </div>
       )}
 
-      {showModal && (
-        <DeployMuleModal onClose={handleModalClose} />
-      )}
     </div>
   );
 }
