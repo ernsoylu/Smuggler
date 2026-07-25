@@ -33,7 +33,8 @@ jobs:
         run: uv export --no-hashes --no-emit-project --format requirements-txt > requirements-lock.txt
 
       - name: pip-audit
-        run: uvx pip-audit --strict --requirement requirements-lock.txt
+        # Pinned: an unpinned uvx resolves and executes whatever is newest.
+        run: uvx pip-audit@2.10.1 --strict --requirement requirements-lock.txt
 
   frontend-deps:
     name: Frontend dependencies (npm audit)
@@ -50,7 +51,8 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - run: npm ci
+      # --ignore-scripts: no dependency lifecycle script runs during install.
+      - run: npm ci --ignore-scripts
 
       # Production dependencies ship to the browser, so any advisory there is a
       # hard failure.
