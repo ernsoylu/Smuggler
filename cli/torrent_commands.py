@@ -11,7 +11,7 @@ from rich.table import Table
 from rich import box
 
 from cli.aria2_client import Aria2Client, Aria2Error
-from cli.docker_client import get_docker_client, get_mule, list_mules
+from cli.docker_client import aria2_for, get_docker_client, get_mule, list_mules
 
 console = Console()
 
@@ -29,7 +29,7 @@ def _get_aria2(worker_name: str) -> Aria2Client:
         console.print(f"[red]Mule '{worker_name}' is not running (status={worker.status})[/red]")
         raise SystemExit(1)
 
-    return Aria2Client(host="localhost", port=worker.rpc_port, token=worker.rpc_token)
+    return aria2_for(worker)
 
 
 def _format_bytes(value: str | int) -> str:
@@ -117,7 +117,7 @@ def torrent_list(worker_name: Optional[str]) -> None:
     table.add_column("Size")
 
     for w in target_workers:
-        aria2 = Aria2Client(host="localhost", port=w.rpc_port, token=w.rpc_token)
+        aria2 = aria2_for(w)
         try:
             all_downloads = (
                 aria2.tell_active()

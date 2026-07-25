@@ -489,3 +489,71 @@ class TestCheckMuleVpnLeakDetection:
         # Tunnel proved healthy; a failed default-route probe must not be a leak.
         assert result["healthy"] is True
         assert result["kind"] == "healthy"
+
+
+class TestMuleRpcAddressing:
+    """RPC is reached differently depending on where the caller runs."""
+
+    def _mule(self):
+        c = MagicMock()
+        c.name = "smuggler-mule-abc"
+        c.short_id = "abc"
+        c.status = "running"
+        c.labels = {
+            "smuggler.mule": "true",
+            "smuggler.rpc_token": "tok",
+            "smuggler.rpc_port": "16800",
+            "smuggler.vpn_config": "vpn.conf",
+        }
+        from cli.docker_client import MuleInfo
+        return MuleInfo(c)
+
+    def test_host_mode_uses_published_loopback_port(self, monkeypatch):
+        monkeypatch.delenv("SMG_MULE_RPC_HOST", raising=False)
+        m = self._mule()
+        assert m.rpc_host == "localhost"
+        assert m.rpc_target_port == 16800
+        assert m.rpc_url == "http://localhost:16800/jsonrpc"
+
+    def test_container_mode_uses_container_name_and_internal_port(self, monkeypatch):
+        monkeypatch.setenv("SMG_MULE_RPC_HOST", "container")
+        m = self._mule()
+        assert m.rpc_host == "smuggler-mule-abc"
+        assert m.rpc_target_port == 6800
+        assert m.rpc_url == "http://smuggler-mule-abc:6800/jsonrpc"
+
+    def test_aria2_for_follows_the_same_addressing(self, monkeypatch):
+        from cli.docker_client import aria2_for
+        monkeypatch.setenv("SMG_MULE_RPC_HOST", "container")
+        assert "smuggler-mule-abc:6800" in aria2_for(self._mule()).url
+        monkeypatch.delenv("SMG_MULE_RPC_HOST", raising=False)
+        assert "localhost:16800" in aria2_for(self._mule()).url
+
+    def test_aria2_for_passes_timeout_through(self, monkeypatch):
+        from cli.docker_client import aria2_for
+        monkeypatch.delenv("SMG_MULE_RPC_HOST", raising=False)
+        assert aria2_for(self._mule(), timeout=5)._timeout == 5
+
+
+class TestAttachRpcNetwork:
+    def test_connects_mule_to_the_rpc_network(self, mock_docker_client):
+        from cli.docker_client import _attach_rpc_network
+        net = MagicMock()
+        mock_docker_client.networks.get.return_value = net
+        container = MagicMock()
+        _attach_rpc_network(mock_docker_client, container, "smuggler-mule-abc")
+        net.connect.assert_called_once_with(container)
+
+    def test_missing_network_is_not_fatal(self, mock_docker_client):
+        # A bare `smg` deploy with no compose stack must still work over the
+        # published loopback port.
+        from cli.docker_client import _attach_rpc_network
+        mock_docker_client.networks.get.side_effect = docker.errors.NotFound("nope")
+        _attach_rpc_network(mock_docker_client, MagicMock(), "smuggler-mule-abc")
+
+    def test_connect_failure_is_not_fatal(self, mock_docker_client):
+        from cli.docker_client import _attach_rpc_network
+        net = MagicMock()
+        net.connect.side_effect = docker.errors.APIError("boom")
+        mock_docker_client.networks.get.return_value = net
+        _attach_rpc_network(mock_docker_client, MagicMock(), "smuggler-mule-abc")

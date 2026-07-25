@@ -72,7 +72,19 @@ def create_app() -> Flask:
     #   2. CSRF: state-changing requests carrying a browser Origin that is not in
     #      the allow-list are refused, so a page the user visits cannot drive the
     #      local API. Non-browser clients (desktop, curl) send no Origin and pass.
-    if not os.environ.get("SMG_API_TOKEN", "").strip():
+    _token = os.environ.get("SMG_API_TOKEN", "").strip()
+    if not _token:
+        # When mules are addressed over the shared internal RPC network, they can
+        # also open connections *to* this API — which holds the Docker socket.
+        # Host networking used to make that impossible (a container cannot reach
+        # the host's loopback), so in this topology the token is the control that
+        # replaces it and cannot be optional.
+        if os.environ.get("SMG_MULE_RPC_HOST", "").strip().lower() == "container":
+            raise RuntimeError(
+                "SMG_API_TOKEN must be set when SMG_MULE_RPC_HOST=container: mules "
+                "share a network with this API and could otherwise drive the Docker "
+                "socket unauthenticated. Run ./setup.sh to generate a token."
+            )
         log.warning(
             "SMG_API_TOKEN is not set — API requests are not authenticated. "
             "Keep the API bound to 127.0.0.1 (default) or set SMG_API_TOKEN."

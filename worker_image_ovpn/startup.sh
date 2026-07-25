@@ -223,8 +223,17 @@ arm_or_die -A OUTPUT -o "${ORIG_DEV}" -j DROP
 
 # Ingress: aria2's RPC has to listen on the container interface for Docker's
 # published port to reach it, which also exposes it to every container sharing
-# this bridge. Restrict it to the gateway (the host) and drop the rest. Scoped
-# to port 6800 so BitTorrent peer traffic over tun0 is untouched.
+# this bridge. Restrict it on the egress NIC to the gateway (the host) and drop
+# the rest. Scoped to port 6800 so BitTorrent peer traffic over tun0 is untouched.
+#
+# Two callers reach the RPC, by different paths:
+#   - host tooling (smg CLI, ./start.sh debug) via the published loopback port,
+#     which arrives on ${ORIG_DEV} from ${ORIG_GW} and is accepted below;
+#   - the API container over the internal smuggler-rpc network, which arrives on
+#     a different interface these rules do not match. That interface is attached
+#     after this script runs, so it deliberately is not named here.
+# Sibling mules also sit on smuggler-rpc, so reachability there is gated by each
+# mule's own 192-bit RPC token rather than by the firewall.
 arm_or_die -A INPUT -i "${ORIG_DEV}" -p tcp --dport 6800 -s "${ORIG_GW}" -j ACCEPT
 arm_or_die -A INPUT -i "${ORIG_DEV}" -p tcp --dport 6800 -j DROP
 
