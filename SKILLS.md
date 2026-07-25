@@ -51,8 +51,17 @@ logger = get_logger(__name__)
 
 ### Adding a New Page
 1. Create `web/src/pages/NewPage.tsx`.
-2. Register the route in `web/src/App.tsx`.
-3. Use TanStack Query for data fetching (see `web/src/api/client.ts`).
+2. Add the page id to `PAGES` in `web/src/lib/router.ts` — that drives the hash
+   route, the nav tabs and the command palette entry.
+3. Render it in the `ErrorBoundary` switch in `web/src/App.tsx`.
+4. Use TanStack Query for data fetching (see `web/src/api/client.ts`).
+
+### Shared frontend state
+- `NotificationContext` — toasts and progress.
+- `DeploymentContext` — in-flight mule deploys; polls real phases from
+  `/api/deployments/`. Do not reintroduce timer-driven progress.
+- `ThemeContext` — light/dark/system.
+- `UiActionsContext` — opens the shell-owned Add Torrent / Deploy Mule modals.
 
 ### Styling
 Use **Tailwind CSS**. Avoid inline styles. Use consistent component patterns from `web/src/components/`.
@@ -69,7 +78,17 @@ uv run pytest tests/ -v
 # With coverage
 uv run pytest tests/ --cov=cli --cov=api --cov-report=term-missing
 ```
-Use `DVD_LOGGING=false` to suppress log files during test runs.
+Use `SMG_LOGGING=false` to suppress log files during test runs.
+
+### Frontend Tests
+```bash
+cd web
+npm run test:run          # vitest
+npm run lint              # eslint
+npx tsc --noEmit          # types
+```
+Pure logic lives in `web/src/lib/` precisely so it is testable — the vitest
+environment is `node` with no DOM library.
 
 ---
 
@@ -86,21 +105,47 @@ Commands are defined in `cli/mule_commands.py` and `cli/torrent_commands.py`.
 
 ## Git & Quality Workflow
 
-### Commit, Analyze, and Push
-All changes must pass local tests and SonarQube analysis before being pushed to the remote repository.
+### Branch, verify, PR
 
-1.  **Stage all changes:**
+`main` is protected by the **`CI / CI Gate`** status check, and work lands via
+pull request — never by pushing to `main` directly.
+
+1.  **Branch** off `main`:
     ```bash
-    git add .
+    git checkout -b area/short-description
     ```
-2.  **Commit with a descriptive message:**
+2.  **Verify locally before pushing.** Run what CI runs, not an approximation:
     ```bash
-    git commit -m "Your description of changes"
+    uv run ruff check api/ cli/ tests/
+    uv run pytest tests/ -q
+    (cd web && npm ci --ignore-scripts && npx tsc --noEmit && npm run lint \
+       && npm run test:run && npm run build)
+    docker compose config --quiet
     ```
-3.  **Run Quality Analysis:**
-    *   **Local Tests:** `uv run pytest tests/`
-    *   **SonarQube Scan:** Run the SonarQube scanner (e.g., via the SonarQube MCP `sonar_scanner` tool or local `sonar-scanner` command). Ensure there are no **BLOCKERS**.
-4.  **Push to remote:**
-    ```bash
-    git push origin main
-    ```
+    For anything touching the mules, Dockerfiles or networking, also build the
+    image and run the stack — a passing unit suite is not evidence that a
+    container change works.
+3.  **Commit and push the branch**, then open a PR.
+4.  **CI runs on the PR, not on the branch push.** The orchestrator triggers on
+    `pull_request` to `main`, so a branch push alone produces no run. Wait for
+    **`CI / CI Gate`** plus the SonarCloud gate to go green.
+5.  **Merge with squash**, matching the existing history.
+
+### Quality gates
+
+- **SonarQube:** SonarCloud **Automatic Analysis** runs server-side; there is no
+  local `sonar-scanner` and none is needed. The gate is reported on the PR — fix
+  BLOCKERS rather than suppressing them, and if a suppression is genuinely
+  correct, document the reason (see `.trivyignore` for the pattern).
+- **Security CI:** `pip-audit`, `npm audit`, Trivy image + IaC scans and an SBOM.
+  Also runs weekly, because advisories appear without the code changing.
+- **Known flake:** `Set up Docker Buildx` fails intermittently on an unrelated
+  image job. Confirm it is that step in the log before assuming a real finding,
+  then `gh run rerun <id> --failed`.
+
+### Verifying a security-relevant change
+
+Unit tests do not prove a container or networking change works. Use the drills
+in [SECURITY.md](SECURITY.md#verifying-a-deployment-does-not-leak): bring the
+stack up, deploy a real mule, and confirm the kill-switch drops traffic rather
+than leaking.
