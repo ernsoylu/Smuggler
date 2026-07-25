@@ -37,7 +37,7 @@ export function DeployMuleModal({ onClose, onDeployStart }: Readonly<Props>) {
       return deployMuleFromConfig(config.id);
     },
     onSuccess: (_, config) => {
-      qc.invalidateQueries({ queryKey: ['workers'] });
+      qc.invalidateQueries({ queryKey: ['mules'] });
       qc.invalidateQueries({ queryKey: ['configs'] });
       if (deployingNotifIdRef.current) {
         updateNotification(deployingNotifIdRef.current, {

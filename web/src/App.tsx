@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { WorkersPage } from './pages/MulesPage';
+import { MulesPage } from './pages/MulesPage';
 import { TorrentsPage } from './pages/TorrentsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ConfigsPage } from './pages/ConfigsPage';
@@ -8,14 +8,14 @@ import { NotificationBell } from './components/NotificationBell';
 import { NotificationProvider } from './context/NotificationContext';
 import { LayoutDashboard, Server, Settings, FileKey2 } from 'lucide-react';
 
-type Page = 'torrents' | 'workers' | 'configs' | 'settings';
+type Page = 'torrents' | 'mules' | 'configs' | 'settings';
 
 export default function App() {
   const [page, setPage] = useState<Page>('torrents');
 
   const tabs: { key: Page; label: string; icon: React.ReactNode }[] = [
     { key: 'torrents', label: 'Torrents', icon: <LayoutDashboard size={16} /> },
-    { key: 'workers', label: 'Mules', icon: <Server size={16} /> },
+    { key: 'mules', label: 'Mules', icon: <Server size={16} /> },
     { key: 'configs', label: 'Configs', icon: <FileKey2 size={16} /> },
     { key: 'settings', label: 'Settings', icon: <Settings size={16} /> },
   ];
@@ -60,7 +60,7 @@ export default function App() {
       {/* Page content — pb-14 to clear the fixed footer */}
       <main className="flex-1 w-full max-w-7xl mx-auto pb-14">
         {page === 'torrents' && <TorrentsPage />}
-        {page === 'workers'  && <WorkersPage />}
+        {page === 'mules'  && <MulesPage />}
         {page === 'configs'  && <ConfigsPage />}
         {page === 'settings' && <SettingsPage />}
       </main>

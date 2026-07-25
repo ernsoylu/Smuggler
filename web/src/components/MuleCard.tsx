@@ -122,31 +122,31 @@ function ExpandedStatsPanel({ history, torrents, liveDl, liveUl, activeCount, pa
 }
 
 interface Props {
-  worker: Mule;
+  mule: Mule;
 }
 
-export function WorkerCard({ worker }: Readonly<Props>) {
+export function MuleCard({ mule }: Readonly<Props>) {
   const qc = useQueryClient();
   const [showConfirm, setShowConfirm] = useState<'stop' | 'kill' | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [history, setHistory] = useState<DataPoint[]>([]);
 
   const stop = useMutation({
-    mutationFn: () => stopMule(worker.name),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['workers'] }),
+    mutationFn: () => stopMule(mule.name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mules'] }),
   });
 
   const kill = useMutation({
-    mutationFn: () => killMule(worker.name),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['workers'] }),
+    mutationFn: () => killMule(mule.name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mules'] }),
   });
 
   // Per-mule torrent polling — only when card is expanded
   const { data: torrents = [] } = useQuery({
-    queryKey: ['mule-torrents', worker.name],
-    queryFn: () => getMuleTorrents(worker.name),
+    queryKey: ['mule-torrents', mule.name],
+    queryFn: () => getMuleTorrents(mule.name),
     refetchInterval: expanded ? 2_000 : false,
-    enabled: expanded && worker.status === 'running',
+    enabled: expanded && mule.status === 'running',
   });
 
   // Reset history when the card collapses — render-phase "previous prop"
@@ -170,12 +170,12 @@ export function WorkerCard({ worker }: Readonly<Props>) {
     );
   }, [torrents, expanded]);
 
-  const isRunning = worker.status === 'running';
+  const isRunning = mule.status === 'running';
   const statusColor = isRunning ? 'bg-emerald-500' : 'bg-neutral-500';
   const statusText  = isRunning ? 'text-emerald-400' : 'text-neutral-400';
   const statusBg    = isRunning ? 'bg-emerald-500/10' : 'bg-neutral-500/10';
   const statusRing  = isRunning ? 'ring-emerald-500/20' : 'ring-neutral-500/20';
-  const ip = worker.ip_info;
+  const ip = mule.ip_info;
 
   // Derived torrent stats when expanded
   const activeCount   = torrents.filter(t => t.status === 'active').length;
@@ -194,13 +194,13 @@ export function WorkerCard({ worker }: Readonly<Props>) {
           <div className="flex gap-3 min-w-0">
             <div className={`mt-1 w-2.5 h-2.5 rounded-full ${statusColor} shrink-0`} />
             <div className="min-w-0">
-              <p className="font-semibold text-white tracking-tight truncate text-base">{worker.name}</p>
-              <p className="text-xs text-neutral-500 font-mono tracking-tighter mt-0.5">{worker.id.slice(0, 12)}</p>
+              <p className="font-semibold text-white tracking-tight truncate text-base">{mule.name}</p>
+              <p className="text-xs text-neutral-500 font-mono tracking-tighter mt-0.5">{mule.id.slice(0, 12)}</p>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <span className={`text-xs px-2.5 py-1 rounded-md font-semibold capitalize ring-1 inset-ring ${statusText} ${statusBg} ${statusRing}`}>
-              {worker.status}
+              {mule.status}
             </span>
             {/* Expand toggle */}
             {isRunning && (
@@ -251,11 +251,11 @@ export function WorkerCard({ worker }: Readonly<Props>) {
         <div className="flex flex-col gap-2 text-sm mt-auto">
           <div className="flex justify-between items-center bg-white/5 px-3 py-2 rounded-lg">
             <span className="text-neutral-500 font-medium text-xs">Config</span>
-            <span className="text-neutral-300 font-mono text-xs truncate max-w-[140px]">{worker.vpn_config}</span>
+            <span className="text-neutral-300 font-mono text-xs truncate max-w-[140px]">{mule.vpn_config}</span>
           </div>
           <div className="flex justify-between items-center bg-white/5 px-3 py-2 rounded-lg">
             <span className="text-neutral-500 font-medium text-xs flex items-center gap-1.5"><TerminalSquare size={14}/> RPC Port</span>
-            <span className="text-neutral-300 font-mono text-xs font-semibold">{worker.rpc_port}</span>
+            <span className="text-neutral-300 font-mono text-xs font-semibold">{mule.rpc_port}</span>
           </div>
         </div>
       </div>

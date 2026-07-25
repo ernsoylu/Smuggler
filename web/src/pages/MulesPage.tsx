@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getMules, getWatchdogStatus, triggerWatchdogSweep, evacuateMule } from '../api/client';
 import type { WatchdogStatus } from '../api/types';
-import { WorkerCard } from '../components/MuleCard';
+import { MuleCard } from '../components/MuleCard';
 import { DeployMuleModal } from '../components/DeployMuleModal';
 import { useNotifications } from '../context/NotificationContext';
 import { ShieldCheck, Rocket, Shield, ShieldAlert, ShieldOff, RefreshCw, LogOut } from 'lucide-react';
@@ -32,7 +32,7 @@ const STAGE_MESSAGES: Record<DeployStage, string> = {
   DEPLOYED:    'Mule is live and VPN is connected.',
 };
 
-function stepWorkersPageStages(prev: DeployingMule[]): DeployingMule[] {
+function stepMulesPageStages(prev: DeployingMule[]): DeployingMule[] {
   const now = Date.now();
   return prev.map(m => {
     if (m.stage === 'DEPLOYED') return m;
@@ -55,7 +55,7 @@ function WatchdogPanel({ watchdog }: Readonly<{ watchdog: WatchdogStatus | undef
     mutationFn: (name: string) => evacuateMule(name, true),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['watchdog'] });
-      qc.invalidateQueries({ queryKey: ['workers'] });
+      qc.invalidateQueries({ queryKey: ['mules'] });
     },
   });
 
@@ -148,15 +148,15 @@ function WatchdogPanel({ watchdog }: Readonly<{ watchdog: WatchdogStatus | undef
   );
 }
 
-export function WorkersPage() {
+export function MulesPage() {
   const [showModal, setShowModal] = useState(false);
   const [deployingMules, setDeployingMules] = useState<DeployingMule[]>([]);
   const { push: pushNotification, update: updateNotification } = useNotifications();
   const prevUnhealthyRef = useRef<Set<string>>(new Set());
   const prevDeployingRef = useRef<DeployingMule[]>([]);
 
-  const { data: workers = [], isLoading } = useQuery({
-    queryKey: ['workers'],
+  const { data: mules = [], isLoading } = useQuery({
+    queryKey: ['mules'],
     queryFn: getMules,
     refetchInterval: 3_000,
   });
@@ -171,7 +171,7 @@ export function WorkersPage() {
   useEffect(() => {
     if (deployingMules.length === 0) return;
     const timer = setInterval(() => {
-      setDeployingMules(stepWorkersPageStages);
+      setDeployingMules(stepMulesPageStages);
     }, 1000);
     return () => clearInterval(timer);
   }, [deployingMules.length]);
@@ -242,7 +242,7 @@ export function WorkersPage() {
       {/* Active deployments */}
       <div className="flex items-center gap-3 mb-6">
         <h3 className="text-lg font-bold text-white tracking-tight">Active Deployments</h3>
-        <span className="px-2.5 py-0.5 rounded-full bg-neutral-800 text-neutral-400 text-xs font-semibold">{workers.length}</span>
+        <span className="px-2.5 py-0.5 rounded-full bg-neutral-800 text-neutral-400 text-xs font-semibold">{mules.length}</span>
       </div>
 
       {isLoading && (
@@ -251,16 +251,16 @@ export function WorkersPage() {
           <span className="font-medium text-sm">Querying active mules...</span>
         </div>
       )}
-      {!isLoading && workers.length === 0 && (
+      {!isLoading && mules.length === 0 && (
         <div className="border-2 border-dashed border-white/10 rounded-2xl p-16 text-center flex flex-col items-center justify-center">
           <ShieldCheck size={48} className="text-neutral-700 mx-auto mb-4" strokeWidth={1} />
           <p className="text-neutral-400 font-medium max-w-sm">No mules are currently running. Click "Deploy Mule" to get started.</p>
         </div>
       )}
-      {!isLoading && workers.length > 0 && (
+      {!isLoading && mules.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {workers.map(w => (
-            <WorkerCard key={w.name} worker={w} />
+          {mules.map(w => (
+            <MuleCard key={w.name} mule={w} />
           ))}
         </div>
       )}
