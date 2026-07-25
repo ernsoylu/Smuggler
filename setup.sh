@@ -274,8 +274,8 @@ if [[ ! -f .env ]]; then
     SMG_KEY=$(gen_secret_key)
     SMG_TOKEN=$(gen_secret_key)
     cat > .env <<EOF
-DVD_LOGGING=true
-DVD_LOG_LEVEL=INFO
+SMG_LOGGING=true
+SMG_LOG_LEVEL=INFO
 # Secret key for encrypting stored secrets at rest — OpenVPN passwords AND VPN
 # config bodies (WireGuard private keys, inline OpenVPN keys). Keep this stable
 # and private — changing it makes existing encrypted secrets unrecoverable.

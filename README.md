@@ -37,7 +37,7 @@ The fastest way to run Smuggler is via the included lifecycle script:
 ## Development
 - **Local Debug**: `./start.sh debug` (Vite + Flask with hot-reload).
 - **Setup**: `./setup.sh` (installs deps and builds all 4 images).
-- **Tests**: `/home/eren/.local/bin/uv run pytest tests/` (294 passing tests).
+- **Tests**: `uv run pytest tests/` (315 passing tests).
 - **CI/CD**: Path-filtered GitHub Actions workflows (least-privilege permissions, concurrency-cancelled, dependency-cached):
   - **Python CI**: `ruff` lint + `pytest` matrix (3.12, 3.13) with coverage.
   - **Frontend CI**: `tsc` type-check, ESLint, `vitest`, and production build.

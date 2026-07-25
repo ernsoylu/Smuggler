@@ -388,8 +388,18 @@ MONITOR_PID=$!
 
 # ─── 11. Wait for aria2 to exit ─────────────────────────────────────────────
 wait "${ARIA2_PID}" || true
-log "aria2 exited — shutting down"
-write_health "stopped" "" "aria2 exited"
 kill "${MONITOR_PID}" 2>/dev/null || true
 kill "${OVPN_PID}"    2>/dev/null || true
 ip link delete dev "${VPN_IFACE}" 2>/dev/null || true
+
+# Distinguish a kill-switch teardown from a clean aria2 exit. Without this the
+# "stopped" status overwrites the kill-switch reason and the container exits 0,
+# so neither the host watchdog nor an operator can tell a leak-abort apart from
+# a normal shutdown.
+if [[ -f /tmp/ks_triggered ]]; then
+    err "aria2 terminated by kill-switch: $(cat /tmp/ks_triggered)"
+    exit 1
+fi
+
+log "aria2 exited — shutting down"
+write_health "stopped" "" "aria2 exited"

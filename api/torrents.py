@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -159,6 +160,18 @@ def list_for_mule(mule_name: str):
         return jsonify({"error": str(exc)}), 502
 
 
+def _safe_subdir(name: str) -> str:
+    """Reduce a magnet's ``dn`` to a single safe directory component.
+
+    ``dn`` is attacker-controlled. Replacing only ``/`` left ``..`` intact, so a
+    magnet named ".." resolved ``/downloads/..`` to the container root — enough
+    to overwrite the mule's own ``/etc/resolv.conf``, which is the DNS pin.
+    """
+    cleaned = re.sub(r"[^A-Za-z0-9 ._@()\[\]+-]", "_", (name or "").strip())
+    cleaned = cleaned.strip(". ")
+    return cleaned[:180]
+
+
 def _add_magnet(aria2: Aria2Client, mule_name: str):
     import urllib.parse as _up
     safe = log_safe(mule_name)
@@ -179,8 +192,9 @@ def _add_magnet(aria2: Aria2Client, mule_name: str):
         dn = (qs.get("dn", [None])[0] or "").strip()
     except Exception:
         dn = ""
-    if dn:
-        options["dir"] = f"/downloads/{dn.replace('/', '_')}"
+    subdir = _safe_subdir(dn)
+    if subdir:
+        options["dir"] = f"/downloads/{subdir}"
     log.info("POST /api/torrents/%s: adding magnet uri=%s", safe, log_safe(magnet[:80]))
     try:
         gid = aria2.add_magnet(magnet, options=options or None)

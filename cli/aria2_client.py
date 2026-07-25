@@ -39,15 +39,17 @@ class Aria2Client:
         try:
             resp = requests.post(self.url, json=payload, timeout=self._timeout)
             resp.raise_for_status()
+        # Failure messages reach API clients verbatim, so they carry no internal
+        # endpoint detail — the full url/exception is logged server-side instead.
         except requests.exceptions.ConnectionError as exc:
             log.error("aria2 RPC: connection refused url=%s — %s", self.url, exc)
-            raise Aria2Error(f"Cannot reach aria2 at {self.url}: {exc}") from exc
-        except requests.exceptions.Timeout:
+            raise Aria2Error("Cannot reach the mule's aria2 RPC") from exc
+        except requests.exceptions.Timeout as exc:
             log.error("aria2 RPC: timeout url=%s method=%s", self.url, method)
-            raise Aria2Error(f"Timeout calling aria2 at {self.url}")
+            raise Aria2Error("Timed out talking to the mule's aria2 RPC") from exc
         except requests.exceptions.RequestException as exc:
             log.error("aria2 RPC: HTTP error url=%s method=%s — %s", self.url, method, exc)
-            raise Aria2Error(f"HTTP error: {exc}") from exc
+            raise Aria2Error("aria2 RPC transport error") from exc
 
         data = resp.json()
         if "error" in data:

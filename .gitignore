@@ -43,6 +43,8 @@ vpn_configs/*
 # Env files
 .env
 .env.*
+# ...but the documented template is checked in.
+!.env.example
 
 # Logs
 logs/

@@ -139,9 +139,10 @@ def create_app() -> Flask:
 
     log.info("create_app: blueprints registered — mules, torrents, stats, settings, configs, watchdog")
 
-    # Start the background VPN watchdog (daemon thread — survives app context)
-    # Skip in Werkzeug reloader child processes to avoid double-starting
-    if os.environ.get("WERKZEUG_RUN_MAIN") != "true" or not app.debug:
-        start_watchdog()
+    # Start the background VPN watchdog (daemon thread — survives app context).
+    # start_watchdog() is itself idempotent, which is what actually prevents a
+    # second thread; the old WERKZEUG_RUN_MAIN guard read app.debug before
+    # app.run() had set it and api/run.py disables the reloader anyway.
+    start_watchdog()
 
     return app

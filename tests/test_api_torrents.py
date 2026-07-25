@@ -676,3 +676,37 @@ class TestSetFileSelection:
             r = client.patch("/api/torrents/smuggler-mule-test/abc123/files",
                              json={"selected_indices": [2]})
         assert r.status_code == 502
+
+
+from api.torrents import _safe_subdir  # noqa: E402
+
+
+class TestSafeSubdir:
+    """Magnet 'dn' is attacker-controlled and becomes a download directory."""
+
+    def test_plain_name_preserved(self):
+        assert _safe_subdir("Ubuntu 24.04 ISO") == "Ubuntu 24.04 ISO"
+
+    def test_dotdot_is_neutralised(self):
+        # "/downloads/.." resolved to the container root before this was fixed.
+        assert _safe_subdir("..") == ""
+        assert _safe_subdir(".") == ""
+
+    def test_slashes_cannot_create_nested_paths(self):
+        assert "/" not in _safe_subdir("../../etc/passwd")
+
+    def test_leading_and_trailing_dots_stripped(self):
+        assert _safe_subdir("...hidden...") == "hidden"
+
+    def test_shell_and_path_metacharacters_replaced(self):
+        # Brackets/parens stay — release names use them heavily ("Movie (2024)").
+        out = _safe_subdir("a;rm -rf /$x`y`|z")
+        for ch in ";$`|/":
+            assert ch not in out
+
+    def test_empty_and_none_are_empty(self):
+        assert _safe_subdir("") == ""
+        assert _safe_subdir("   ") == ""
+
+    def test_length_is_bounded(self):
+        assert len(_safe_subdir("x" * 500)) <= 180

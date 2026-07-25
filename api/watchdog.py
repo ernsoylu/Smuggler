@@ -66,6 +66,11 @@ def _threshold_for(result: dict) -> int:
 # ── Shared state (protected by _lock) ────────────────────────────────────────
 _lock = threading.Lock()
 
+# Guards start_watchdog() so repeated calls (multiple gunicorn workers, an app
+# factory invoked twice in tests) cannot spawn competing sweep threads.
+_start_lock = threading.Lock()
+_watchdog_thread: threading.Thread | None = None
+
 # mule_name → {"healthy": bool, "ip": str|None, "reason": str, "checked_at": str,
 #              "consecutive_failures": int, "evacuated": bool}
 _mule_states: dict[str, dict[str, Any]] = {}
@@ -209,9 +214,21 @@ def start_watchdog() -> None:
     Safe to call multiple times — will not start a second thread.
     Should be called from ``create_app()`` after blueprints are registered.
     """
-    t = threading.Thread(target=_watchdog_loop, name="smuggler-watchdog", daemon=True)
-    t.start()
-    log.info("watchdog: daemon thread launched (tid=%s)", t.ident)
+    global _watchdog_thread
+
+    with _start_lock:
+        if _watchdog_thread is not None and _watchdog_thread.is_alive():
+            log.info("watchdog: already running (tid=%s) — not starting another",
+                     _watchdog_thread.ident)
+            return
+
+        # Concurrent sweeps would race on evacuate_mule() and could evacuate the
+        # same torrents twice, so the guard the docstring promised is enforced
+        # here rather than relying on gunicorn being configured with one worker.
+        t = threading.Thread(target=_watchdog_loop, name="smuggler-watchdog", daemon=True)
+        t.start()
+        _watchdog_thread = t
+        log.info("watchdog: daemon thread launched (tid=%s)", t.ident)
 
 
 # ── API endpoints ─────────────────────────────────────────────────────────────

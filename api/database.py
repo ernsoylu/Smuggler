@@ -59,10 +59,14 @@ _DEFAULTS: dict[str, str] = {
 
 
 def _get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=5.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    # WAL lets readers run during a write, but concurrent *writers* still get an
+    # immediate SQLITE_BUSY without this. Gunicorn runs 8 threads alongside the
+    # watchdog, so writes to settings/state genuinely overlap.
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
