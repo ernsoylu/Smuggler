@@ -118,6 +118,15 @@ class TestUploadConfig:
         assert r.status_code == 400
         assert "filename is required" in r.get_json()["error"]
 
+    def test_returns_503_when_no_encryption_key_configured(self, client, monkeypatch):
+        # The config body holds VPN private keys — refuse rather than persist it
+        # in the clear, and say so instead of raising a bare 500.
+        monkeypatch.delenv("SMG_SECRET_KEY", raising=False)
+        monkeypatch.delenv("SMG_ALLOW_PLAINTEXT_SECRETS", raising=False)
+        r = self._post(client)
+        assert r.status_code == 503
+        assert "SMG_SECRET_KEY" in r.get_json()["error"]
+
     def test_uploads_wireguard_config(self, client):
         with patch("api.configs.add_vpn_config", return_value=42):
             r = self._post(client, filename="wg0.conf", name="my-vpn")

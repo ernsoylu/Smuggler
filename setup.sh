@@ -272,6 +272,7 @@ gen_secret_key() {
 
 if [[ ! -f .env ]]; then
     SMG_KEY=$(gen_secret_key)
+    SMG_TOKEN=$(gen_secret_key)
     cat > .env <<EOF
 DVD_LOGGING=true
 DVD_LOG_LEVEL=INFO
@@ -280,21 +281,34 @@ DVD_LOG_LEVEL=INFO
 # and private — changing it makes existing encrypted secrets unrecoverable.
 # Leave empty to disable encryption (not recommended).
 SMG_SECRET_KEY=${SMG_KEY}
-# Optional API token. When set, every /api/* request must carry a matching
-# X-Smuggler-Token header (the web UI injects it automatically). Recommended if
-# you expose the API beyond loopback. Uncomment to enable:
-# SMG_API_TOKEN=$(gen_secret_key)
+# API token, enabled by default. Every /api/* request must carry a matching
+# X-Smuggler-Token header; the web UI injects it automatically via nginx. The
+# API holds the Docker socket, so authenticating it is the safer default —
+# comment this out only if a local client cannot send the header.
+SMG_API_TOKEN=${SMG_TOKEN}
 EOF
-    ok ".env created with defaults (generated SMG_SECRET_KEY)"
-elif ! grep -q '^SMG_SECRET_KEY=' .env; then
-    {
-        echo ""
-        echo "# Secret key for encrypting stored secrets at rest (added by setup)."
-        echo "SMG_SECRET_KEY=$(gen_secret_key)"
-    } >> .env
-    ok ".env exists — appended a generated SMG_SECRET_KEY"
+    ok ".env created (generated SMG_SECRET_KEY and SMG_API_TOKEN)"
 else
-    ok ".env already exists — skipping"
+    if ! grep -q '^SMG_SECRET_KEY=' .env; then
+        {
+            echo ""
+            echo "# Secret key for encrypting stored secrets at rest (added by setup)."
+            echo "SMG_SECRET_KEY=$(gen_secret_key)"
+        } >> .env
+        ok ".env exists — appended a generated SMG_SECRET_KEY"
+    fi
+    # Only add a token if the operator has neither enabled nor deliberately
+    # commented one out, so re-running setup never overrides an opt-out.
+    if ! grep -qE '^\s*#?\s*SMG_API_TOKEN=' .env; then
+        {
+            echo ""
+            echo "# API token (added by setup). The API holds the Docker socket, so"
+            echo "# requests are authenticated by default. Comment out to disable."
+            echo "SMG_API_TOKEN=$(gen_secret_key)"
+        } >> .env
+        ok ".env exists — appended a generated SMG_API_TOKEN"
+    fi
+    ok ".env already exists — left existing values untouched"
 fi
 # .env holds the master encryption key — keep it owner-readable only.
 chmod 600 .env 2>/dev/null || true

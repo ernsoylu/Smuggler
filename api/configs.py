@@ -8,6 +8,7 @@ from pathlib import Path
 
 from flask import Blueprint, request, jsonify
 
+from api.crypto import EncryptionUnavailable
 from api.database import list_vpn_configs, get_vpn_config, add_vpn_config, delete_vpn_config
 from cli.log import get_logger, log_safe
 from cli.docker_client import (
@@ -100,15 +101,22 @@ def upload_config():
     username = request.form.get("username", "").strip() or None
     password = request.form.get("password", "").strip() or None
 
-    config_id = add_vpn_config(
-        name=name,
-        filename=file.filename,
-        content=content,
-        vpn_type=vpn_type,
-        requires_auth=requires_auth,
-        ovpn_username=username,
-        ovpn_password=password,
-    )
+    try:
+        config_id = add_vpn_config(
+            name=name,
+            filename=file.filename,
+            content=content,
+            vpn_type=vpn_type,
+            requires_auth=requires_auth,
+            ovpn_username=username,
+            ovpn_password=password,
+        )
+    except EncryptionUnavailable as exc:
+        # The config body holds private keys, so storing it unencrypted is worse
+        # than refusing the upload. Surfaced as 503: the request is valid, the
+        # server is misconfigured.
+        log.error("POST /api/configs/: refusing upload — %s", exc)
+        return jsonify({"error": str(exc)}), 503
     log.info(
         "POST /api/configs/: created id=%d name=%s vpn_type=%s requires_auth=%s",
         config_id, log_safe(name), vpn_type, requires_auth,

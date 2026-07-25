@@ -44,6 +44,20 @@ class TestTokenAuth:
              patch("api.mules.list_mules", return_value=[]):
             assert c.get("/api/mules/").status_code == 200
 
+    def test_health_exemption_is_not_a_prefix_match(self, monkeypatch):
+        # The exemption must cover /api/health exactly, not everything that
+        # merely starts with it — otherwise a future /api/health-something route
+        # would be silently unauthenticated. 401 (guard ran) not 404 (routed).
+        c = _client(monkeypatch, token="sekret")
+        assert c.get("/api/healthz").status_code == 401
+        assert c.get("/api/health/secrets").status_code == 401
+
+    def test_health_still_exempt_with_and_without_trailing_slash(self, monkeypatch):
+        c = _client(monkeypatch, token="sekret")
+        assert c.get("/api/health/").status_code == 200
+        # Flask redirects the slashless form rather than 401-ing it.
+        assert c.get("/api/health").status_code in (200, 308)
+
 
 class TestCsrfOriginGuard:
     def test_cross_origin_mutation_refused(self, monkeypatch):

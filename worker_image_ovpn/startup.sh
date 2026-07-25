@@ -3,14 +3,22 @@
 #
 # Security measures:
 #   • curl VPN check bound to tun0 (--interface)
-#   • aria2 binds to 127.0.0.1 only (not 0.0.0.0)
+#   • aria2's RPC listens on the container interface (Docker port publishing
+#     DNATs to it, so loopback-only would be unreachable); ingress on the real
+#     NIC is firewalled to the Docker gateway so bridge peers cannot reach it
 #   • Credentials deleted from disk immediately after tunnel established
 #   • Periodic runtime IP re-verification every HEALTH_CHECK_INTERVAL seconds
 #   • Kill-switch: SIGTERM → 10s grace → SIGKILL; writes /tmp/ks_triggered
 #   • Writes /tmp/vpn_health.json for host watchdog
+#
+# Fail-closed policy: if no endpoint can be pinned or any firewall rule cannot
+# be installed, the mule aborts instead of running unprotected. This matters
+# more here than for WireGuard — 'redirect-gateway def1' makes the tunnel work
+# fine without a pin, so an unarmed kill-switch stays invisible until tun0 dies
+# and OpenVPN restores the clear-net default route.
 set -euo pipefail
 
-ARIA2_SECRET="${ARIA2_SECRET:-changeme}"
+ARIA2_SECRET="${ARIA2_SECRET:-}"
 OVPN_CONF="/etc/openvpn/client.ovpn"
 VPN_IFACE="tun0"
 VPN_CHECK_TIMEOUT=30      # seconds to wait for ipinfo.io response
@@ -31,6 +39,15 @@ write_health() {
     return
 }
 write_health "starting" "" "initialising"
+
+# ─── 0. Refuse to run without a real RPC secret ──────────────────────────────
+# A predictable secret plus a reachable RPC port is unauthenticated download
+# control, so this is fatal rather than defaulted.
+if [[ -z "${ARIA2_SECRET}" ]] || [[ "${ARIA2_SECRET}" == "changeme" ]]; then
+    err "FATAL: ARIA2_SECRET is unset or a placeholder — refusing to start."
+    write_health "dead" "" "ARIA2_SECRET missing or placeholder"
+    exit 1
+fi
 
 # ─── 1. Write credentials file if env vars are provided ─────────────────────
 # Credentials are removed from disk as soon as the tunnel is established.
@@ -53,23 +70,47 @@ ORIG_GW=$(ip -4 route show default | awk '/default/{print $3; exit}')
 ORIG_DEV=$(ip -4 route show default | awk '/default/{print $5; exit}')
 log "Original gateway: ${ORIG_GW} dev ${ORIG_DEV}"
 
-# ─── 3. Pin the VPN server endpoint to the original gateway ─────────────────
-REMOTE_HOST=$(grep -iP '^\s*remote\s+\S+' "${OVPN_CONF}" \
-              | awk '{print $2}' | head -1 || true)
-REMOTE_IP=""
+# Both are load-bearing for the kill-switch below (they identify the interface
+# to seal and the only host allowed to reach the RPC), so validate them here
+# rather than letting a later rule fail obscurely.
+if [[ -z "${ORIG_GW}" ]] || [[ -z "${ORIG_DEV}" ]]; then
+    err "FATAL: could not determine the default gateway/interface —"
+    err "the kill-switch cannot be armed, so aria2 will not be started."
+    write_health "dead" "" "no default route — kill-switch cannot be armed"
+    exit 1
+fi
 
-if [[ -n "${REMOTE_HOST}" ]] && [[ -n "${ORIG_GW}" ]]; then
-    REMOTE_IP=$(getent ahostsv4 "${REMOTE_HOST}" 2>/dev/null \
+# ─── 3. Pin the VPN server endpoint(s) to the original gateway ──────────────
+# Configs routinely list several 'remote' lines for failover, so pin every one
+# of them: a kill-switch that whitelists only the first would block OpenVPN the
+# moment it fails over to the second.
+mapfile -t REMOTE_HOSTS < <(grep -iP '^\s*remote\s+\S+' "${OVPN_CONF}" \
+                            | awk '{print $2}' | sort -u || true)
+REMOTE_IPS=()
+
+for remote_host in "${REMOTE_HOSTS[@]}"; do
+    [[ -z "${remote_host}" ]] && continue
+    remote_ip=$(getent ahostsv4 "${remote_host}" 2>/dev/null \
                 | awk 'NR==1{print $1}' || true)
-    if [[ -n "${REMOTE_IP}" ]]; then
-        ip -4 route add "${REMOTE_IP}/32" via "${ORIG_GW}" dev "${ORIG_DEV}" \
-            2>/dev/null || true
-        log "VPN endpoint ${REMOTE_IP} (${REMOTE_HOST}) pinned via ${ORIG_GW}"
-    else
-        warn "Could not resolve VPN endpoint '${REMOTE_HOST}' — skipping pin"
+    if [[ -z "${remote_ip}" ]]; then
+        warn "Could not resolve VPN endpoint '${remote_host}'"
+        continue
     fi
-else
-    warn "No 'remote' directive found in config or no default gateway"
+    REMOTE_IPS+=("${remote_ip}")
+    ip -4 route add "${remote_ip}/32" via "${ORIG_GW}" dev "${ORIG_DEV}" \
+        2>/dev/null || true
+    log "VPN endpoint ${remote_ip} (${remote_host}) pinned via ${ORIG_GW}"
+done
+
+# Fail closed before OpenVPN is even launched: with no resolvable endpoint the
+# kill-switch in 6b cannot be armed, and 'redirect-gateway def1' would happily
+# bring up a tunnel whose failure mode is a silent clear-net leak.
+if [[ ${#REMOTE_IPS[@]} -eq 0 ]]; then
+    err "FATAL: no VPN endpoint in ${OVPN_CONF} could be resolved."
+    err "Without a pinned endpoint the kill-switch cannot be armed, so this mule"
+    err "will not be started. Check the 'remote' lines and DNS from the host."
+    write_health "dead" "" "no endpoint resolvable — kill-switch cannot be armed"
+    exit 1
 fi
 
 # ─── 4. Build and launch OpenVPN ────────────────────────────────────────────
@@ -152,18 +193,43 @@ iptables -A OUTPUT -d 127.0.0.11 -p tcp --dport 53 -j REJECT 2>/dev/null || true
 ip6tables -A OUTPUT -o "${ORIG_DEV}" -d fe80::/10 -j ACCEPT 2>/dev/null || true
 ip6tables -A OUTPUT -o "${ORIG_DEV}" -j DROP 2>/dev/null || true
 
-# Firewall kill-switch on the real NIC: permit only VPN transport to the pinned
-# endpoint and aria2 RPC replies; drop everything else. If tun0 dies (OpenVPN
-# also restores the eth0 default route on exit), aria2 traffic is dropped here
-# instead of leaking the real IP during the window before the monitor reacts.
-iptables -A OUTPUT -o "${ORIG_DEV}" -p tcp --sport 6800 -j ACCEPT 2>/dev/null || true
-if [[ -n "${REMOTE_IP}" ]]; then
-    iptables -A OUTPUT -o "${ORIG_DEV}" -d "${REMOTE_IP}" -j ACCEPT 2>/dev/null || true
-    iptables -A OUTPUT -o "${ORIG_DEV}" -j DROP 2>/dev/null || true
-    log "Kill-switch armed: only VPN endpoint ${REMOTE_IP} + RPC allowed on ${ORIG_DEV}"
-else
-    warn "VPN endpoint IP unknown — firewall kill-switch NOT armed (routing only)"
-fi
+# Firewall kill-switch on the real NIC — the PRIMARY no-leak guarantee (see
+# SECURITY.md): permit only VPN transport to the pinned endpoints and aria2 RPC
+# traffic; drop everything else. If tun0 dies (OpenVPN also restores the eth0
+# default route on exit), traffic is dropped here instead of leaking the real IP
+# during the window before the monitor reacts.
+#
+# Every step is fatal on failure. Endpoint resolution already fell over in
+# step 3, so REMOTE_IPS is non-empty by construction here.
+arm_or_die() {
+    # Install one firewall rule, or abort the mule. Unlike the best-effort rules
+    # above, these define the leak boundary — a mule running without them is
+    # exactly the failure mode the kill-switch exists to prevent.
+    if ! iptables "$@"; then
+        err "FATAL: could not install kill-switch rule: iptables $*"
+        write_health "dead" "" "kill-switch rule install failed"
+        kill "${OVPN_PID}" 2>/dev/null || true
+        exit 1
+    fi
+    return 0
+}
+
+# Egress: RPC replies and VPN transport only.
+arm_or_die -A OUTPUT -o "${ORIG_DEV}" -p tcp --sport 6800 -j ACCEPT
+for remote_ip in "${REMOTE_IPS[@]}"; do
+    arm_or_die -A OUTPUT -o "${ORIG_DEV}" -d "${remote_ip}" -j ACCEPT
+done
+arm_or_die -A OUTPUT -o "${ORIG_DEV}" -j DROP
+
+# Ingress: aria2's RPC has to listen on the container interface for Docker's
+# published port to reach it, which also exposes it to every container sharing
+# this bridge. Restrict it to the gateway (the host) and drop the rest. Scoped
+# to port 6800 so BitTorrent peer traffic over tun0 is untouched.
+arm_or_die -A INPUT -i "${ORIG_DEV}" -p tcp --dport 6800 -s "${ORIG_GW}" -j ACCEPT
+arm_or_die -A INPUT -i "${ORIG_DEV}" -p tcp --dport 6800 -j DROP
+
+log "Kill-switch armed: only VPN endpoints ${REMOTE_IPS[*]} + RPC allowed on ${ORIG_DEV}"
+log "RPC ingress restricted to gateway ${ORIG_GW}"
 
 # ─── 7. Remove credentials from disk ────────────────────────────────────────
 cleanup_creds
@@ -220,15 +286,20 @@ fi
 log "VPN active — External IP: ${EXT_IP}  Country: ${EXT_COUNTRY}"
 write_health "healthy" "${EXT_IP}" "VPN verified at startup"
 
-# ─── 9. Start aria2 — bound to 127.0.0.1 only ──────────────────────────────
-log "Starting aria2 RPC daemon (bound to 127.0.0.1)..."
+# ─── 9. Start aria2 ─────────────────────────────────────────────────────────
+# --rpc-listen-all=true is required, not an oversight: Docker's published port
+# DNATs to the container's address, so a loopback-only listener would be
+# unreachable and aria2 has no bind-address option. Ingress is constrained by
+# the INPUT rules armed in 6b instead. CORS stays off — the Flask API proxies
+# RPC server-side, so no browser ever talks to aria2 directly.
+log "Starting aria2 RPC daemon (RPC ingress firewalled to ${ORIG_GW})..."
 aria2c \
     --dir=/downloads \
     --enable-rpc=true \
     --rpc-listen-all=true \
     --rpc-listen-port=6800 \
     --rpc-secret="${ARIA2_SECRET}" \
-    --rpc-allow-origin-all=true \
+    --rpc-allow-origin-all=false \
     --continue=true \
     --max-concurrent-downloads=5 \
     --file-allocation=none \

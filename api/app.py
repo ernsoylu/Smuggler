@@ -9,6 +9,7 @@ from flask import Flask, request
 from flask_cors import CORS
 
 from cli.log import get_logger, log_file_path
+from api.crypto import encryption_enabled
 from api.mules import mules_bp
 from api.torrents import torrents_bp
 from api.stats import stats_bp
@@ -77,11 +78,23 @@ def create_app() -> Flask:
             "Keep the API bound to 127.0.0.1 (default) or set SMG_API_TOKEN."
         )
 
+    # Fail loudly at boot rather than on the first VPN config upload, which is
+    # where the missing key would otherwise surface as a 503.
+    if not encryption_enabled():
+        log.critical(
+            "SMG_SECRET_KEY is not set — VPN config uploads will be refused. "
+            "Run ./setup.sh to generate one, or set SMG_ALLOW_PLAINTEXT_SECRETS=1 "
+            "to store secrets unencrypted (not recommended)."
+        )
+
     _MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
+    # Exact paths, not a prefix: startswith("/api/health") would also exempt any
+    # future route that merely begins with those characters.
+    _UNAUTHENTICATED = {"/api/health", "/api/health/"}
 
     @app.before_request
     def _api_guard():
-        if request.method == "OPTIONS" or request.path.startswith("/api/health"):
+        if request.method == "OPTIONS" or request.path in _UNAUTHENTICATED:
             return None
 
         token = os.environ.get("SMG_API_TOKEN", "").strip()

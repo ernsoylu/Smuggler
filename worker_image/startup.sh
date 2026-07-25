@@ -5,14 +5,19 @@
 #   • curl VPN check is bound to wg0 (--interface) — prevents eth0 fallback
 #   • IPv6 outbound is blocked unless WG config carries IPv6
 #   • DNS is hard-locked to VPN DNS; Docker DNS 127.0.0.11 is firewalled
-#   • aria2 binds to 127.0.0.1 only (not 0.0.0.0)
+#   • aria2's RPC listens on the container interface (Docker port publishing
+#     DNATs to it, so loopback-only would be unreachable); ingress on the real
+#     NIC is firewalled to the Docker gateway so bridge peers cannot reach it
 #   • Kill-switch checks both interface existence AND WireGuard handshake freshness
 #   • Periodic runtime IP re-verification every HEALTH_CHECK_INTERVAL seconds
 #   • On kill-switch: SIGTERM → 10s grace → SIGKILL; writes /tmp/ks_triggered
 #   • Writes /tmp/vpn_health.json for host watchdog to read
+#
+# Fail-closed policy: if the endpoint cannot be pinned or any firewall rule
+# cannot be installed, the mule aborts instead of running unprotected.
 set -euo pipefail
 
-ARIA2_SECRET="${ARIA2_SECRET:-changeme}"
+ARIA2_SECRET="${ARIA2_SECRET:-}"
 WG_CONF="/etc/wireguard/wg0.conf"
 WG_IFACE="wg0"
 VPN_CHECK_TIMEOUT=15      # seconds for external IP check
@@ -35,6 +40,15 @@ write_health() {
 }
 write_health "starting" "" "initialising"
 
+# ─── 0. Refuse to run without a real RPC secret ──────────────────────────────
+# A predictable secret plus a reachable RPC port is unauthenticated download
+# control, so this is fatal rather than defaulted.
+if [[ -z "${ARIA2_SECRET}" ]] || [[ "${ARIA2_SECRET}" == "changeme" ]]; then
+    err "FATAL: ARIA2_SECRET is unset or a placeholder — refusing to start."
+    write_health "dead" "" "ARIA2_SECRET missing or placeholder"
+    exit 1
+fi
+
 # ─── 1. Parse WireGuard config ───────────────────────────────────────────────
 WG_ADDR4=$(grep -oP '(?i)(?<=Address\s=\s|Address=)\s*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+' \
            "$WG_CONF" | tr -d ' ' | head -1 || true)
@@ -50,6 +64,16 @@ log "Config: addr4=${WG_ADDR4} addr6=${WG_ADDR6:-none} endpoint=${WG_EP_HOST} dn
 ORIG_GW=$(ip -4 route show default | awk '/default/{print $3; exit}')
 ORIG_DEV=$(ip -4 route show default | awk '/default/{print $5; exit}')
 log "Original gateway: ${ORIG_GW} dev ${ORIG_DEV}"
+
+# Both are load-bearing for the kill-switch below (they identify the interface
+# to seal and the only host allowed to reach the RPC), so validate them here
+# rather than letting a later rule fail obscurely.
+if [[ -z "${ORIG_GW}" ]] || [[ -z "${ORIG_DEV}" ]]; then
+    err "FATAL: could not determine the default gateway/interface —"
+    err "the kill-switch cannot be armed, so aria2 will not be started."
+    write_health "dead" "" "no default route — kill-switch cannot be armed"
+    exit 1
+fi
 
 # ─── 3. Create WireGuard interface ──────────────────────────────────────────
 log "Creating ${WG_IFACE}..."
@@ -127,18 +151,51 @@ log "Docker DNS (127.0.0.11) blocked"
 ip -4 route replace default dev "${WG_IFACE}"
 
 # ─── 6b. Firewall kill-switch on the real NIC ───────────────────────────────
-# Belt-and-suspenders to the wg0 default route: on ${ORIG_DEV} permit only
-# WireGuard transport to the pinned endpoint and aria2 RPC replies, and drop
-# everything else. If wg0 disappears or the default route is ever restored to
-# eth0, aria2 traffic is dropped here instead of leaking the real IP.
-iptables -A OUTPUT -o "${ORIG_DEV}" -p tcp --sport 6800 -j ACCEPT 2>/dev/null || true
-if [[ -n "${WG_EP_IP}" ]]; then
-    iptables -A OUTPUT -o "${ORIG_DEV}" -d "${WG_EP_IP}" -j ACCEPT 2>/dev/null || true
-    iptables -A OUTPUT -o "${ORIG_DEV}" -j DROP 2>/dev/null || true
-    log "Kill-switch armed: only WG endpoint ${WG_EP_IP} + RPC allowed on ${ORIG_DEV}"
-else
-    warn "WG endpoint IP unknown — firewall kill-switch NOT armed (relying on wg0 default route)"
+# This is the PRIMARY no-leak guarantee (see SECURITY.md), not a backstop to the
+# wg0 default route: on ${ORIG_DEV} permit only WireGuard transport to the pinned
+# endpoint and aria2 RPC traffic, and drop everything else. If wg0 disappears or
+# the default route is ever restored to eth0, traffic is dropped here instead of
+# leaking the real IP.
+#
+# Every step below is fatal on failure. Previously an unresolvable endpoint only
+# logged a warning and startup continued with no firewall at all, which silently
+# downgraded that guarantee to "we hope the default route holds".
+if [[ -z "${WG_EP_IP}" ]]; then
+    err "FATAL: WireGuard endpoint '${WG_EP_HOST:-unset}' could not be resolved."
+    err "Without a pinned endpoint the kill-switch cannot be armed, so aria2 will"
+    err "not be started. Check the Endpoint line in the config and DNS from the host."
+    write_health "dead" "" "endpoint unresolvable — kill-switch cannot be armed"
+    ip link delete dev "${WG_IFACE}" 2>/dev/null || true
+    exit 1
 fi
+
+arm_or_die() {
+    # Install one firewall rule, or abort the mule. Unlike the best-effort rules
+    # elsewhere in this script, these define the leak boundary — a mule running
+    # without them is exactly the failure mode the kill-switch exists to prevent.
+    if ! iptables "$@"; then
+        err "FATAL: could not install kill-switch rule: iptables $*"
+        write_health "dead" "" "kill-switch rule install failed"
+        ip link delete dev "${WG_IFACE}" 2>/dev/null || true
+        exit 1
+    fi
+    return 0
+}
+
+# Egress: RPC replies and WireGuard transport only.
+arm_or_die -A OUTPUT -o "${ORIG_DEV}" -p tcp --sport 6800 -j ACCEPT
+arm_or_die -A OUTPUT -o "${ORIG_DEV}" -d "${WG_EP_IP}" -j ACCEPT
+arm_or_die -A OUTPUT -o "${ORIG_DEV}" -j DROP
+
+# Ingress: aria2's RPC has to listen on the container interface for Docker's
+# published port to reach it, which also exposes it to every container sharing
+# this bridge. Restrict it to the gateway (the host) and drop the rest. Scoped
+# to port 6800 so BitTorrent peer traffic over wg0 is untouched.
+arm_or_die -A INPUT -i "${ORIG_DEV}" -p tcp --dport 6800 -s "${ORIG_GW}" -j ACCEPT
+arm_or_die -A INPUT -i "${ORIG_DEV}" -p tcp --dport 6800 -j DROP
+
+log "Kill-switch armed: only WG endpoint ${WG_EP_IP} + RPC allowed on ${ORIG_DEV}"
+log "RPC ingress restricted to gateway ${ORIG_GW}"
 
 # ─── 7. Verify external connectivity through VPN ────────────────────────────
 log "Verifying VPN connectivity through ${WG_IFACE}..."
@@ -219,15 +276,20 @@ fi
 log "VPN active — External IP: ${EXT_IP}  Country: ${EXT_COUNTRY}"
 write_health "healthy" "${EXT_IP}" "VPN verified at startup"
 
-# ─── 8. Start aria2 — bound to 127.0.0.1 only ──────────────────────────────
-log "Starting aria2 RPC daemon (bound to 127.0.0.1)..."
+# ─── 8. Start aria2 ─────────────────────────────────────────────────────────
+# --rpc-listen-all=true is required, not an oversight: Docker's published port
+# DNATs to the container's address, so a loopback-only listener would be
+# unreachable and aria2 has no bind-address option. Ingress is constrained by
+# the INPUT rules armed in 6b instead. CORS stays off — the Flask API proxies
+# RPC server-side, so no browser ever talks to aria2 directly.
+log "Starting aria2 RPC daemon (RPC ingress firewalled to ${ORIG_GW})..."
 aria2c \
     --dir=/downloads \
     --enable-rpc=true \
     --rpc-listen-all=true \
     --rpc-listen-port=6800 \
     --rpc-secret="${ARIA2_SECRET}" \
-    --rpc-allow-origin-all=true \
+    --rpc-allow-origin-all=false \
     --continue=true \
     --max-concurrent-downloads=5 \
     --file-allocation=none \

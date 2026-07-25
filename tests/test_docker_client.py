@@ -386,6 +386,38 @@ class TestWaitForVpn:
             with pytest.raises(RuntimeError, match="timed out"):
                 wait_for_vpn(mock_docker_client, "smuggler-mule-test", timeout=1, poll_interval=0)
 
+    def test_falls_back_to_icanhazip_when_ipinfo_unavailable(self, mock_docker_client):
+        # ipinfo.io rate-limits aggressively; a deploy must not fail just because
+        # one metadata provider is unreachable.
+        container = self._running_container(b"")
+
+        def _exec(cmd, **kwargs):
+            if "ipinfo.io" in cmd:
+                return (22, b"")
+            return (0, b"9.9.9.9\n")
+
+        container.exec_run.side_effect = _exec
+        mock_docker_client.containers.get.return_value = container
+        with patch("cli.docker_client.time.sleep"), \
+             patch("cli.docker_client._wait_for_aria2"):
+            result = wait_for_vpn(mock_docker_client, "smuggler-mule-test", timeout=10)
+        assert result == {"ip": "9.9.9.9"}
+
+    def test_prefers_ipinfo_metadata_when_available(self, mock_docker_client):
+        container = self._running_container(b'{"ip":"1.2.3.4","country":"NZ"}')
+        mock_docker_client.containers.get.return_value = container
+        with patch("cli.docker_client._wait_for_aria2"):
+            result = wait_for_vpn(mock_docker_client, "smuggler-mule-test", timeout=10)
+        assert result["country"] == "NZ"
+
+    def test_times_out_when_both_probes_fail(self, mock_docker_client):
+        container = self._running_container(b"")
+        container.exec_run.return_value = (1, b"")
+        mock_docker_client.containers.get.return_value = container
+        with patch("cli.docker_client.time.sleep"):
+            with pytest.raises(RuntimeError, match="timed out"):
+                wait_for_vpn(mock_docker_client, "smuggler-mule-test", timeout=1, poll_interval=0)
+
 
 # ─── get_container_logs ──────────────────────────────────────────────────────
 

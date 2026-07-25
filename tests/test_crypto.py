@@ -22,6 +22,14 @@ def with_key(monkeypatch):
 @pytest.fixture
 def without_key(monkeypatch):
     monkeypatch.delenv("SMG_SECRET_KEY", raising=False)
+    monkeypatch.delenv("SMG_ALLOW_PLAINTEXT_SECRETS", raising=False)
+
+
+@pytest.fixture
+def without_key_plaintext_allowed(monkeypatch):
+    """No key, but the operator has explicitly opted in to plaintext storage."""
+    monkeypatch.delenv("SMG_SECRET_KEY", raising=False)
+    monkeypatch.setenv("SMG_ALLOW_PLAINTEXT_SECRETS", "1")
 
 
 # ─── round-trip ─────────────────────────────────────────────────────────────
@@ -80,10 +88,19 @@ class TestNoKey:
     def test_encryption_disabled(self, without_key):
         assert crypto.encryption_enabled() is False
 
-    def test_encrypt_returns_plaintext(self, without_key):
+    def test_encrypt_raises_without_key(self, without_key):
+        # Fail closed: silently persisting a credential in the clear is worse
+        # than refusing to store it.
+        with pytest.raises(crypto.EncryptionUnavailable):
+            crypto.encrypt("secret")
+
+    def test_encrypt_returns_plaintext_when_explicitly_allowed(
+        self, without_key_plaintext_allowed
+    ):
         assert crypto.encrypt("secret") == "secret"
 
     def test_decrypt_plaintext_passthrough(self, without_key):
+        # Reads stay tolerant so legacy plaintext rows keep working.
         assert crypto.decrypt("secret") == "secret"
 
     def test_decrypt_encrypted_without_key_returns_none(self, with_key, monkeypatch):
@@ -141,7 +158,15 @@ class TestEncryptionAtRest:
         # ...but callers transparently get plaintext back.
         assert db.get_vpn_config(config_id)["ovpn_password"] == "s3cr3t"
 
-    def test_password_stored_plaintext_without_key(self, without_key, temp_db):
+    def test_storing_config_refused_without_key(self, without_key, temp_db):
+        with pytest.raises(crypto.EncryptionUnavailable):
+            db.add_vpn_config(
+                "ovpn", "v.ovpn", b"client\n", "openvpn", True, "user", "s3cr3t"
+            )
+
+    def test_password_stored_plaintext_when_explicitly_allowed(
+        self, without_key_plaintext_allowed, temp_db
+    ):
         config_id = db.add_vpn_config(
             "ovpn", "v.ovpn", b"client\n", "openvpn", True, "user", "s3cr3t"
         )
@@ -181,7 +206,16 @@ class TestBytesRoundTrip:
         assert once == twice
         assert crypto.decrypt_bytes(twice) == b"data"
 
-    def test_without_key_passthrough(self, without_key):
+    def test_encrypt_bytes_raises_without_key(self, without_key):
+        with pytest.raises(crypto.EncryptionUnavailable):
+            crypto.encrypt_bytes(b"data")
+
+    def test_decrypt_bytes_passthrough_without_key(self, without_key):
+        assert crypto.decrypt_bytes(b"data") == b"data"
+
+    def test_without_key_passthrough_when_explicitly_allowed(
+        self, without_key_plaintext_allowed
+    ):
         assert crypto.encrypt_bytes(b"data") == b"data"
         assert crypto.decrypt_bytes(b"data") == b"data"
 
@@ -196,7 +230,15 @@ class TestConfigBodyAtRest:
         assert b"PrivateKey=xyz" not in raw
         assert db.get_vpn_config(cid)["content"] == b"[Interface]\nPrivateKey=xyz\n"
 
-    def test_content_plaintext_without_key(self, without_key, temp_db):
+    def test_content_storage_refused_without_key(self, without_key, temp_db):
+        # The config body carries the WireGuard private key, so this must not
+        # fall through to plaintext.
+        with pytest.raises(crypto.EncryptionUnavailable):
+            db.add_vpn_config("wg", "wg0.conf", b"[Interface]\n", "wireguard")
+
+    def test_content_plaintext_when_explicitly_allowed(
+        self, without_key_plaintext_allowed, temp_db
+    ):
         cid = db.add_vpn_config("wg", "wg0.conf", b"[Interface]\n", "wireguard")
         assert _raw_content(temp_db, cid) == b"[Interface]\n"
         assert db.get_vpn_config(cid)["content"] == b"[Interface]\n"

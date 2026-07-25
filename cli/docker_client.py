@@ -196,9 +196,13 @@ def wait_for_vpn(
     poll_interval: int = 3,
 ) -> dict:
     """
-    Block until the mule's VPN is up and ipinfo.io responds.
+    Block until the mule's VPN is confirmed up.
 
-    Returns the parsed JSON dict from ipinfo.io on success.
+    Returns a dict of exit-node metadata. ipinfo.io is tried first for the rich
+    fields (city/region/country), falling back to icanhazip for a bare ``ip``:
+    proving the tunnel routes is the actual gate, and a single third party being
+    rate-limited must not be able to fail every deployment.
+
     Raises RuntimeError with container logs if the container exits or times out.
     """
     log.info("wait_for_vpn: waiting for VPN on mule=%s (timeout=%ds)", name_or_id, timeout)
@@ -226,32 +230,45 @@ def wait_for_vpn(
             time.sleep(poll_interval)
             continue
 
+        # Bind the probes to the tunnel interface so this startup check never
+        # egresses via eth0 (which would reveal the real IP to the probe endpoint
+        # before routing settles).
+        vpn_iface = "tun0" if mule.vpn_type == "openvpn" else "wg0"
+        info: dict | None = None
+
         try:
-            # Bind the probe to the tunnel interface so this startup check never
-            # egresses via eth0 (which would reveal the real IP to ipinfo.io
-            # before routing settles).
-            vpn_iface = "tun0" if mule.vpn_type == "openvpn" else "wg0"
             exit_code, output = mule.container.exec_run(
                 f"curl -sf --interface {vpn_iface} --max-time 8 https://ipinfo.io/json",
                 demux=False,
             )
             if exit_code == 0 and output:
                 info = json.loads(output.decode().strip())
-                log.info(
-                    "wait_for_vpn: VPN confirmed — mule=%s ip=%s country=%s",
-                    name_or_id, info.get("ip"), info.get("country"),
-                )
-                # VPN is up — now wait for aria2 to start accepting connections
-                _wait_for_aria2(mule, deadline)
-                return info
-            log.debug(
-                "wait_for_vpn: curl exit_code=%s output_len=%s — retrying",
-                exit_code, len(output) if output else 0,
-            )
         except (docker.errors.APIError, ValueError) as exc:
-            log.debug("wait_for_vpn: exec/parse error — %s", exc)
+            log.debug("wait_for_vpn: ipinfo exec/parse error — %s", exc)
 
-        last_error = "VPN not ready yet"
+        if not info or not info.get("ip"):
+            # ipinfo is unavailable or rate-limited — fall back to the plain-text
+            # probe. Less metadata, same proof that the tunnel is routing.
+            ip, reason = _probe_icanhazip(mule.container, vpn_iface)
+            if ip:
+                log.info(
+                    "wait_for_vpn: ipinfo unavailable, confirmed via icanhazip — "
+                    "mule=%s ip=%s", name_or_id, ip,
+                )
+                info = {"ip": ip}
+            else:
+                info = None
+                last_error = f"VPN not ready yet ({reason})"
+
+        if info:
+            log.info(
+                "wait_for_vpn: VPN confirmed — mule=%s ip=%s country=%s",
+                name_or_id, info.get("ip"), info.get("country"),
+            )
+            # VPN is up — now wait for aria2 to start accepting connections
+            _wait_for_aria2(mule, deadline)
+            return info
+
         time.sleep(poll_interval)
 
     log.error("wait_for_vpn: timed out after %ds for worker=%s", timeout, name_or_id)
