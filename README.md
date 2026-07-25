@@ -20,7 +20,7 @@
 
 ## Security & Access
 - **Loopback by default**: Compose publishes the API to `127.0.0.1:55555` and the UI to `127.0.0.1:8887`. Neither runs in the host's network namespace — they sit on Docker bridge networks, with aria2 RPC carried over an `internal` network that has no route off the host. The API can drive Docker through a filtered socket proxy (it no longer mounts the socket itself), so it must still not be exposed to the LAN; widen the published port only behind an authenticated reverse proxy.
-- **API token (on by default)**: `setup.sh` generates `SMG_API_TOKEN` into `.env`, requiring an `X-Smuggler-Token` header on every `/api/*` call. The web UI injects it automatically; the desktop client reads it from the environment. It is **mandatory** under Docker Compose, where mules share a network with the API.
+- **API token (on by default)**: `setup.sh` generates `SMG_API_TOKEN` into `.env`, requiring an `X-Smuggler-Token` header on every `/api/*` call. The web UI injects it automatically; the `smg` CLI reads it from the environment. It is **mandatory** under Docker Compose, where mules share a network with the API.
 - **CSRF-guarded**: State-changing requests carrying a browser `Origin` outside the allow-list are refused.
 - **Least privilege**: Mules start from `cap_drop: ALL` and add back only the five capabilities they need (no `CAP_SYS_MODULE`, no `NET_RAW`), run with `no-new-privileges` and memory/PID ceilings, and drop aria2 to your uid so downloads are not root-owned. `setup.sh` loads the `wireguard` module on the host instead.
 
@@ -41,13 +41,12 @@ The fastest way to run Smuggler is via the included lifecycle script:
 - **CI/CD**: Path-filtered GitHub Actions workflows (least-privilege permissions, concurrency-cancelled, dependency-cached):
   - **Python CI**: `ruff` lint + `pytest` matrix (3.12, 3.13) with coverage.
   - **Frontend CI**: `tsc` type-check, ESLint, `vitest`, and production build.
-  - **Desktop CI**: Java 21 / Gradle build and Shadow JAR artifact.
   - **Docker CI**: `hadolint` + cached build of all 4 images + `docker compose config` validation.
   - **Shell CI**: `shellcheck` over the mule kill-switch / leak-protection scripts and setup scripts.
   - **Security CI**: `pip-audit` on the resolved Python lock file, `npm audit` (production advisories fail; build-tooling advisories are reported), Trivy CVE scans of all four images, Trivy IaC misconfiguration scanning, and a CycloneDX SBOM artifact. Also runs weekly on a schedule, because a dependency advisory can land without anyone touching the code.
   - **SonarQube Cloud**: analysis + quality gate (auto-skips until `SONAR_TOKEN` is set).
 
-  Dependabot keeps Python, npm, Gradle, GitHub Actions and the digest-pinned base images current — scanning reports a CVE, Dependabot is what closes it. All actions are SHA-pinned.
+  Dependabot keeps Python, npm, GitHub Actions and the digest-pinned base images current — scanning reports a CVE, Dependabot is what closes it. All actions are SHA-pinned.
 
   A single `ci.yml` orchestrator detects which areas a change touches and invokes only those reusable workflows, ending in one always-running **CI Gate** job.
 

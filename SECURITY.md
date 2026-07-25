@@ -104,7 +104,7 @@ This key encrypts every stored VPN secret.
 `setup.sh` generates `SMG_API_TOKEN` into `.env` and leaves it **active** — the
 API can drive Docker, so authenticating it is the safer default.
 `docker compose up` passes it to both the API and the UI, so the browser UI keeps
-working via nginx injection. For the desktop client, export the same value:
+working via nginx injection. For the `smg` CLI, export the same value:
 
 ```bash
 export SMG_API_TOKEN=...   # same value as .env

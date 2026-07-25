@@ -258,9 +258,11 @@ def perform_deploy(config_id: int, config: dict, mule_name: str | None = None,
 def deploy_mule(config_id: int):
     """Deploy a new mule using a stored VPN config, blocking until it is up.
 
-    Kept synchronous for the desktop client and any existing scripts. The web UI
-    uses ``POST /api/deployments/`` instead, which reports real progress rather
-    than blocking a request thread for up to 90 seconds.
+    Kept for existing scripts and one-shot automation, where blocking until the
+    mule is actually up is the simpler contract. The web UI uses
+    ``POST /api/deployments/`` instead, which reports real progress rather than
+    blocking a request thread for up to 90 seconds. Both share
+    ``check_deployable`` and ``perform_deploy``, so they cannot drift.
 
     JSON body (optional):
       - name (str) — mule name override

@@ -32,14 +32,6 @@ updates:
     commit-message:
       prefix: "deps(web)"
 
-  - package-ecosystem: gradle
-    directory: /desktop
-    schedule:
-      interval: monthly
-    open-pull-requests-limit: 3
-    commit-message:
-      prefix: "deps(desktop)"
-
   # Keeps the SHA pins in .github/workflows current — pinning without updates
   # just freezes known-good-at-the-time actions in place indefinitely.
   - package-ecosystem: github-actions

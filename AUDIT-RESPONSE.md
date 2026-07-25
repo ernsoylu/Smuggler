@@ -22,7 +22,7 @@ product Smuggler isn't.
 | 4 — Truthful deploy state | **Done** — async deploy + real mule-reported phases | `HEAD` |
 | 5 — Supply chain & CI | **Done** — scanners, SBOM, Dependabot, action pinning | `HEAD` |
 | 6 — UX gaps | **Done** — one deliberate deviation: SSE not built, see note below | `66b7c97`, `HEAD` |
-| 7 — Decisions | Open | |
+| 7 — Decisions | **Desktop client deleted**; remaining items assessed below | `HEAD` |
 
 **Phase 6 deviation — SSE.** The plan called for replacing the 2-second polling
 with server-sent events. Not done, deliberately. TanStack Query already gates
@@ -343,21 +343,28 @@ Ordered by impact-to-effort, and scoped to what verification confirmed missing:
 
 These are strategy calls, not defects. Recorded with a recommendation.
 
-- **`desktop/`'s future.** 2,972 LOC of JavaFX that mirrors the React UI
-  page-for-page and is *already drifting* — no notification bell, no watchdog
-  panel, no deploy staging. Every feature in Phase 6 must otherwise be built
-  twice. **Recommendation:** either commit to replacing it with a Tauri shell
-  around the existing React build (deletes ~3k LOC, gains auto-update and native
-  notifications), or explicitly re-scope it as a deliberately minimal "lite"
-  client and document that. The status quo — an undocumented near-clone — is the
-  worst of both. Either way, fix F30 first (add `desktop/` to CLAUDE.md).
-  If JavaFX stays: add WM_CLASS, a window icon, tray, and DBus notifications
-  (C#1's one genuinely useful cluster).
+- **`desktop/` — DECIDED: deleted.** The evidence was one-sided: two commits
+  ever touched `desktop/` against 23 touching `web/`, and the last was a
+  security sweep rather than a feature. It consumed 8 of the API's 27 endpoint
+  paths and, after Phases 4 and 6, lacked categories, search, sorting,
+  drag-and-drop, the command palette, the notification bell and piece priority
+  outright. It was also the sole reason the synchronous deploy endpoint existed.
+  Nor was it really the "no browser" option — it needed Java 21 and JavaFX on
+  the host, shipped as a fat JAR with no installer, and required the full Docker
+  stack running anyway, at which point the web UI is already on
+  `127.0.0.1:8887`. Removed along with its CI job, Dependabot ecosystem, the
+  `smg client` command, the `start.sh` target, the Java/JavaFX provisioning in
+  `setup.sh`, and the `state_version` counter that existed only for it to poll.
+  If a desktop experience is wanted later, a Tauri shell around the existing
+  React build makes parity structural rather than aspirational — that is the
+  option to revisit, not another hand-written client.
 - **`core/` extraction (F34).** Real coupling, but the current split isn't
   hurting anything yet. Do it *if and when* you want to ship `smg` as a
   standalone wheel without Flask.
-- **OpenAPI spec (F33).** Highest value if the desktop client survives — two
-  hand-written clients against docstring-only contracts is the actual cost.
+- **OpenAPI spec (F33).** Downgraded by the desktop deletion. The cost it
+  addressed was two hand-written clients against docstring-only contracts;
+  there is now one in-repo CLI, type-checked alongside the API. Skip unless a
+  second client reappears.
 - **RSS automation / \*arr-compatible API.** The largest genuine competitive
   gaps. Both are net-new subsystems; neither is a fix.
 - **Rate limiting (F19).** Low value while loopback-bound and token-gated.

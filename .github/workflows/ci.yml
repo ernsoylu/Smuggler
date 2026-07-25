@@ -26,7 +26,6 @@ jobs:
     outputs:
       python: ${{ steps.filter.outputs.python }}
       frontend: ${{ steps.filter.outputs.frontend }}
-      desktop: ${{ steps.filter.outputs.desktop }}
       docker: ${{ steps.filter.outputs.docker }}
       shell: ${{ steps.filter.outputs.shell }}
       security: ${{ steps.filter.outputs.security }}
@@ -48,10 +47,6 @@ jobs:
             frontend:
               - 'web/**'
               - '.github/workflows/frontend-ci.yml'
-              - '.github/workflows/ci.yml'
-            desktop:
-              - 'desktop/**'
-              - '.github/workflows/desktop-ci.yml'
               - '.github/workflows/ci.yml'
             docker:
               - 'docker/**'
@@ -93,13 +88,6 @@ jobs:
       contents: read
     uses: ./.github/workflows/frontend-ci.yml
 
-  desktop:
-    needs: changes
-    if: needs.changes.outputs.desktop == 'true'
-    permissions:
-      contents: read
-    uses: ./.github/workflows/desktop-ci.yml
-
   docker:
     needs: changes
     if: needs.changes.outputs.docker == 'true'
@@ -126,18 +114,17 @@ jobs:
     runs-on: ubuntu-latest
     if: always()
     permissions: {}
-    needs: [changes, python, frontend, desktop, docker, shell, security]
+    needs: [changes, python, frontend, docker, shell, security]
     steps:
       - name: Verify no triggered job failed
         run: |
           echo "changes=${{ needs.changes.result }}"
           echo "python=${{ needs.python.result }}   frontend=${{ needs.frontend.result }}"
-          echo "desktop=${{ needs.desktop.result }} docker=${{ needs.docker.result }} shell=${{ needs.shell.result }}"
+          echo "docker=${{ needs.docker.result }} shell=${{ needs.shell.result }}"
           echo "security=${{ needs.security.result }}"
           for r in "${{ needs.changes.result }}" \
                    "${{ needs.python.result }}" \
                    "${{ needs.frontend.result }}" \
-                   "${{ needs.desktop.result }}" \
                    "${{ needs.docker.result }}" \
                    "${{ needs.shell.result }}" \
                    "${{ needs.security.result }}"; do

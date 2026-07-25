@@ -47,8 +47,8 @@ def create_app() -> Flask:
     app = Flask(__name__)
 
     # Restrict cross-origin access. In production the frontend is served by nginx
-    # and proxies /api same-origin, so CORS is only needed for local dev / the
-    # desktop client. Override with SMG_CORS_ORIGINS (comma-separated, or "*").
+    # and proxies /api same-origin, so CORS is only needed for local dev.
+    # Override with SMG_CORS_ORIGINS (comma-separated, or "*").
     _origins_env = os.environ.get("SMG_CORS_ORIGINS", "").strip()
     if _origins_env == "*":
         cors_origins: object = "*"
@@ -72,7 +72,7 @@ def create_app() -> Flask:
     #      (except health + CORS preflight) must carry a matching X-Smuggler-Token.
     #   2. CSRF: state-changing requests carrying a browser Origin that is not in
     #      the allow-list are refused, so a page the user visits cannot drive the
-    #      local API. Non-browser clients (desktop, curl) send no Origin and pass.
+    #      local API. Non-browser clients (the smg CLI, curl) send no Origin and pass.
     _token = os.environ.get("SMG_API_TOKEN", "").strip()
     if not _token:
         # When mules are addressed over the shared internal RPC network, they can

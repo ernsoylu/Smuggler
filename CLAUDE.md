@@ -3,7 +3,6 @@
 ## Tech Stack
 - **Backend:** Python 3.12+ (uv), Flask, Docker SDK, aria2-rpc.
 - **Frontend:** React 19 (Vite), TS, Tailwind, TanStack Query, D3.
-- **Desktop:** Java 21, JavaFX, Gradle (`desktop/`).
 - **VPN:** WireGuard (raw wg/ip) & OpenVPN (tun0).
 - **Storage:** SQLite (WAL), Migration-aware.
 
@@ -26,11 +25,7 @@
 ## Directory Structure
 - `api/`: Flask blueprints, database, watchdog logic.
 - `cli/`: Shared Docker/aria2 clients, CLI commands.
-- `web/`: React frontend (Vite) — the primary UI.
-- `desktop/`: JavaFX 21 / Gradle desktop client. A second, hand-written UI that
-  mirrors `web/` page-for-page over the same REST API (it never touches SQLite).
-  Any UI feature added to `web/` has to be built here too, and it currently
-  trails (no notification bell, watchdog panel, or deploy staging).
+- `web/`: React frontend (Vite) — the only UI.
 - `worker_image/`: WireGuard mule Dockerfile/startup.
 - `worker_image_ovpn/`: OpenVPN mule Dockerfile/startup.
 - `docker/`: API/web Dockerfiles and the nginx template.
