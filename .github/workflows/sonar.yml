@@ -35,7 +35,7 @@ jobs:
             echo "::notice::SONAR_TOKEN is not set — skipping SonarQube Cloud analysis."
           fi
 
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.check.outputs.enabled == 'true'
         with:
           # Full history so Sonar can attribute issues/coverage to New Code.
@@ -44,7 +44,7 @@ jobs:
       # ── Python coverage (coverage.xml) ────────────────────────────────────
       - name: Install uv
         if: steps.check.outputs.enabled == 'true'
-        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: "latest"
 
@@ -71,7 +71,7 @@ jobs:
       # ── Frontend coverage (web/coverage/lcov.info) ────────────────────────
       - name: Set up Node.js
         if: steps.check.outputs.enabled == 'true'
-        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "20"
           cache: "npm"
@@ -91,4 +91,4 @@ jobs:
       # ── SonarQube Cloud scan + quality gate ───────────────────────────────
       - name: SonarQube Scan
         if: steps.check.outputs.enabled == 'true'
-        uses: SonarSource/sonarqube-scan-action@c7ee0f9df90b7aa20e8dcf9695dcfe2e7da5b4f2 # v7
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
