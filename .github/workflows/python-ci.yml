@@ -25,10 +25,16 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --all-extras
+          # --locked pins the exact resolved versions from uv.lock, and
+          # --no-build means no third-party source distribution is ever built,
+          # so no dependency's setup.py executes in CI. --no-install-project is
+          # what makes --no-build possible: the project itself is an editable
+          # install and would otherwise have to be "built". api/ and cli/ import
+          # fine from the repo root, so nothing needs it installed.
+        run: uv sync --locked --no-build --all-extras --no-install-project
 
       - name: Ruff
-        run: uv run ruff check --output-format=github .
+        run: uv run --no-sync --no-build ruff check --output-format=github .
 
   test:
     name: Test (Python ${{ matrix.python-version }})
@@ -51,17 +57,23 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --all-extras
+          # --locked pins the exact resolved versions from uv.lock, and
+          # --no-build means no third-party source distribution is ever built,
+          # so no dependency's setup.py executes in CI. --no-install-project is
+          # what makes --no-build possible: the project itself is an editable
+          # install and would otherwise have to be "built". api/ and cli/ import
+          # fine from the repo root, so nothing needs it installed.
+        run: uv sync --locked --no-build --all-extras --no-install-project
 
       # One run per interpreter — coverage-instrumented on 3.12 (fed to Sonar),
       # plain on 3.13 so we still exercise the newer runtime.
       - name: Run tests
         run: |
           if [ "${{ matrix.python-version }}" = "3.12" ]; then
-            uv run pytest tests/ -q --tb=short \
+            uv run --no-sync --no-build pytest tests/ -q --tb=short \
               --cov=cli --cov=api --cov-report=term-missing --cov-report=xml
           else
-            uv run pytest tests/ -q --tb=short
+            uv run --no-sync --no-build pytest tests/ -q --tb=short
           fi
         env:
           SMG_LOGGING: "false"

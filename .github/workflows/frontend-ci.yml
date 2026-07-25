@@ -24,11 +24,12 @@ jobs:
 
       - name: Install dependencies
         working-directory: web
-        run: npm ci
+        # --ignore-scripts: no dependency lifecycle script runs during install.
+        run: npm ci --ignore-scripts
 
       - name: Type-check
         working-directory: web
-        run: npx tsc --noEmit
+        run: ./node_modules/.bin/tsc --noEmit
 
       - name: Lint
         working-directory: web
