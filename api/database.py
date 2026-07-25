@@ -15,6 +15,9 @@ from api.crypto import (
     encryption_enabled,
     is_encrypted,
     is_encrypted_bytes,
+    needs_rekey,
+    rekey,
+    rekey_bytes,
 )
 from cli.log import get_logger, log_safe
 
@@ -113,6 +116,8 @@ def init_db() -> None:
     # Encrypt any legacy plaintext VPN config bodies (WireGuard private keys,
     # inline OpenVPN keys/certs) the same way.
     _encrypt_legacy_content(conn)
+    # Move any rows still under the old unsalted SHA-256 key onto scrypt.
+    _rekey_legacy_secrets(conn)
     conn.commit()
     conn.close()
     log.info("init_db: done")
@@ -164,6 +169,36 @@ def _encrypt_legacy_content(conn: sqlite3.Connection) -> None:
             migrated += 1
     if migrated:
         log.info("init_db: encrypted %d legacy plaintext VPN config body/ies", migrated)
+
+
+def _rekey_legacy_secrets(conn: sqlite3.Connection) -> None:
+    """Rotate v1 (unsalted SHA-256) ciphertext onto the current scrypt key.
+
+    Rows already under the current key are left alone, so this is a no-op after
+    the first run. Runs inside ``init_db``'s transaction.
+    """
+    if not encryption_enabled():
+        return
+    rows = conn.execute(
+        "SELECT id, content, ovpn_password FROM vpn_configs"
+    ).fetchall()
+    rotated = 0
+    for r in rows:
+        updates: dict[str, Any] = {}
+        if needs_rekey(r["content"]):
+            updates["content"] = rekey_bytes(r["content"])
+        if needs_rekey(r["ovpn_password"]):
+            updates["ovpn_password"] = rekey(r["ovpn_password"])
+        if not updates:
+            continue
+        assignments = ", ".join(f"{col} = ?" for col in updates)
+        conn.execute(
+            f"UPDATE vpn_configs SET {assignments} WHERE id = ?",  # noqa: S608 - column names are literals above
+            (*updates.values(), r["id"]),
+        )
+        rotated += 1
+    if rotated:
+        log.info("init_db: re-keyed %d config(s) from SHA-256 onto scrypt", rotated)
 
 
 # ── Settings ──────────────────────────────────────────────────────────────────

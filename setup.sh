@@ -273,6 +273,7 @@ gen_secret_key() {
 if [[ ! -f .env ]]; then
     SMG_KEY=$(gen_secret_key)
     SMG_TOKEN=$(gen_secret_key)
+    SMG_SALT=$(gen_secret_key)
     cat > .env <<EOF
 SMG_LOGGING=true
 SMG_LOG_LEVEL=INFO
@@ -281,6 +282,11 @@ SMG_LOG_LEVEL=INFO
 # and private — changing it makes existing encrypted secrets unrecoverable.
 # Leave empty to disable encryption (not recommended).
 SMG_SECRET_KEY=${SMG_KEY}
+# Per-deployment salt for the scrypt key derivation. Not secret, but it must
+# stay stable — changing it makes existing encrypted secrets unrecoverable.
+# Only written for fresh installs; existing deployments keep using the built-in
+# default salt, which is why setup never appends this to an existing .env.
+SMG_SECRET_SALT=${SMG_SALT}
 # API token, enabled by default. Every /api/* request must carry a matching
 # X-Smuggler-Token header; the web UI injects it automatically via nginx. The
 # API holds the Docker socket, so authenticating it is the safer default —

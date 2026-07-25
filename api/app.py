@@ -9,7 +9,7 @@ from flask import Flask, request
 from flask_cors import CORS
 
 from cli.log import get_logger, log_file_path
-from api.crypto import encryption_enabled
+from api.crypto import encryption_enabled, weak_key_reason
 from api.mules import mules_bp
 from api.torrents import torrents_bp
 from api.stats import stats_bp
@@ -86,6 +86,14 @@ def create_app() -> Flask:
             "Run ./setup.sh to generate one, or set SMG_ALLOW_PLAINTEXT_SECRETS=1 "
             "to store secrets unencrypted (not recommended)."
         )
+    else:
+        _weak = weak_key_reason()
+        if _weak:
+            log.warning(
+                "SMG_SECRET_KEY looks weak (%s). scrypt makes guessing costly but "
+                "cannot rescue a trivial secret — prefer the key ./setup.sh "
+                "generates (openssl rand -base64 32).", _weak,
+            )
 
     _MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
     # Exact paths, not a prefix: startswith("/api/health") would also exempt any

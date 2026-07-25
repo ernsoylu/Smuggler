@@ -17,8 +17,8 @@ product Smuggler isn't.
 | 0 — Fail closed | **Done**, verified against a real WireGuard tunnel | `939c7e8` |
 | 1 — Correctness bugs | **Done** | `8beced4` (backend), `62785d1` (frontend) |
 | 8 — Docs & hygiene | **Done** | `8beced4` |
-| 2 — Crypto hardening | Not started — next | |
-| 3 — Container/network | Not started | |
+| 2 — Crypto hardening | **Done** — scrypt + MultiFernet rotation | `0d46579` |
+| 3 — Container/network | Not started — next | |
 | 4 — Truthful deploy state | Not started | |
 | 5 — Supply chain & CI | Not started | |
 | 6 — UX gaps | Not started | |

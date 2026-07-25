@@ -82,9 +82,18 @@ This key encrypts every stored VPN secret.
 - The key and the database live on the same host, so encryption-at-rest primarily
   defends against **database-only exfiltration** (e.g. a leaked backup), not
   against an attacker who already has host access.
-- The key derivation is an unsalted SHA-256 of `SMG_SECRET_KEY` (no stretching),
-  which is appropriate for the generated high-entropy value but weak for a
-  hand-chosen passphrase — keep the generated key.
+- Key derivation is **scrypt** (N=2¹⁴, r=8, p=1) over `SMG_SECRET_KEY` and
+  `SMG_SECRET_SALT`. The original scheme was an unsalted SHA-256, which could be
+  brute-forced at raw hash speed against a captured row; scrypt makes offline
+  guessing impractical even for a hand-chosen passphrase. The API still warns at
+  startup if the key looks weak — prefer the generated one.
+- Existing ciphertext keeps working: both keys live in a `MultiFernet`, and
+  `init_db` rotates SHA-256 rows onto scrypt in place on first start. The
+  rotation is idempotent and skips rows that are already current.
+- `SMG_SECRET_SALT` is written only for **fresh** installs, so upgrading an
+  existing deployment keeps using the built-in default salt and nothing becomes
+  unreadable. It is not secret, but like the key it must stay stable — losing or
+  changing either makes encrypted secrets unrecoverable. Back it up with `.env`.
 
 ### 2. The API token (enabled by default)
 
