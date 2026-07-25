@@ -99,20 +99,27 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
+      # Trivy runs as a container rather than via aquasecurity/trivy-action.
+      # The action is SHA-pinned but internally references a *floating* tag of
+      # aquasecurity/setup-trivy, which upstream deleted — the pin protected
+      # against content drift but not against a vanished transitive dependency,
+      # and every scan job failed at "Set up job". A digest-pinned image has no
+      # such indirection, and is exactly how these scans were validated locally.
+      #
       # --ignore-unfixed is deliberate: the Debian and Alpine bases carry dozens
       # of HIGH/CRITICAL advisories with no upstream patch available, so gating
       # on those would leave CI permanently red for something no change here can
       # resolve. Failing only on fixable CVEs keeps the signal actionable — the
       # fix is always "rebuild against a newer base digest".
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
-        with:
-          image-ref: smuggler-scan-${{ matrix.name }}:ci
-          scanners: vuln
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
-          format: table
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${HOME}/.cache/trivy:/root/.cache/trivy" \
+            aquasec/trivy:0.58.1@sha256:ab70a02200597efa04748f210f793936eb647cbcdb0ea69cc30b226d6f5a22c7 \
+            image --scanners vuln --ignore-unfixed \
+                  --severity HIGH,CRITICAL --exit-code 1 --format table \
+                  "smuggler-scan-${{ matrix.name }}:ci"
 
   iac-config:
     name: IaC misconfiguration (trivy config)
@@ -121,16 +128,16 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       # Reads .trivyignore, which documents the one accepted finding (DS-0002)
-      # and why. Anything new fails.
+      # and why. Anything new fails. Container rather than action — see the
+      # image-scan job above for why.
       - name: Trivy config scan
-        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
-        with:
-          scan-type: config
-          scan-ref: .
-          severity: HIGH,CRITICAL
-          exit-code: "1"
-          trivyignores: .trivyignore
-          format: table
+        run: |
+          docker run --rm \
+            -v "${PWD}:/src" -w /src \
+            -v "${HOME}/.cache/trivy:/root/.cache/trivy" \
+            aquasec/trivy:0.58.1@sha256:ab70a02200597efa04748f210f793936eb647cbcdb0ea69cc30b226d6f5a22c7 \
+            config --severity HIGH,CRITICAL --exit-code 1 \
+                   --ignorefile /src/.trivyignore --format table /src
 
   sbom:
     name: SBOM (CycloneDX)
