@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -146,6 +147,29 @@ class TestAddTorrent:
 
         assert r.status_code == 201
         assert r.get_json()["gid"] == "filegid456"
+
+    @resp_lib.activate
+    def test_torrent_file_dot_stem_cannot_escape_downloads(self, client):
+        """Traversal guard: dot-only stems (".." always, "...torrent" on
+        Python <3.14) must not produce a download dir with a ".." component."""
+        mule = make_mule_info()
+
+        with patch("api.torrents.get_docker_client"), \
+             patch("api.torrents.get_mule", return_value=mule):
+            for fname in ("..", "...torrent"):
+                resp_lib.add(resp_lib.POST, ARIA2_URL, json=rpc_ok("filegid789"))
+                r = client.post(
+                    "/api/torrents/smuggler-mule-test",
+                    data={"torrent_file": (io.BytesIO(b"d8:announce...e"), fname)},
+                    content_type="multipart/form-data",
+                )
+                assert r.status_code == 201
+
+        for call in resp_lib.calls:
+            payload = json.loads(call.request.body)
+            for param in payload["params"]:
+                if isinstance(param, dict) and "dir" in param:
+                    assert ".." not in param["dir"].split("/")
 
     def test_returns_400_without_payload(self, client):
         mule = make_mule_info()
