@@ -199,6 +199,18 @@ def _find_free_port() -> int:
     return port
 
 
+# Mule names double as DNS hostnames on the internal RPC network, so an
+# override must never be FQDN-shaped: a dotted name that outlives its container
+# would resolve externally and send the RPC token off-host.
+MULE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,62}")
+MULE_NAME_ERROR = "invalid mule name: letters, digits, '-' and '_' only (max 63 chars)"
+
+
+def is_valid_mule_name(name: str) -> bool:
+    """True if *name* is safe to use as a container name and RPC hostname."""
+    return bool(MULE_NAME_RE.fullmatch(name))
+
+
 def start_mule(
     client: docker.DockerClient,
     vpn_config_path: str | Path,
@@ -226,6 +238,9 @@ def start_mule(
       - Credentials passed as OVPN_USERNAME / OVPN_PASSWORD env vars
       - Only requires NET_ADMIN capability
     """
+    if name and not is_valid_mule_name(name):
+        raise ValueError(MULE_NAME_ERROR)
+
     vpn_config_path = Path(vpn_config_path).resolve()
     log.info("start_mule: vpn_config=%s name=%s vpn_type=%s", vpn_config_path, log_safe(name), vpn_type)
 

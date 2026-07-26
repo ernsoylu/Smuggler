@@ -24,6 +24,7 @@ from cli.docker_client import (
     start_mule,
     stop_mule,
     wait_for_vpn,
+    is_valid_mule_name,
     MULE_LABEL,
     MULE_IMAGE,
 )
@@ -629,3 +630,22 @@ class TestMuleHardening:
     ):
         k = self._run_kwargs(mock_docker_client, mock_container)
         assert k["ports"]["6800/tcp"] == ("127.0.0.1", 16800)
+
+
+class TestMuleNameValidation:
+    """The name override becomes both the container name and the RPC hostname."""
+
+    @pytest.mark.parametrize("bad", [
+        "evil.example.com",  # FQDN-shaped — could resolve off-network
+        "-leading-dash",
+        "has space",
+        "sneaky/../path",
+        "x" * 64,  # over the 63-char DNS label limit
+    ])
+    def test_start_mule_rejects_unsafe_names(self, bad):
+        with pytest.raises(ValueError):
+            start_mule(client=None, vpn_config_path="unused.conf", name=bad)
+
+    @pytest.mark.parametrize("good", ["mule1", "smuggler-mule-a1b2", "A_b-3", "x" * 63])
+    def test_accepts_plain_names(self, good):
+        assert is_valid_mule_name(good)

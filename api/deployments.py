@@ -24,7 +24,7 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 from api.configs import DeployError, check_deployable, perform_deploy
-from cli.docker_client import get_docker_client, get_mule_phase
+from cli.docker_client import get_docker_client, get_mule_phase, is_valid_mule_name, MULE_NAME_ERROR
 from cli.log import get_logger, log_safe
 
 log = get_logger(__name__)
@@ -170,6 +170,10 @@ def start_deployment():
     # numeric value rather than request-tainted input.
     config_id = int(config_id)
 
+    name = data.get("name") or None
+    if name is not None and not is_valid_mule_name(name):
+        return jsonify({"error": MULE_NAME_ERROR}), 400
+
     log.info("POST /api/deployments/ config_id=%d", config_id)
     try:
         config = check_deployable(config_id)
@@ -199,7 +203,7 @@ def start_deployment():
         payload = _public(job)
 
     threading.Thread(
-        target=_run_deploy, args=(job_id, config_id, config, data.get("name") or None),
+        target=_run_deploy, args=(job_id, config_id, config, name),
         name=f"smuggler-deploy-{job_id[:8]}", daemon=True,
     ).start()
 

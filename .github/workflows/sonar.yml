@@ -40,6 +40,7 @@ jobs:
         with:
           # Full history so Sonar can attribute issues/coverage to New Code.
           fetch-depth: 0
+          persist-credentials: false
 
       # ── Python coverage (coverage.xml) ────────────────────────────────────
       - name: Install uv
