@@ -320,3 +320,44 @@ class TestStartWatchdogIdempotence:
             assert wd._watchdog_thread.is_alive()
         finally:
             self._reset()
+
+
+# ─── Evacuation audit events ─────────────────────────────────────────────────
+
+class TestEvacuationEvents:
+    def test_auto_evacuation_records_trigger_and_completion(self):
+        from api.database import list_events
+        report = {"migrated": ["gid1", "gid2"], "skipped": [], "killed": True}
+        with patch("api.watchdog.evacuate_mule", return_value=report):
+            wd._do_evacuation(MagicMock(), "smuggler-mule-test", consecutive=3)
+
+        triggered = list_events(kind="evacuation_triggered")
+        assert len(triggered) == 1
+        assert triggered[0]["source"] == "watchdog"
+        assert triggered[0]["severity"] == "critical"
+        assert triggered[0]["payload"] == {"failures": 3}
+
+        complete = list_events(kind="evacuation_complete")
+        assert len(complete) == 1
+        assert complete[0]["payload"] == {"migrated": 2, "skipped": 0, "killed": True}
+
+    def test_failed_evacuation_records_error(self):
+        from api.database import list_events
+        with patch("api.watchdog.evacuate_mule", side_effect=RuntimeError("no healthy mules")):
+            wd._do_evacuation(MagicMock(), "smuggler-mule-test", consecutive=3)
+
+        errors = list_events(kind="evacuation_error")
+        assert len(errors) == 1
+        assert errors[0]["payload"] == {"error": "no healthy mules"}
+
+    def test_manual_evacuation_endpoint_records_event(self, client):
+        from api.database import list_events
+        report = {"migrated": [], "skipped": ["gid9"], "killed": True}
+        with patch("api.watchdog.get_docker_client"), \
+             patch("api.watchdog.evacuate_mule", return_value=report):
+            resp = client.post("/api/watchdog/smuggler-mule-test/evacuate")
+        assert resp.status_code == 200
+
+        manual = list_events(kind="evacuation_manual")
+        assert len(manual) == 1
+        assert manual[0]["payload"] == {"kill_after": True, "migrated": 0, "skipped": 1}

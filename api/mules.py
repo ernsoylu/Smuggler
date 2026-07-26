@@ -9,12 +9,13 @@ from pathlib import Path
 
 from flask import Blueprint, request, jsonify
 
-from cli.log import get_logger, log_safe
+from cli.log import get_logger, log_safe, redact
 from cli.docker_client import (
     get_docker_client,
     start_mule,
     list_mules,
     get_mule,
+    get_container_logs,
     stop_mule,
     kill_mule,
     exec_in_mule,
@@ -242,6 +243,34 @@ def evacuate(mule_name: str):
         log.error("POST /api/mules/%s/evacuate: error — %s", safe, exc)
         return jsonify({"error": str(exc)}), 500
     return jsonify(report)
+
+
+# ─── GET /api/mules/<name>/logs ──────────────────────────────────────────────
+
+@mules_bp.get("/<mule_name>/logs")
+def container_logs(mule_name: str):
+    """Return the tail of a mule's container logs, secrets redacted.
+
+    Query params:
+      ?tail=200   — lines to return (1–1000, default 200)
+    """
+    safe = log_safe(mule_name)
+    log.info("GET /api/mules/%s/logs", safe)
+    try:
+        tail = int(request.args.get("tail", "200"))
+    except ValueError:
+        return jsonify({"error": "tail must be an integer"}), 400
+    tail = max(1, min(tail, 1000))
+
+    client = get_docker_client()
+    try:
+        raw = get_container_logs(client, mule_name, tail=tail)
+    except RuntimeError as exc:
+        log.warning("GET /api/mules/%s/logs: error — %s", safe, exc)
+        return jsonify({"error": str(exc)}), 404
+    # Mule stdout should never contain key material, but this endpoint hands
+    # container internals to the browser — scrub rather than trust.
+    return jsonify({"name": mule_name, "tail": tail, "logs": redact(raw)})
 
 
 # ─── GET /api/mules/<name>/ip ────────────────────────────────────────────────

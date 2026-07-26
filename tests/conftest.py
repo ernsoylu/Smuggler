@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import MagicMock
 
 import pytest
 
 from api import database
+
+# Set at import time, not in a fixture: pytest-flask's autouse
+# _configure_application fixture requests the `app` fixture — and with it
+# create_app() — BEFORE function-scoped fixtures like isolated_db run, so a
+# fixture-level env var would be too late to stop the observer thread.
+os.environ["SMG_OBSERVER_ENABLED"] = "false"
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +28,10 @@ def isolated_db(tmp_path, monkeypatch):
     db_file = tmp_path / "smuggler-test.db"
     monkeypatch.setenv("SMG_DB_PATH", str(db_file))
     monkeypatch.setattr(database, "DB_PATH", db_file)
+    # Belt to the module-level braces above: guarantees the observer stays
+    # disabled per-test even if something restores os.environ wholesale.
+    # Tests drive api.observer._run_sweep() directly instead.
+    monkeypatch.setenv("SMG_OBSERVER_ENABLED", "false")
     # Create the schema up front, as create_app() does at startup — otherwise
     # tests that touch settings without building an app hit "no such table".
     database.init_db()

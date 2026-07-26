@@ -23,6 +23,7 @@ API endpoints
 
 from __future__ import annotations
 
+import sqlite3
 import threading
 import time
 from datetime import datetime, timezone
@@ -37,6 +38,7 @@ from cli.docker_client import (
     check_mule_vpn,
     evacuate_mule,
 )
+from api.database import record_event
 
 log = get_logger(__name__)
 
@@ -121,12 +123,21 @@ def _record_result(mule_name: str, result: dict, threshold: int) -> tuple[int, b
     return consecutive, already_evacuated
 
 
+def _audit(kind: str, mule_name: str, severity: str, payload: dict) -> None:
+    """Persist a watchdog event; a broken DB must never block an evacuation."""
+    try:
+        record_event("watchdog", kind, severity=severity, mule=mule_name, payload=payload)
+    except sqlite3.Error as exc:
+        log.error("watchdog: could not record %s event — %s", kind, exc)
+
+
 def _do_evacuation(client, mule_name: str, consecutive: int) -> None:
     """Run evacuate_mule(), log the report, and mark the mule evacuated."""
     log.error(
         "watchdog: TRIGGERING EVACUATION for mule=%s (failures=%d)",
         mule_name, consecutive,
     )
+    _audit("evacuation_triggered", mule_name, "critical", {"failures": consecutive})
     try:
         report = evacuate_mule(client, mule_name, kill_after=True)
         log.info(
@@ -136,8 +147,14 @@ def _do_evacuation(client, mule_name: str, consecutive: int) -> None:
             len(report.get("skipped", [])),
             report.get("killed"),
         )
+        _audit("evacuation_complete", mule_name, "warning", {
+            "migrated": len(report.get("migrated", [])),
+            "skipped": len(report.get("skipped", [])),
+            "killed": report.get("killed"),
+        })
     except Exception as exc:
         log.error("watchdog: evacuation error for mule=%s — %s", mule_name, exc)
+        _audit("evacuation_error", mule_name, "error", {"error": str(exc)})
 
     with _lock:
         if mule_name in _mule_states:
@@ -296,6 +313,12 @@ def watchdog_evacuate(mule_name: str):
     except RuntimeError as exc:
         log.error("POST /api/watchdog/%s/evacuate: error — %s", safe, exc)
         return jsonify({"error": str(exc)}), 500
+
+    _audit("evacuation_manual", mule_name, "warning", {
+        "kill_after": kill_after,
+        "migrated": len(report.get("migrated", [])),
+        "skipped": len(report.get("skipped", [])),
+    })
 
     with _lock:
         _watchdog_stats["total_evacuations"] += 1

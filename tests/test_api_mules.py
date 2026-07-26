@@ -177,3 +177,40 @@ class TestMuleIp:
                    side_effect=RuntimeError("not running")):
             r = client.get("/api/mules/smuggler-mule-test/ip")
         assert r.status_code == 400
+
+
+# ─── GET /api/mules/<name>/logs ──────────────────────────────────────────────
+
+class TestContainerLogs:
+    def test_returns_redacted_tail(self, client):
+        raw = "aria2 started PID=42\nrpc_token=super-secret\n"
+        with patch("api.mules.get_docker_client"), \
+             patch("api.mules.get_container_logs", return_value=raw) as mock_logs:
+            r = client.get("/api/mules/smuggler-mule-test/logs?tail=100")
+        assert r.status_code == 200
+        data = r.get_json()
+        assert data["name"] == "smuggler-mule-test"
+        assert data["tail"] == 100
+        assert "super-secret" not in data["logs"]
+        assert "rpc_token=[REDACTED]" in data["logs"]
+        assert "aria2 started PID=42" in data["logs"]
+        mock_logs.assert_called_once()
+
+    def test_tail_clamped_to_bounds(self, client):
+        with patch("api.mules.get_docker_client"), \
+             patch("api.mules.get_container_logs", return_value="") as mock_logs:
+            r = client.get("/api/mules/smuggler-mule-test/logs?tail=99999")
+        assert r.status_code == 200
+        assert r.get_json()["tail"] == 1000
+        assert mock_logs.call_args.kwargs["tail"] == 1000
+
+    def test_non_integer_tail_rejected(self, client):
+        r = client.get("/api/mules/smuggler-mule-test/logs?tail=abc")
+        assert r.status_code == 400
+
+    def test_unknown_mule_404(self, client):
+        with patch("api.mules.get_docker_client"), \
+             patch("api.mules.get_container_logs",
+                   side_effect=RuntimeError("Mule not found: 'nope'")):
+            r = client.get("/api/mules/nope/logs")
+        assert r.status_code == 404
