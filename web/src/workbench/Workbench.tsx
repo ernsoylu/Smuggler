@@ -6,7 +6,6 @@ import {
   type DockviewApi,
   type DockviewReadyEvent,
   type IDockviewPanelProps,
-  type IWatermarkPanelProps,
 } from 'dockview-react';
 import { Button, Stack, Text } from '@mantine/core';
 import { ErrorBoundary } from '../components/ErrorBoundary';
@@ -29,7 +28,7 @@ import { isPage, parseHash, toHash, type Page } from '../lib/router';
 
 const LAYOUT_KEY = 'smuggler.layout.v1';
 
-export const PANEL_TITLES: Record<Page, string> = {
+const PANEL_TITLES: Record<Page, string> = {
   torrents: 'Torrents',
   mules: 'Mules',
   configs: 'Configs',
@@ -38,7 +37,7 @@ export const PANEL_TITLES: Record<Page, string> = {
 
 /** Each panel scrolls its own content; the grid itself never scrolls. */
 function panel(Component: React.ComponentType) {
-  return function PanelHost(_props: IDockviewPanelProps) {
+  return function PanelHost() {
     return (
       <div style={{ height: '100%', overflow: 'auto' }}>
         <ErrorBoundary>
@@ -56,7 +55,7 @@ const components: Record<Page, React.FunctionComponent<IDockviewPanelProps>> = {
   settings: panel(SettingsPage),
 };
 
-function Watermark(_props: IWatermarkPanelProps) {
+function Watermark() {
   return (
     <Stack align="center" justify="center" h="100%" gap="xs">
       <Text c="dimmed" size="sm">All panels closed.</Text>
