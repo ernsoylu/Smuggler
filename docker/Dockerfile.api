@@ -7,11 +7,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install runtime dependencies. requirements.txt is the single source of truth
-# for the API image and already pins flask, flask-cors, requests, docker,
-# python-dotenv and gunicorn — do not swallow failures here.
+# Install runtime dependencies. requirements.txt is compiled from
+# requirements.in (regeneration command in either file's header), so every
+# package — transitive deps included — is pinned to an exact version and
+# sha256. --require-hashes makes pip enforce those pins and --only-binary
+# keeps sdist setup scripts from executing at build time. Do not swallow
+# failures here.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --require-hashes --only-binary :all: -r requirements.txt
 
 # We will mount the working directory via docker-compose, 
 # but copying the code makes the image self-contained if needed.

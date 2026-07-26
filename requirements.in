@@ -1,0 +1,11 @@
+# Direct runtime dependencies of the API image — the human-edited source of
+# truth. requirements.txt is compiled from this file; regenerate it after any
+# change here:
+#   uv pip compile requirements.in -o requirements.txt --generate-hashes --universal --python-version 3.14
+flask>=3.0
+flask-cors>=4.0
+gunicorn>=26.0.0
+requests>=2.31
+docker>=7.2.0
+python-dotenv>=1.0
+cryptography>=42.0

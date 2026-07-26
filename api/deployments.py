@@ -166,6 +166,9 @@ def start_deployment():
     config_id = data.get("config_id")
     if not isinstance(config_id, int):
         return jsonify({"error": "config_id (int) is required"}), 400
+    # int() so everything downstream (log line, job dict) carries a provably
+    # numeric value rather than request-tainted input.
+    config_id = int(config_id)
 
     log.info("POST /api/deployments/ config_id=%d", config_id)
     try:

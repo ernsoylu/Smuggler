@@ -151,5 +151,5 @@ export function leastLoadedMule(mules: Mule[], torrents: Torrent[]): Mule | null
     const ml = load.get(m.name) ?? 0;
     if (ml !== bl) return ml < bl ? m : best;
     return m.name < best.name ? m : best;
-  });
+  }, running[0]);
 }

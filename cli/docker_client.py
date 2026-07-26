@@ -114,7 +114,10 @@ class MuleInfo:
 
     @property
     def rpc_url(self) -> str:
-        return f"http://{self.rpc_host}:{self.rpc_target_port}/jsonrpc"
+        # Cleartext by design: aria2 ships no TLS listener, and this URL only
+        # ever points at the isolated internal RPC network or host loopback,
+        # with a per-mule RPC secret gating every call.
+        return f"http://{self.rpc_host}:{self.rpc_target_port}/jsonrpc"  # NOSONAR
 
 
 def aria2_for(mule: MuleInfo, timeout: int | None = None) -> Aria2Client:
