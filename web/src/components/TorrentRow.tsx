@@ -408,12 +408,26 @@ interface Props {
   torrent: Torrent;
   selected?: boolean;
   onToggleSelected?: () => void;
+  /**
+   * Expansion is owned by the page, not the row. Local state was destroyed
+   * whenever pagination, sorting or filtering unmounted the row, so an open
+   * detail panel silently closed itself; the page also needs to know a row is
+   * open so it can stop the list reordering underneath it.
+   */
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
 }
 
-export function TorrentRow({ torrent, selected = false, onToggleSelected }: Readonly<Props>) {
+export function TorrentRow({
+  torrent, selected = false, onToggleSelected, expanded, onToggleExpanded,
+}: Readonly<Props>) {
   const qc = useQueryClient();
   const [showConfirm, setShowConfirm] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
+  // Uncontrolled fallback keeps the component usable on its own (and in tests)
+  // when a caller does not lift the state.
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const isExpanded = expanded ?? localExpanded;
+  const toggleExpanded = onToggleExpanded ?? (() => setLocalExpanded(v => !v));
   const [activeTab, setActiveTab] = useState<DetailTab>('status');
 
   const pause = useMutation({
@@ -462,7 +476,7 @@ export function TorrentRow({ torrent, selected = false, onToggleSelected }: Read
               color="gray"
               size="sm"
               mt={2}
-              onClick={() => setIsExpanded(!isExpanded)}
+              onClick={toggleExpanded}
               title={isExpanded ? 'Collapse' : 'Expand details'}
               aria-expanded={isExpanded}
             >

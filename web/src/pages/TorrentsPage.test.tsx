@@ -35,7 +35,7 @@ const selectRow = async (name: RegExp) =>
 
 const bulkBar = () => screen.getByText(/\d+ selected/).closest('div')!;
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
 
 describe('TorrentsPage bulk actions', () => {
   const two = [
@@ -158,5 +158,74 @@ describe('TorrentsPage empty states', () => {
 
     expect(await screen.findByText(/no error torrents found/i)).toBeInTheDocument();
     expect(screen.queryByText(/set up your first/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('TorrentsPage list ergonomics', () => {
+  const two = [
+    makeTorrent({ gid: 'a', name: 'alpha.iso', download_speed: 100 }),
+    makeTorrent({ gid: 'b', name: 'beta.iso', download_speed: 900 }),
+  ];
+
+  it('holds the row order still while a selection exists', async () => {
+    setup(two);
+    renderWithProviders(<TorrentsPage />);
+    await screen.findByText('alpha.iso');
+
+    // Sort by speed so the order is data-driven and would move on refetch.
+    await userEvent.click(screen.getByRole('button', { name: /speed/i }));
+    const before = screen.getAllByRole('checkbox', { name: /^select \w+\.iso$/i }).map(c => c.getAttribute('aria-label'));
+
+    await selectRow(/select alpha\.iso/i);
+    // Speeds swap on the next poll; a frozen list must not reorder underneath.
+    vi.mocked(client.getAllTorrents).mockResolvedValue([
+      makeTorrent({ gid: 'a', name: 'alpha.iso', download_speed: 5000 }),
+      makeTorrent({ gid: 'b', name: 'beta.iso', download_speed: 10 }),
+    ]);
+
+    await waitFor(() => expect(client.getAllTorrents).toHaveBeenCalledTimes(2), { timeout: 4000 });
+    const after = screen.getAllByRole('checkbox', { name: /^select \w+\.iso$/i }).map(c => c.getAttribute('aria-label'));
+    expect(after).toEqual(before);
+  });
+
+  it('lets the order resume once the user is done', async () => {
+    setup(two);
+    renderWithProviders(<TorrentsPage />);
+    await screen.findByText('alpha.iso');
+
+    await selectRow(/select alpha\.iso/i);
+    expect(screen.getByText(/1 selected/)).toBeInTheDocument();
+
+    await userEvent.click(within(bulkBar()).getByRole('button', { name: /clear/i }));
+    await waitFor(() => expect(screen.queryByText(/1 selected/)).not.toBeInTheDocument());
+  });
+
+  it('keeps a detail panel open across a page-size change', async () => {
+    setup(two);
+    renderWithProviders(<TorrentsPage />);
+    await screen.findByText('alpha.iso');
+
+    await userEvent.click(screen.getAllByRole('button', { name: /expand details/i })[0]);
+    expect(await screen.findByRole('tab', { name: /peers/i })).toBeInTheDocument();
+
+    // Expansion used to live in the row, so anything that unmounted it — paging,
+    // sorting, filtering — silently closed the panel.
+    await userEvent.click(screen.getByRole('button', { name: /speed/i }));
+    expect(screen.getByRole('tab', { name: /peers/i })).toBeInTheDocument();
+  });
+
+  it('offers a density toggle and remembers the choice', async () => {
+    setup(two);
+    renderWithProviders(<TorrentsPage />);
+    await screen.findByText('alpha.iso');
+
+    const toggle = screen.getByRole('button', { name: /switch to compact rows/i });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+
+    await userEvent.click(toggle);
+
+    expect(localStorage.getItem('smuggler.torrents.density')).toBe('compact');
+    expect(screen.getByRole('button', { name: /switch to comfortable rows/i }))
+      .toHaveAttribute('aria-pressed', 'true');
   });
 });
