@@ -51,6 +51,12 @@ RESULT = {
 
 
 class TestStartDeployment:
+    def test_rejects_unsafe_mule_name_override(self, client):
+        r = client.post("/api/deployments/",
+                        json={"config_id": 1, "name": "evil.example.com"})
+        assert r.status_code == 400
+        assert "mule name" in r.get_json()["error"]
+
     def test_returns_202_immediately_with_a_pollable_job(self, client):
         with patch("api.deployments.check_deployable", return_value={"vpn_type": "wireguard"}), \
              patch("api.deployments.perform_deploy", return_value=RESULT):

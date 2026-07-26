@@ -23,6 +23,12 @@ def client(app):
     return app.test_client()
 
 
+def test_deploy_rejects_unsafe_mule_name(client):
+    r = client.post("/api/configs/1/deploy", json={"name": "evil.example.com"})
+    assert r.status_code == 400
+    assert "mule name" in r.get_json()["error"]
+
+
 def make_mule(name="smuggler-mule-test", status="running"):
     from cli.docker_client import MuleInfo
     c = MagicMock()

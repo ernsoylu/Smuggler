@@ -17,6 +17,8 @@ from cli.docker_client import (
     wait_for_vpn,
     stop_mule,
     list_mules,
+    is_valid_mule_name,
+    MULE_NAME_ERROR,
 )
 from api.settings import read_settings
 from api.settings_sync import apply_settings_to_mule
@@ -218,6 +220,8 @@ def perform_deploy(config_id: int, config: dict, mule_name: str | None = None,
                 ovpn_password=config.get("ovpn_password"),
                 config_id=config_id,
             )
+        except ValueError as exc:
+            raise DeployError(str(exc), 400) from exc
         except (FileNotFoundError, RuntimeError) as exc:
             raise DeployError(str(exc), 500) from exc
 
@@ -269,9 +273,12 @@ def deploy_mule(config_id: int):
     """
     log.info("POST /api/configs/%d/deploy", config_id)
     data = request.get_json(silent=True) or {}
+    name = data.get("name") or None
+    if name is not None and not is_valid_mule_name(name):
+        return jsonify({"error": MULE_NAME_ERROR}), 400
     try:
         config = check_deployable(config_id)
-        result = perform_deploy(config_id, config, data.get("name") or None)
+        result = perform_deploy(config_id, config, name)
     except DeployError as exc:
         log.error("POST /api/configs/%d/deploy: %s", config_id, exc)
         return jsonify({"error": str(exc), **exc.extra}), exc.status
