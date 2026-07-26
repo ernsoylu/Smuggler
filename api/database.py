@@ -1,7 +1,8 @@
-"""SQLite database layer for Smuggler settings and VPN configurations."""
+"""SQLite database layer for Smuggler settings, VPN configurations and events."""
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from pathlib import Path
@@ -53,6 +54,22 @@ CREATE TABLE IF NOT EXISTS torrent_categories (
     category   TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Append-only audit/observability trail written by the observer, the watchdog
+-- and the API request hook. payload is redacted JSON — secrets must be
+-- scrubbed *before* they reach this table, never on the way out.
+CREATE TABLE IF NOT EXISTS events (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts       TEXT NOT NULL DEFAULT (datetime('now')),
+    source   TEXT NOT NULL,
+    kind     TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT 'info',
+    mule     TEXT,
+    payload  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_events_ts   ON events(ts);
+CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind);
+CREATE INDEX IF NOT EXISTS idx_events_mule ON events(mule);
 """
 
 # Migrations for existing databases that pre-date new columns
@@ -341,4 +358,115 @@ def delete_vpn_config(config_id: int) -> bool:
     deleted = cur.rowcount > 0
     conn.close()
     log.info("delete_vpn_config: id=%d deleted=%s", config_id, deleted)
+    return deleted
+
+
+# ── Events (audit / observability trail) ─────────────────────────────────────
+
+_EVENT_SEVERITIES = ("debug", "info", "warning", "error", "critical")
+
+
+def record_event(
+    source: str,
+    kind: str,
+    *,
+    severity: str = "info",
+    mule: str | None = None,
+    payload: dict[str, Any] | None = None,
+) -> int:
+    """Append one event to the audit trail and return its row id.
+
+    Deliberately does NOT log: one caller is the log-redaction callback, which
+    runs inside the logging pipeline — a log call here would recurse into it.
+    Payloads must already be redacted by the caller.
+    """
+    if severity not in _EVENT_SEVERITIES:
+        severity = "info"
+    conn = _get_conn()
+    cur = conn.execute(
+        "INSERT INTO events (source, kind, severity, mule, payload) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (source, kind, severity, mule,
+         json.dumps(payload, default=str) if payload is not None else None),
+    )
+    conn.commit()
+    event_id = cur.lastrowid or 0
+    conn.close()
+    return event_id
+
+
+def list_events(
+    limit: int = 100,
+    *,
+    before_id: int | None = None,
+    source: str | None = None,
+    kind: str | None = None,
+    severity: str | None = None,
+    mule: str | None = None,
+    since: str | None = None,
+) -> list[dict[str, Any]]:
+    """Events newest-first, with optional filters.
+
+    ``before_id`` pages backwards through history; ``since`` (ISO / SQLite
+    datetime text) bounds by timestamp. Filter values are always bound as
+    parameters — only the static column list below reaches the SQL text.
+    """
+    clauses: list[str] = []
+    params: list[Any] = []
+    for column, value in (
+        ("source", source), ("kind", kind), ("severity", severity), ("mule", mule),
+    ):
+        if value is not None:
+            clauses.append(f"{column} = ?")
+            params.append(value)
+    if before_id is not None:
+        clauses.append("id < ?")
+        params.append(before_id)
+    if since is not None:
+        clauses.append("ts >= ?")
+        params.append(since)
+
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    params.append(max(1, min(limit, 500)))
+
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT id, ts, source, kind, severity, mule, payload FROM events "  # noqa: S608 - clauses are the literal column names above
+        f"{where} ORDER BY id DESC LIMIT ?",
+        params,
+    ).fetchall()
+    conn.close()
+
+    events = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["payload"] = json.loads(d["payload"]) if d["payload"] else None
+        except ValueError:
+            d["payload"] = {"raw": d["payload"]}
+        events.append(d)
+    return events
+
+
+def prune_events(max_age_days: int = 14, max_rows: int = 50_000) -> int:
+    """Enforce event retention: drop rows older than *max_age_days*, then trim
+    the oldest rows beyond *max_rows*. Returns how many rows were deleted."""
+    conn = _get_conn()
+    deleted = 0
+    if max_age_days > 0:
+        cur = conn.execute(
+            "DELETE FROM events WHERE ts < datetime('now', ?)",
+            (f"-{int(max_age_days)} days",),
+        )
+        deleted += cur.rowcount
+    if max_rows > 0:
+        cur = conn.execute(
+            "DELETE FROM events WHERE id <= ("
+            "  SELECT id FROM events ORDER BY id DESC LIMIT 1 OFFSET ?"
+            ")",
+            (max_rows,),
+        )
+        deleted += cur.rowcount
+    conn.commit()
+    conn.close()
     return deleted

@@ -14,6 +14,7 @@
 - **Keyboard & Theme**: `Ctrl+K` command palette, `N` to add, `/` to search, and a light/dark/system theme.
 - **Global Notifications**: Real-time deployment tracking, watchdog alerts, and system feedback via a centralized notification bell.
 - **Host Watchdog**: Background health checks that automatically evacuate and kill compromised mules.
+- **Systemwide Observer**: A read-only audit engine records every mule state transition, evacuation, and mutating API call to a persistent events table (`/api/events`), scans mule stdout for secret-shaped content, and turns any attempt to log a secret into a `secret_redacted` audit event — all log output passes through a redaction filter first.
 - **Unified Storage**: All downloads land in a single host folder, regardless of which mule handled them.
 
 ## System Invariants

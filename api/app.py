@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hmac
 import os
+import sqlite3
+import time
 
-from flask import Flask, request
+from flask import Flask, g, request
 from flask_cors import CORS
 
-from cli.log import get_logger, log_file_path
+from cli.log import get_logger, log_file_path, log_safe
 from api.crypto import encryption_enabled, weak_key_reason
 from api.mules import mules_bp
 from api.torrents import torrents_bp
@@ -17,7 +19,9 @@ from api.settings import settings_bp
 from api.configs import configs_bp
 from api.deployments import deployments_bp
 from api.watchdog import watchdog_bp, start_watchdog
-from api.database import init_db
+from api.observer import observer_bp, start_observer
+from api.events import events_bp
+from api.database import init_db, record_event
 
 log = get_logger(__name__)
 
@@ -114,6 +118,12 @@ def create_app() -> Flask:
     _UNAUTHENTICATED = {"/api/health", "/api/health/"}
 
     @app.before_request
+    def _start_timer():
+        # Registered before _api_guard so rejected requests are timed too —
+        # after_request runs even when a before_request hook short-circuits.
+        g.request_started = time.perf_counter()
+
+    @app.before_request
     def _api_guard():
         if request.method == "OPTIONS" or request.path in _UNAUTHENTICATED:
             return None
@@ -135,6 +145,32 @@ def create_app() -> Flask:
                 return {"error": "Cross-origin request refused"}, 403
         return None
 
+    @app.after_request
+    def _access_log(response):
+        # Access log for every request; reads (the UI polls several endpoints
+        # every 2s) stay at DEBUG so INFO logs remain the story of what
+        # *changed*. Never touch the request body here — VPN config uploads
+        # carry key material.
+        elapsed_ms = (time.perf_counter() - getattr(g, "request_started", time.perf_counter())) * 1000
+        safe_path = log_safe(request.path)
+        level = log.info if request.method in _MUTATING else log.debug
+        level("access: %s %s -> %d (%.1fms)",
+              request.method, safe_path, response.status_code, elapsed_ms)
+
+        if request.method in _MUTATING:
+            # Mutations are the audit trail — persist them as events.
+            try:
+                record_event("api", "api_request", severity="info", payload={
+                    "method": request.method,
+                    "path": safe_path,
+                    "status": response.status_code,
+                    "duration_ms": round(elapsed_ms, 1),
+                    "remote_addr": request.remote_addr,
+                })
+            except sqlite3.Error as exc:
+                log.error("access audit: could not record event — %s", exc)
+        return response
+
     app.register_blueprint(mules_bp)
     app.register_blueprint(torrents_bp)
     app.register_blueprint(stats_bp)
@@ -142,6 +178,8 @@ def create_app() -> Flask:
     app.register_blueprint(configs_bp)
     app.register_blueprint(deployments_bp)
     app.register_blueprint(watchdog_bp)
+    app.register_blueprint(observer_bp)
+    app.register_blueprint(events_bp)
 
     @app.route("/api/health/", methods=["GET"])
     def health():
@@ -159,12 +197,17 @@ def create_app() -> Flask:
         log.error("500: %s", e)
         return {"error": "Internal server error"}, 500
 
-    log.info("create_app: blueprints registered — mules, torrents, stats, settings, configs, deployments, watchdog")
+    log.info("create_app: blueprints registered — mules, torrents, stats, settings, "
+             "configs, deployments, watchdog, observer, events")
 
     # Start the background VPN watchdog (daemon thread — survives app context).
     # start_watchdog() is itself idempotent, which is what actually prevents a
     # second thread; the old WERKZEUG_RUN_MAIN guard read app.debug before
     # app.run() had set it and api/run.py disables the reloader anyway.
     start_watchdog()
+
+    # Start the systemwide observer (same idempotent daemon-thread pattern).
+    # It records state transitions and audit events; it never intervenes.
+    start_observer()
 
     return app

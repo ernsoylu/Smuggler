@@ -484,6 +484,23 @@ def get_container_logs(client: docker.DockerClient, name_or_id: str, tail: int =
     return mule.container.logs(tail=tail).decode(errors="replace")
 
 
+def get_docker_health(mule: MuleInfo) -> str | None:
+    """Docker's own HEALTHCHECK verdict for a mule.
+
+    Returns "healthy" / "unhealthy" / "starting", or None when the state is
+    unreadable or the image declares no healthcheck. Needs a reload because
+    the list endpoint that built this MuleInfo does not carry health state —
+    only inspect does.
+    """
+    try:
+        mule.container.reload()
+        state = mule.container.attrs.get("State") or {}
+        return (state.get("Health") or {}).get("Status")
+    except docker.errors.APIError as exc:
+        log.debug("get_docker_health: mule=%s unreadable — %s", mule.name, exc)
+        return None
+
+
 def list_mules(client: docker.DockerClient) -> list[MuleInfo]:
     """Return all containers that have the smuggler.mule label (any status)."""
     log.debug("list_mules: listing all mules")

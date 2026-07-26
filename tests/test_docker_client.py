@@ -17,6 +17,7 @@ from cli.docker_client import (
     exec_in_mule,
     get_container_logs,
     get_docker_client,
+    get_docker_health,
     get_mule,
     kill_all_mules,
     kill_mule,
@@ -649,3 +650,32 @@ class TestMuleNameValidation:
     @pytest.mark.parametrize("good", ["mule1", "smuggler-mule-a1b2", "A_b-3", "x" * 63])
     def test_accepts_plain_names(self, good):
         assert is_valid_mule_name(good)
+
+
+# ─── get_docker_health ───────────────────────────────────────────────────────
+
+class TestGetDockerHealth:
+    def _mule(self, attrs):
+        c = MagicMock()
+        c.name = "smuggler-mule-test"
+        c.short_id = "abc123"
+        c.status = "running"
+        c.labels = {"smuggler.mule": "true", "smuggler.rpc_port": "16800"}
+        c.attrs = attrs
+        return MuleInfo(c)
+
+    def test_returns_healthcheck_verdict(self):
+        mule = self._mule({"State": {"Health": {"Status": "unhealthy"}}})
+        assert get_docker_health(mule) == "unhealthy"
+        mule.container.reload.assert_called_once()
+
+    def test_none_when_image_has_no_healthcheck(self):
+        assert get_docker_health(self._mule({"State": {"Status": "running"}})) is None
+
+    def test_none_when_state_missing(self):
+        assert get_docker_health(self._mule({})) is None
+
+    def test_none_on_api_error(self):
+        mule = self._mule({})
+        mule.container.reload.side_effect = docker.errors.APIError("gone")
+        assert get_docker_health(mule) is None
