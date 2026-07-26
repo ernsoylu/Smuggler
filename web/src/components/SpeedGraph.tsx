@@ -108,14 +108,14 @@ export function SpeedGraph({ stats, data, height = 140 }: Readonly<Props>) {
       .call(d3.axisLeft(yL).ticks(4).tickSize(-iW).tickFormat(() => ''))
       .call(g => g.select('.domain').remove())
       .call(g => g.selectAll('line')
-        .attr('stroke', 'rgba(255,255,255,0.05)')
+        .attr('stroke', 'rgba(128,128,128,0.14)')
         .attr('stroke-dasharray', '4 4'));
 
     // ── Left axis (Download / emerald) ───────────────────────────────────
     root.append('g')
       .call(d3.axisLeft(yL).ticks(4).tickFormat(fmtAxis))
-      .call(g => g.select('.domain').attr('stroke', 'rgba(255,255,255,0.07)'))
-      .call(g => g.selectAll('.tick line').attr('stroke', 'rgba(255,255,255,0.07)'))
+      .call(g => g.select('.domain').attr('stroke', 'rgba(128,128,128,0.22)'))
+      .call(g => g.selectAll('.tick line').attr('stroke', 'rgba(128,128,128,0.22)'))
       .call(g => g.selectAll('.tick text')
         .attr('fill', '#10b981').attr('font-size', '10').attr('font-family', 'monospace'));
 
@@ -132,8 +132,8 @@ export function SpeedGraph({ stats, data, height = 140 }: Readonly<Props>) {
     root.append('g')
       .attr('transform', `translate(${iW},0)`)
       .call(d3.axisRight(yR).ticks(4).tickFormat(fmtAxis))
-      .call(g => g.select('.domain').attr('stroke', 'rgba(255,255,255,0.07)'))
-      .call(g => g.selectAll('.tick line').attr('stroke', 'rgba(255,255,255,0.07)'))
+      .call(g => g.select('.domain').attr('stroke', 'rgba(128,128,128,0.22)'))
+      .call(g => g.selectAll('.tick line').attr('stroke', 'rgba(128,128,128,0.22)'))
       .call(g => g.selectAll('.tick text')
         .attr('fill', '#60a5fa').attr('font-size', '10').attr('font-family', 'monospace'));
 
@@ -179,7 +179,7 @@ export function SpeedGraph({ stats, data, height = 140 }: Readonly<Props>) {
     const dot = (cx: number, cy: number, color: string) =>
       root.append('circle')
         .attr('cx', cx).attr('cy', cy).attr('r', 3.5)
-        .attr('fill', color).attr('stroke', '#0a0a0a').attr('stroke-width', 1.5);
+        .attr('fill', color).style('stroke', 'var(--mantine-color-body)').attr('stroke-width', 1.5);
 
     dot(x(last.t), yL(last.down), '#10b981');
     dot(x(last.t), yR(last.up),   '#60a5fa');
@@ -188,15 +188,26 @@ export function SpeedGraph({ stats, data, height = 140 }: Readonly<Props>) {
 
   if (history.length < 2) {
     return (
-      <div ref={wrapRef} style={{ height }} className="flex items-center justify-center text-[11px] text-neutral-600 font-mono">
+      <div
+        ref={wrapRef}
+        style={{
+          height,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 11,
+          fontFamily: 'var(--mantine-font-family-monospace)',
+          color: 'var(--mantine-color-dimmed)',
+        }}
+      >
         collecting data…
       </div>
     );
   }
 
   return (
-    <div ref={wrapRef} className="w-full">
-      <svg ref={svgRef} className="block overflow-visible" />
+    <div ref={wrapRef} style={{ width: '100%' }}>
+      <svg ref={svgRef} style={{ display: 'block', overflow: 'visible' }} />
     </div>
   );
 }

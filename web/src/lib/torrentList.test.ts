@@ -3,7 +3,7 @@ import type { Torrent, Mule } from '../api/types'
 import {
   filterTorrents, matchesSearch, sortTorrents, nextSort, paginate, totalPages,
   statusCounts, torrentKey, leastLoadedMule, DEFAULT_PAGE_SIZE,
-  categoriesOf, ALL_CATEGORIES, UNCATEGORISED,
+  categoriesOf, ALL_CATEGORIES, UNCATEGORISED, resolveRoutingTarget, AUTO_MULE,
 } from './torrentList'
 
 const t = (over: Partial<Torrent> = {}): Torrent => ({
@@ -206,5 +206,32 @@ describe('category filtering', () => {
 
   it('categoriesOf tolerates torrents with no category field', () => {
     expect(categoriesOf([t({ category: undefined as unknown as string })])).toEqual([])
+  })
+})
+
+describe('resolveRoutingTarget', () => {
+  const mules = [m('busy'), m('idle'), m('off', 'exited')]
+  const torrents = [t({ gid: '1', mule: 'busy' }), t({ gid: '2', mule: 'busy' })]
+
+  it('auto-routes to the least loaded running mule', () => {
+    expect(resolveRoutingTarget(AUTO_MULE, mules, torrents)).toBe('idle')
+  })
+
+  it('honours an explicit mule over the automatic choice', () => {
+    expect(resolveRoutingTarget('busy', mules, torrents)).toBe('busy')
+  })
+
+  it('refuses rather than inventing a target when nothing is running', () => {
+    expect(resolveRoutingTarget(AUTO_MULE, [m('off', 'exited')], torrents)).toBeNull()
+  })
+
+  it('treats the empty selection as no target', () => {
+    expect(resolveRoutingTarget('', mules, torrents)).toBeNull()
+  })
+
+  it('never collides with a real mule name', () => {
+    // MULE_NAME_RE requires an alphanumeric first character, so no deployed
+    // mule can ever be called this.
+    expect(AUTO_MULE.charCodeAt(0)).toBe(0)
   })
 })

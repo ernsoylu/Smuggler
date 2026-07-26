@@ -117,20 +117,43 @@ export function TorrentDropZone() {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-neutral-950/80 backdrop-blur-sm pointer-events-none"
       aria-live="polite"
+      style={{
+        position: 'fixed', inset: 0, zIndex: 400,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(0, 0, 0, 0.6)', backdropFilter: 'blur(2px)',
+        pointerEvents: 'none',
+      }}
     >
-      <div className="flex flex-col items-center gap-4 px-10 py-8 rounded-3xl border-2 border-dashed border-blue-500/50 bg-neutral-900/80">
-        <UploadCloud size={40} className={`text-blue-400 ${upload.isPending ? 'animate-pulse' : ''}`} />
+      <div
+        style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16,
+          padding: '32px 40px', borderRadius: 24,
+          border: '2px dashed var(--mantine-color-blue-5)',
+          background: 'var(--mantine-color-body)',
+        }}
+      >
+        <UploadCloud
+          size={40}
+          color="var(--mantine-color-blue-4)"
+          className={upload.isPending ? 'smuggler-pulse' : undefined}
+        />
         {upload.isPending ? (
-          <p className="text-sm font-semibold text-white">Adding torrent…</p>
+          <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--mantine-color-text)' }}>
+            Adding torrent…
+          </p>
         ) : (
           <>
-            <p className="text-base font-bold text-white tracking-tight">Drop .torrent files to add</p>
-            <p className="text-xs text-neutral-400">
+            <p style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--mantine-color-text)' }}>
+              Drop .torrent files to add
+            </p>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--mantine-color-dimmed)' }}>
               {target
-                ? <>Will be routed to <span className="font-mono text-neutral-200">{target.name}</span> (least loaded)</>
-                : <span className="text-orange-400">No running mule — deploy one first</span>}
+                ? <>Will be routed to{' '}
+                    <span style={{ fontFamily: 'var(--mantine-font-family-monospace)', color: 'var(--mantine-color-text)' }}>
+                      {target.name}
+                    </span>{' '}(least loaded)</>
+                : <span style={{ color: 'var(--mantine-color-orange-4)' }}>No running mule — deploy one first</span>}
             </p>
           </>
         )}

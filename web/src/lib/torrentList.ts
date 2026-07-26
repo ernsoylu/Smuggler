@@ -153,3 +153,28 @@ export function leastLoadedMule(mules: Mule[], torrents: Torrent[]): Mule | null
     return m.name < best.name ? m : best;
   }, running[0]);
 }
+
+/**
+ * Sentinel for "let the app pick" in the routing-mule selector.
+ *
+ * Cannot collide with a real name — MULE_NAME_RE requires an alphanumeric first
+ * character — and is distinct from '', the old "nothing selected yet" value
+ * that kept the submit button disabled. Written as an escape rather than a
+ * literal control byte, which would make the file read as binary to git.
+ */
+export const AUTO_MULE = '\u0000auto';
+
+/**
+ * Destination for a new torrent given the selector's current value.
+ *
+ * Returns null when auto-routing is asked for and no mule is running, which is
+ * the caller's cue to refuse rather than post to nowhere.
+ */
+export function resolveRoutingTarget(
+  selection: string,
+  mules: Mule[],
+  torrents: Torrent[],
+): string | null {
+  if (selection !== AUTO_MULE) return selection || null;
+  return leastLoadedMule(mules, torrents)?.name ?? null;
+}
