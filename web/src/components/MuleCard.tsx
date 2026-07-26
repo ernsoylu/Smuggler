@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import {
   ActionIcon, Badge, Box, Button, Card, Collapse, Group, Loader, Paper, Progress,
-  Stack, Text,
+  Stack, Text, Tooltip,
 } from '@mantine/core';
 import { stopMule, killMule, getMuleTorrents } from '../api/client';
 import type { Mule, Torrent } from '../api/types';
@@ -312,26 +312,36 @@ export function MuleCard({ mule }: Readonly<Props>) {
             </Group>
           </Paper>
         ) : (
-          <Group gap="xs" grow>
+          /*
+           * Stop carries the width; Kill is demoted to an icon.
+           *
+           * They used to sit side by side at equal weight, so the destructive,
+           * abrupt option was one slipped click from the graceful one. Both are
+           * still one click plus a confirm — only the visual pull differs.
+           */
+          <Group gap="xs" wrap="nowrap">
             <Button
               variant="default"
               size="xs"
+              flex={1}
               leftSection={<Power size={15} />}
               onClick={() => setShowConfirm('stop')}
               disabled={stop.isPending || kill.isPending}
             >
               Stop
             </Button>
-            <Button
-              variant="light"
-              color="red"
-              size="xs"
-              leftSection={<Trash2 size={15} />}
-              onClick={() => setShowConfirm('kill')}
-              disabled={stop.isPending || kill.isPending}
-            >
-              Kill
-            </Button>
+            <Tooltip label="Kill immediately — no graceful shutdown" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="red"
+                size="lg"
+                aria-label="Kill mule immediately"
+                onClick={() => setShowConfirm('kill')}
+                disabled={stop.isPending || kill.isPending}
+              >
+                <Trash2 size={15} />
+              </ActionIcon>
+            </Tooltip>
           </Group>
         )}
       </Box>

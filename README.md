@@ -43,7 +43,7 @@ The fastest way to run Smuggler is via the included lifecycle script:
 ## Development
 - **Local Debug**: `./start.sh debug` (Vite + Flask with hot-reload).
 - **Setup**: `./setup.sh` (installs deps and builds all 4 images).
-- **Tests**: `uv run pytest tests/` (458 passing tests, plus 130 frontend tests via `npm run test:run`).
+- **Tests**: `uv run pytest tests/` (458 passing tests, plus 161 frontend tests via `npm run test:run`).
   > If the backend suite fails en masse with `401`, your local `.env` has a real `SMG_API_TOKEN`;
   > it is loaded at import and the test client sends no header. Run `SMG_API_TOKEN= uv run pytest tests/`.
 - **CI/CD**: Path-filtered GitHub Actions workflows (least-privilege permissions, concurrency-cancelled, dependency-cached):

@@ -44,9 +44,13 @@ export function renderWithProviders(ui: ReactElement, options: Options = {}) {
   const queryClient = options.queryClient ?? makeQueryClient();
   const uiActions = options.uiActions ?? makeUiActions();
 
+  // env="test" disables Mantine's transitions. Without it, portalled content
+  // (Popover, Modal) never finishes entering under jsdom and stays out of the
+  // accessibility tree, so getByRole cannot see buttons that are plainly
+  // visible in a browser.
   function Wrapper({ children }: Readonly<{ children: ReactNode }>) {
     return (
-      <MantineProvider theme={theme} forceColorScheme="dark">
+      <MantineProvider theme={theme} forceColorScheme="dark" env="test">
         <QueryClientProvider client={queryClient}>
           <NotificationProvider>
             <UiActionsContext.Provider value={uiActions}>{children}</UiActionsContext.Provider>
