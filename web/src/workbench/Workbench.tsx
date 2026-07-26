@@ -13,6 +13,7 @@ import { TorrentsPage } from '../pages/TorrentsPage';
 import { MulesPage } from '../pages/MulesPage';
 import { ConfigsPage } from '../pages/ConfigsPage';
 import { SettingsPage } from '../pages/SettingsPage';
+import { EventsPage } from '../pages/EventsPage';
 import { useTheme } from '../context/ThemeContext';
 import { isPage, parseHash, toHash, type Page } from '../lib/router';
 
@@ -32,6 +33,7 @@ const PANEL_TITLES: Record<Page, string> = {
   torrents: 'Torrents',
   mules: 'Mules',
   configs: 'Configs',
+  events: 'Events',
   settings: 'Settings',
 };
 
@@ -52,6 +54,7 @@ const components: Record<Page, React.FunctionComponent<IDockviewPanelProps>> = {
   torrents: panel(TorrentsPage),
   mules: panel(MulesPage),
   configs: panel(ConfigsPage),
+  events: panel(EventsPage),
   settings: panel(SettingsPage),
 };
 
@@ -79,6 +82,12 @@ function buildDefaultLayout(api: DockviewApi): void {
     component: 'configs',
     title: PANEL_TITLES.configs,
     position: { referencePanel: 'mules', direction: 'below' },
+  });
+  api.addPanel({
+    id: 'events',
+    component: 'events',
+    title: PANEL_TITLES.events,
+    position: { referencePanel: 'configs', direction: 'within' },
   });
   api.addPanel({
     id: 'settings',

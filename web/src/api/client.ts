@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { Mule, Torrent, GlobalStats, IpInfo, VpnConfig, MuleHealth, WatchdogStatus, Peer, TorrentOptions, Deployment } from './types';
+import type { Mule, Torrent, GlobalStats, IpInfo, VpnConfig, MuleHealth, WatchdogStatus, Peer, TorrentOptions, Deployment, AuditEvent, EventQuery } from './types';
 
 const api = axios.create({ baseURL: '/api' });
 
@@ -142,3 +142,20 @@ export const evacuateMule = (name: string, kill = true): Promise<object> =>
 
 export const triggerWatchdogSweep = (): Promise<{ swept: number; results: MuleHealth[] }> =>
   api.post<{ swept: number; results: MuleHealth[] }>('/watchdog/run').then(r => r.data);
+
+// ── Events ────────────────────────────────────────────────────────────────────
+
+export { type AuditEvent, type EventQuery, type EventSeverity } from './types';
+
+/**
+ * Audit trail, newest first. Undefined filters are dropped rather than sent as
+ * empty strings, which the API would treat as a literal value to match.
+ */
+export const getEvents = (query: EventQuery = {}): Promise<{ events: AuditEvent[]; count: number }> =>
+  api
+    .get<{ events: AuditEvent[]; count: number }>('/events/', {
+      params: Object.fromEntries(
+        Object.entries(query).filter(([, v]) => v !== undefined && v !== ''),
+      ),
+    })
+    .then(r => r.data);

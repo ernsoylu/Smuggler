@@ -6,7 +6,7 @@ import { useTheme } from '../context/ThemeContext';
 import { fuzzyMatch } from '../lib/fuzzy';
 import {
   Command, LayoutDashboard, Server, FileKey2, Settings, Plus, Rocket,
-  Sun, Moon, Monitor, CornerDownLeft,
+  Sun, Moon, Monitor, CornerDownLeft, ScrollText,
 } from 'lucide-react';
 
 /**
@@ -36,6 +36,7 @@ const PAGE_ICONS: Record<Page, React.ReactNode> = {
   torrents: <LayoutDashboard size={16} />,
   mules: <Server size={16} />,
   configs: <FileKey2 size={16} />,
+  events: <ScrollText size={16} />,
   settings: <Settings size={16} />,
 };
 

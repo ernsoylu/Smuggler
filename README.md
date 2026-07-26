@@ -14,7 +14,7 @@
 - **Keyboard & Theme**: `Ctrl+K` command palette, `N` to add, `/` to search, and a light/dark/system theme.
 - **Global Notifications**: Real-time deployment tracking, watchdog alerts, and system feedback via a centralized notification bell.
 - **Host Watchdog**: Background health checks that automatically evacuate and kill compromised mules.
-- **Systemwide Observer**: A read-only audit engine records every mule state transition, evacuation, and mutating API call to a persistent events table (`/api/events`), scans mule stdout for secret-shaped content, and turns any attempt to log a secret into a `secret_redacted` audit event — all log output passes through a redaction filter first.
+- **Systemwide Observer**: A read-only audit engine records every mule state transition, evacuation, and mutating API call to a persistent events table (`/api/events`), scans mule stdout for secret-shaped content, and turns any attempt to log a secret into a `secret_redacted` audit event — all log output passes through a redaction filter first. The trail is browsable in the UI's **Events** tab, which flags redactions and kill-switch trips as incidents rather than log lines.
 - **Unified Storage**: All downloads land in a single host folder, regardless of which mule handled them.
 
 ## System Invariants
@@ -43,7 +43,7 @@ The fastest way to run Smuggler is via the included lifecycle script:
 ## Development
 - **Local Debug**: `./start.sh debug` (Vite + Flask with hot-reload).
 - **Setup**: `./setup.sh` (installs deps and builds all 4 images).
-- **Tests**: `uv run pytest tests/` (458 passing tests, plus 130 frontend tests via `npm run test:run`).
+- **Tests**: `uv run pytest tests/` (458 passing tests, plus 158 frontend tests via `npm run test:run`).
   > If the backend suite fails en masse with `401`, your local `.env` has a real `SMG_API_TOKEN`;
   > it is loaded at import and the test client sends no header. Run `SMG_API_TOKEN= uv run pytest tests/`.
 - **CI/CD**: Path-filtered GitHub Actions workflows (least-privilege permissions, concurrency-cancelled, dependency-cached):

@@ -132,3 +132,27 @@ describe('watchdog', () => {
     expect(mockInstance.post).toHaveBeenCalledWith('/watchdog/run')
   })
 })
+
+describe('events', () => {
+  it('requests the audit trail newest-first with a limit', async () => {
+    mockInstance.get.mockResolvedValue({ data: { events: [], count: 0 } })
+    await client.getEvents({ limit: 50 })
+    expect(mockInstance.get).toHaveBeenCalledWith('/events/', { params: { limit: 50 } })
+  })
+
+  it('drops unset filters rather than sending them as empty strings', async () => {
+    // The API matches on the literal value, so `severity=` would filter for a
+    // severity of "" and return nothing.
+    mockInstance.get.mockResolvedValue({ data: { events: [], count: 0 } })
+    await client.getEvents({ limit: 100, severity: undefined, source: '', kind: 'secret_redacted' })
+    expect(mockInstance.get).toHaveBeenCalledWith('/events/', {
+      params: { limit: 100, kind: 'secret_redacted' },
+    })
+  })
+
+  it('sends no params at all when nothing is filtered', async () => {
+    mockInstance.get.mockResolvedValue({ data: { events: [], count: 0 } })
+    await client.getEvents()
+    expect(mockInstance.get).toHaveBeenCalledWith('/events/', { params: {} })
+  })
+})
