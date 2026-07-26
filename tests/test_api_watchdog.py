@@ -15,6 +15,7 @@ def reset_watchdog_state():
     """Clear shared watchdog state between tests."""
     with wd._lock:
         wd._mule_states.clear()
+        wd._expected_stops.clear()
         wd._watchdog_stats.update({
             "started_at": None,
             "last_run_at": None,
@@ -361,3 +362,77 @@ class TestEvacuationEvents:
         manual = list_events(kind="evacuation_manual")
         assert len(manual) == 1
         assert manual[0]["payload"] == {"kill_after": True, "migrated": 0, "skipped": 1}
+
+
+# ─── Expected stops (user-initiated teardown must not read as unhealthy) ─────
+
+class TestExpectedStop:
+    def test_sweep_skips_marked_stopping_mule(self):
+        """Regression: a graceful stop racing a sweep raised "VPN compromised"."""
+        wd.mark_expected_stop("smuggler-mule-test")
+        mule = make_mule_info(status="exited")
+        with patch("api.watchdog.get_docker_client"), \
+             patch("api.watchdog.list_mules", return_value=[mule]):
+            results = wd._run_sweep()
+        assert results == []
+        with wd._lock:
+            assert "smuggler-mule-test" not in wd._mule_states
+
+    def test_sweep_drops_prior_state_for_marked_mule(self):
+        with wd._lock:
+            wd._mule_states["smuggler-mule-test"] = {"healthy": False, "consecutive_failures": 1}
+        wd.mark_expected_stop("smuggler-mule-test")
+        mule = make_mule_info(status="exited")
+        with patch("api.watchdog.get_docker_client"), \
+             patch("api.watchdog.list_mules", return_value=[mule]):
+            wd._run_sweep()
+        with wd._lock:
+            assert "smuggler-mule-test" not in wd._mule_states
+
+    def test_expired_marker_flags_exited_mule_again(self):
+        wd.mark_expected_stop("smuggler-mule-test", ttl=-1)
+        mule = make_mule_info(status="exited")
+        with patch("api.watchdog.get_docker_client"), \
+             patch("api.watchdog.list_mules", return_value=[mule]):
+            results = wd._run_sweep()
+        assert len(results) == 1
+        assert results[0]["healthy"] is False
+        assert results[0]["kind"] == "exited"
+
+    def test_marker_does_not_mask_a_running_mule(self):
+        """The marker only excuses non-running statuses — a live container is
+        still probed, so a real VPN failure during the stop window is caught."""
+        wd.mark_expected_stop("smuggler-mule-test")
+        mule = make_mule_info(status="running")
+        with patch("api.watchdog.get_docker_client"), \
+             patch("api.watchdog.list_mules", return_value=[mule]), \
+             patch("api.watchdog.check_mule_vpn", return_value=dict(UNHEALTHY_RESULT)):
+            results = wd._run_sweep()
+        assert len(results) == 1
+        assert results[0]["healthy"] is False
+
+    def test_marker_purged_once_container_is_gone(self):
+        wd.mark_expected_stop("smuggler-mule-test")
+        with patch("api.watchdog.get_docker_client"), \
+             patch("api.watchdog.list_mules", return_value=[]):
+            wd._run_sweep()
+        with wd._lock:
+            assert "smuggler-mule-test" not in wd._expected_stops
+
+    def test_manual_evacuate_endpoint_marks_expected_stop(self, client):
+        report = {"migrated": [], "skipped": [], "killed": True}
+        with patch("api.watchdog.get_docker_client"), \
+             patch("api.watchdog.evacuate_mule", return_value=report):
+            resp = client.post("/api/watchdog/smuggler-mule-test/evacuate")
+        assert resp.status_code == 200
+        with wd._lock:
+            assert "smuggler-mule-test" in wd._expected_stops
+
+    def test_manual_evacuate_keep_does_not_mark(self, client):
+        report = {"migrated": [], "skipped": [], "killed": False}
+        with patch("api.watchdog.get_docker_client"), \
+             patch("api.watchdog.evacuate_mule", return_value=report):
+            resp = client.post("/api/watchdog/smuggler-mule-test/evacuate?kill=false")
+        assert resp.status_code == 200
+        with wd._lock:
+            assert "smuggler-mule-test" not in wd._expected_stops
