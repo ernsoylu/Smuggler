@@ -22,6 +22,7 @@
 - **Dev:** `./start.sh debug`
 - **Test:** `uv run pytest tests/`
 - **CLI:** `uv run smg`
+- **API deps:** edit `requirements.in` (never `requirements.txt` by hand), then regenerate the hash-pinned lock: `uv pip compile requirements.in -o requirements.txt --generate-hashes --universal --python-version 3.14`. `Dockerfile.api` installs with `--require-hashes --only-binary :all:`, so a stale or hand-edited lock fails the image build.
 - **Push:** Following the [Git & Quality Workflow](SKILLS.md#git--quality-workflow)
 
 ## Directory Structure
