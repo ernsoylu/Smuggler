@@ -77,7 +77,7 @@ function WatchdogPanel({ watchdog }: Readonly<{ watchdog: WatchdogStatus | undef
                 <Group gap="sm" wrap="nowrap" miw={0}>
                   <ShieldOff size={14} color="var(--mantine-color-red-4)" style={{ flexShrink: 0 }} />
                   <Stack gap={0} miw={0}>
-                    <Text size="sm" fw={600} c="red.4" truncate>{m.name}</Text>
+                    <Text size="sm" fw={600} c="var(--smg-bad)" truncate>{m.name}</Text>
                     <Text size="11px" c="red.5" truncate>{m.reason}</Text>
                   </Stack>
                   {(m.consecutive_failures ?? 0) > 0 && (

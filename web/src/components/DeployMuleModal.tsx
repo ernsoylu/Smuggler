@@ -6,7 +6,8 @@ import {
 import { getConfigs } from '../api/client';
 import type { VpnConfig } from '../api/client';
 import { useDeployments } from '../context/DeploymentContext';
-import { Rocket, Shield, FileKey2 } from 'lucide-react';
+import { useUiActions } from '../context/UiActionsContext';
+import { Rocket, Shield, FileKey2, FileUp } from 'lucide-react';
 
 interface Props {
   onClose: () => void;
@@ -16,6 +17,7 @@ export function DeployMuleModal({ onClose }: Readonly<Props>) {
   const [deployingId, setDeployingId] = useState<number | null>(null);
   const [error, setError] = useState('');
   const { start } = useDeployments();
+  const { navigate } = useUiActions();
 
   const { data: configs = [], isLoading } = useQuery({
     queryKey: ['configs'],
@@ -67,10 +69,22 @@ export function DeployMuleModal({ onClose }: Readonly<Props>) {
           </Group>
         )}
         {!isLoading && configs.length === 0 && (
+          /* "Go to the Configs tab" was static text in a modal that covers the
+             tab bar. It routes now. */
           <Stack align="center" py="xl" gap={4}>
             <FileKey2 size={40} strokeWidth={1} color="var(--mantine-color-dimmed)" />
             <Text size="sm" fw={500} c="dimmed" mt="xs">No VPN configurations stored.</Text>
-            <Text size="xs" c="dimmed">Go to the Configs tab to upload one.</Text>
+            <Text size="xs" c="dimmed" mb="sm">
+              A mule needs a WireGuard or OpenVPN config to build its tunnel from.
+            </Text>
+            <Button
+              size="compact-sm"
+              variant="default"
+              leftSection={<FileUp size={13} />}
+              onClick={() => { onClose(); navigate('configs'); }}
+            >
+              Upload a config
+            </Button>
           </Stack>
         )}
         {!isLoading && configs.length > 0 && (
@@ -99,7 +113,7 @@ export function DeployMuleModal({ onClose }: Readonly<Props>) {
                         <Text size="sm" fw={600} truncate>{cfg.name}</Text>
                         <Text size="xs" c="dimmed" ff="monospace" truncate>{cfg.filename}</Text>
                         {inUse && (
-                          <Text size="11px" c="yellow.4" truncate>
+                          <Text size="11px" c="var(--smg-attention)" truncate>
                             In use by mule <Text component="span" ff="monospace" size="11px">{cfg.in_use_by_mule}</Text>
                           </Text>
                         )}
@@ -126,7 +140,7 @@ export function DeployMuleModal({ onClose }: Readonly<Props>) {
 
         {error && (
           <Alert color="red" radius="md" p="sm" mt="md">
-            <Text size="sm" fw={500} c="red.4">{error}</Text>
+            <Text size="sm" fw={500} c="var(--smg-bad)">{error}</Text>
           </Alert>
         )}
       </ScrollArea.Autosize>
@@ -136,7 +150,7 @@ export function DeployMuleModal({ onClose }: Readonly<Props>) {
         <Paper mt="md" p="sm" radius="md" style={{ background: 'var(--mantine-color-blue-light)' }}>
           <Group gap="sm">
             <Box w={8} h={8} bg="blue.5" style={{ borderRadius: '50%' }} className="smuggler-pulse" />
-            <Text size="sm" fw={500} c="blue.4">Negotiating VPN handshake... (up to 90s)</Text>
+            <Text size="sm" fw={500} c="var(--smg-info)">Negotiating VPN handshake... (up to 90s)</Text>
           </Group>
         </Paper>
       )}

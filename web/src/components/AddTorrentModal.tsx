@@ -4,8 +4,11 @@ import {
   Alert, Button, Group, Modal, SegmentedControl, Select, Stack, Text, Textarea, ThemeIcon,
   UnstyledButton,
 } from '@mantine/core';
-import { getMules, addMagnet, addTorrentFile } from '../api/client';
-import { UploadCloud, Link as LinkIcon, AlertCircle } from 'lucide-react';
+import { getMules, getAllTorrents, addMagnet, addTorrentFile } from '../api/client';
+import { leastLoadedMule, resolveRoutingTarget, AUTO_MULE } from '../lib/torrentList';
+import { useUiActions } from '../context/UiActionsContext';
+import { useNotifications } from '../context/NotificationContext';
+import { UploadCloud, Link as LinkIcon, AlertCircle, Rocket } from 'lucide-react';
 
 interface Props {
   onClose: () => void;
@@ -13,9 +16,15 @@ interface Props {
 
 export function AddTorrentModal({ onClose }: Readonly<Props>) {
   const qc = useQueryClient();
+  const { openDeployMule } = useUiActions();
+  const { push } = useNotifications();
   const [mode, setMode] = useState<'magnet' | 'file'>('magnet');
   const [magnet, setMagnet] = useState('');
-  const [mule, setMule] = useState('');
+  // Defaults to auto-routing. Dropping a .torrent already picks the
+  // least-loaded mule without asking; making the button path demand the one
+  // decision a user cannot make well ("which container is least loaded?") made
+  // the same action harder through the more obvious entry point.
+  const [mule, setMule] = useState<string>(AUTO_MULE);
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
@@ -26,20 +35,36 @@ export function AddTorrentModal({ onClose }: Readonly<Props>) {
     staleTime: 10_000,
   });
 
+  // Load only matters for the auto choice; the cache is already warm.
+  const { data: torrents = [] } = useQuery({
+    queryKey: ['torrents'],
+    queryFn: getAllTorrents,
+  });
+
   const runningMules = mules.filter(w => w.status === 'running');
+  const autoTarget = leastLoadedMule(mules, torrents);
 
   const add = useMutation({
     mutationFn: async () => {
-      if (!mule) throw new Error('Select a mule');
+      const target = resolveRoutingTarget(mule, mules, torrents);
+      if (!target) throw new Error('No running mule to receive the torrent');
       if (mode === 'magnet') {
         if (!magnet.trim()) throw new Error('Paste a magnet link');
-        return addMagnet(mule, magnet.trim());
+        await addMagnet(target, magnet.trim());
       } else {
         if (!file) throw new Error('Choose a .torrent file');
-        return addTorrentFile(mule, file);
+        await addTorrentFile(target, file);
       }
+      return target;
     },
-    onSuccess: () => {
+    onSuccess: (target) => {
+      // The drop path already confirms; the button path used to just close,
+      // leaving the user to find the new row in a paginated, filtered list.
+      push({
+        type: 'success',
+        title: mode === 'magnet' ? 'Magnet added' : `Added ${file?.name}`,
+        message: `Routed to ${target}.`,
+      });
       qc.invalidateQueries({ queryKey: ['torrents'] });
       onClose();
     },
@@ -125,7 +150,7 @@ export function AddTorrentModal({ onClose }: Readonly<Props>) {
                 onChange={e => { setFile(e.target.files?.[0] ?? null); setError(''); }}
               />
               {file ? (
-                <Text size="sm" fw={500} c="blue.4">{file.name}</Text>
+                <Text size="sm" fw={500} c="var(--smg-info)">{file.name}</Text>
               ) : (
                 <Text size="sm" c="dimmed">Click to choose a .torrent file — or drop one anywhere</Text>
               )}
@@ -138,26 +163,46 @@ export function AddTorrentModal({ onClose }: Readonly<Props>) {
           <Select
             id="add-torrent-mule"
             label="Routing Mule"
-            placeholder="— select a mule —"
-            value={mule || null}
-            onChange={v => { setMule(v ?? ''); setError(''); }}
-            data={runningMules.map(w => ({
-              value: w.name,
-              label: `${w.name}${w.ip_info ? ` (${w.ip_info.country})` : ''}`,
-            }))}
+            allowDeselect={false}
+            value={mule}
+            onChange={v => { setMule(v ?? AUTO_MULE); setError(''); }}
+            data={[
+              {
+                value: AUTO_MULE,
+                label: autoTarget
+                  ? `Auto — least loaded (${autoTarget.name})`
+                  : 'Auto — least loaded',
+              },
+              ...runningMules.map(w => ({
+                value: w.name,
+                label: `${w.name}${w.ip_info ? ` (${w.ip_info.country})` : ''}`,
+              })),
+            ]}
             comboboxProps={{ withinPortal: true }}
           />
+          {/* Used to be a sentence. A dead end that names its own fix should
+              perform it, not describe it. */}
           {runningMules.length === 0 && (
-            <Group gap={6} mt={6}>
-              <AlertCircle size={14} color="var(--mantine-color-orange-4)" />
-              <Text size="xs" fw={500} c="orange.4">No running mules — deploy one first.</Text>
+            <Group gap="xs" mt={6}>
+              <Group gap={6} wrap="nowrap">
+                <AlertCircle size={14} color="var(--mantine-color-orange-4)" />
+                <Text size="xs" fw={500} c="var(--smg-warn)">No running mules.</Text>
+              </Group>
+              <Button
+                size="compact-xs"
+                variant="default"
+                leftSection={<Rocket size={12} />}
+                onClick={() => { onClose(); openDeployMule(); }}
+              >
+                Deploy one
+              </Button>
             </Group>
           )}
         </div>
 
         {error && (
           <Alert color="red" radius="md" p="sm">
-            <Text size="sm" fw={500} c="red.4">{error}</Text>
+            <Text size="sm" fw={500} c="var(--smg-bad)">{error}</Text>
           </Alert>
         )}
 

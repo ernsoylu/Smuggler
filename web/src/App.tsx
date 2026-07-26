@@ -65,8 +65,8 @@ function Shell() {
   const openAddTorrent = useCallback(() => setAddTorrentOpen(true), []);
   const openDeployMule = useCallback(() => setDeployMuleOpen(true), []);
   const uiActions = useMemo(
-    () => ({ openAddTorrent, openDeployMule }),
-    [openAddTorrent, openDeployMule],
+    () => ({ openAddTorrent, openDeployMule, navigate }),
+    [openAddTorrent, openDeployMule, navigate],
   );
 
   const shortcuts: Shortcut[] = useMemo(() => [

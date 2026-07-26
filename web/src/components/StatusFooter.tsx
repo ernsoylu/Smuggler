@@ -9,10 +9,14 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Box, Collapse, Divider, Group, SimpleGrid, Stack, Text, UnstyledButton,
 } from '@mantine/core';
-import { getStats, getAllTorrents } from '../api/client';
+import { getStats, getAllTorrents, getWatchdogStatus } from '../api/client';
 import { SpeedGraph } from './SpeedGraph';
 import type { DataPoint } from './SpeedGraph';
-import { ChevronUp, ChevronDown, Activity, Download, Upload, Server } from 'lucide-react';
+import { useUiActions } from '../context/UiActionsContext';
+import { healthSummary, healthLabel } from '../lib/watchdog';
+import {
+  ChevronUp, ChevronDown, Activity, Download, Upload, Server, Shield, ShieldAlert,
+} from 'lucide-react';
 
 const MAX_POINTS = 60;
 
@@ -47,6 +51,7 @@ function CountCell({ label, value, color }: Readonly<{ label: string; value: num
 export function StatusFooter() {
   const [expanded, setExpanded] = useState(false);
   const [history, setHistory] = useState<DataPoint[]>([]);
+  const { navigate } = useUiActions();
 
   const { data: stats } = useQuery({
     queryKey: ['stats'],
@@ -59,6 +64,15 @@ export function StatusFooter() {
     queryFn: getAllTorrents,
     refetchInterval: 2_000,
   });
+
+  // Same key and cadence the Mules page uses, so this shares its cache entry
+  // rather than adding a fifth poll.
+  const { data: watchdog } = useQuery({
+    queryKey: ['watchdog'],
+    queryFn: getWatchdogStatus,
+    refetchInterval: 15_000,
+  });
+  const health = healthSummary(watchdog);
 
   // Build a rolling speed history from polled stats. Genuine time-series
   // accumulation keyed on Date.now() (impure — must run in an effect), so the
@@ -159,12 +173,12 @@ export function StatusFooter() {
 
         <Group gap={6} wrap="nowrap" miw={90}>
           <Download size={13} color="var(--mantine-color-teal-5)" />
-          <Text size="xs" ff="monospace" fw={600} c="teal.4">{formatBytes(dl)}/s</Text>
+          <Text size="xs" ff="monospace" fw={600} c="var(--smg-ok)">{formatBytes(dl)}/s</Text>
         </Group>
 
         <Group gap={6} wrap="nowrap" miw={90}>
           <Upload size={13} color="var(--mantine-color-blue-5)" />
-          <Text size="xs" ff="monospace" fw={600} c="blue.4">{formatBytes(ul)}/s</Text>
+          <Text size="xs" ff="monospace" fw={600} c="var(--smg-info)">{formatBytes(ul)}/s</Text>
         </Group>
 
         <Divider orientation="vertical" h={16} style={{ alignSelf: 'center' }} />
@@ -188,6 +202,34 @@ export function StatusFooter() {
           <Text size="xs" fw={600}>{mules}</Text>
           <Text size="xs" c="dimmed">mule{mules === 1 ? '' : 's'}</Text>
         </Group>
+
+        {/*
+          Tunnel health — the product's headline signal, and previously visible
+          only on the Mules page. Hidden entirely when there is nothing to
+          report, so an empty system does not display a reassuring "0/0 secure".
+        */}
+        {!health.empty && (
+          <>
+            <Divider orientation="vertical" h={16} style={{ alignSelf: 'center' }} />
+            <UnstyledButton
+              onClick={() => navigate('mules')}
+              title={
+                health.allHealthy
+                  ? 'All mule tunnels verified. Open the Mules page.'
+                  : `${health.compromised} of ${health.total} mule tunnels compromised. Open the Mules page.`
+              }
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              {health.allHealthy
+                ? <Shield size={12} color="var(--mantine-color-teal-5)" />
+                : <ShieldAlert size={12} color="var(--mantine-color-red-5)" />}
+              {/* Never colour alone: the state is spelled out in the label. */}
+              <Text size="xs" fw={500} c={health.allHealthy ? 'teal.4' : 'red.4'} style={{ whiteSpace: 'nowrap' }}>
+                {healthLabel(health)}
+              </Text>
+            </UnstyledButton>
+          </>
+        )}
 
         <Box flex={1} />
 

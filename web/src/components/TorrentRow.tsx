@@ -236,51 +236,23 @@ function FilesTab({ torrent }: Readonly<{ torrent: Torrent }>) {
   );
 }
 
-function PeerFlag({ ip }: Readonly<{ ip: string }>) {
-  const { data: flag } = useQuery({
-    queryKey: ['geo-ip', ip],
-    queryFn: async () => {
-      try {
-        // Handle basic IPv6 loopback or local IPs
-        if (ip.startsWith('127.') || ip === '::1' || ip.startsWith('10.') || ip.startsWith('192.168.')) {
-          return '🏠';
-        }
-        const res = await fetch(`https://get.geojs.io/v1/ip/country/${ip}`);
-        if (!res.ok) return '🏳️';
-        const code = (await res.text()).trim();
-        if (!code || code === 'nil' || code.length !== 2) return '🏳️';
-
-        const codePoints = code
-          .toUpperCase()
-          .split('')
-          .map(char => 127397 + (char.codePointAt(0) ?? 0));
-        return String.fromCodePoint(...codePoints);
-      } catch {
-        return '🏳️';
-      }
-    },
-    staleTime: Infinity,
-  });
-
-  if (!flag) {
-    return (
-      <Box
-        component="span"
-        w={16}
-        h={16}
-        mr={8}
-        display="inline-block"
-        bg="var(--mantine-color-default-hover)"
-        style={{ borderRadius: 4, verticalAlign: 'middle' }}
-      />
-    );
-  }
-  return (
-    <Text component="span" mr={8} fz={14} lh={1} title="Location" style={{ userSelect: 'none', verticalAlign: 'middle' }}>
-      {flag}
-    </Text>
-  );
-}
+/*
+ * Peer country flags used to be resolved here by fetching
+ * https://get.geojs.io/v1/ip/country/<ip> once per visible peer, from the
+ * browser, over clearnet.
+ *
+ * That inverted the product's entire premise. The backend exists so torrent
+ * traffic only ever leaves through a kill-switched tunnel; the UI was then
+ * handing the peer list — the precise correlation data that architecture
+ * suppresses — to a third-party geolocation service, tagged with the user's
+ * real IP. It is metadata rather than payload, but it is exactly the metadata
+ * the threat model is about.
+ *
+ * Removed rather than relocated: doing the same lookup from the API container
+ * would move the leak, not close it, since the API is not behind the tunnel
+ * either. Restoring flags means resolving offline from a local MMDB (DB-IP
+ * Lite or similar) shipped in the API image — until that lands, no flag.
+ */
 
 function PeersTab({ torrent, isVisible }: Readonly<{ torrent: Torrent; isVisible: boolean }>) {
   const { data: peers = [], isLoading } = useQuery<Peer[]>({
@@ -319,11 +291,10 @@ function PeersTab({ torrent, isVisible }: Readonly<{ torrent: Torrent; isVisible
         {peers.map((peer) => (
           <Table.Tr key={`${peer.ip}:${peer.port}`}>
             <Table.Td ff="monospace">
-              <PeerFlag ip={peer.ip} />
-              {peer.ip}:{peer.port}
+                    {peer.ip}:{peer.port}
             </Table.Td>
-            <Table.Td ta="right" c="teal.4" ff="monospace">{formatSpeed(peer.download_speed)}</Table.Td>
-            <Table.Td ta="right" c="blue.4" ff="monospace">{formatSpeed(peer.upload_speed)}</Table.Td>
+            <Table.Td ta="right" c="var(--smg-ok)" ff="monospace">{formatSpeed(peer.download_speed)}</Table.Td>
+            <Table.Td ta="right" c="var(--smg-info)" ff="monospace">{formatSpeed(peer.upload_speed)}</Table.Td>
             <Table.Td>
               <Group gap={4} justify="center" wrap="nowrap">
                 <Progress size="xs" value={peer.progress * 100} color="gray" w={64} />
@@ -424,8 +395,8 @@ function OptionsTab({ torrent, isVisible }: Readonly<{ torrent: Torrent; isVisib
         <Button size="xs" onClick={() => save.mutate()} disabled={!isDirty || save.isPending}>
           {save.isPending ? 'Saving…' : 'Apply'}
         </Button>
-        {saved && <Text size="xs" c="teal.4">Saved!</Text>}
-        {save.isError && <Text size="xs" c="red.4">Failed to save</Text>}
+        {saved && <Text size="xs" c="var(--smg-ok)">Saved!</Text>}
+        {save.isError && <Text size="xs" c="var(--smg-bad)">Failed to save</Text>}
       </Group>
     </Stack>
   );
@@ -539,8 +510,8 @@ export function TorrentRow({ torrent, selected = false, onToggleSelected }: Read
         {/* Speed */}
         <Table.Td ta="right" style={{ whiteSpace: 'nowrap' }}>
           <Stack gap={2}>
-            <Text size="xs" fw={500} c="teal.4">{formatSpeed(torrent.download_speed)} ↓</Text>
-            <Text size="xs" fw={500} c="blue.4">{formatSpeed(torrent.upload_speed)} ↑</Text>
+            <Text size="xs" fw={500} c="var(--smg-ok)">{formatSpeed(torrent.download_speed)} ↓</Text>
+            <Text size="xs" fw={500} c="var(--smg-info)">{formatSpeed(torrent.upload_speed)} ↑</Text>
           </Stack>
         </Table.Td>
 

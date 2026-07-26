@@ -75,11 +75,11 @@ function ExpandedStatsPanel({ history, torrents, liveDl, liveUl, activeCount, pa
         <Group px="md" pb="sm" gap="md">
           <Group gap={6}>
             <Download size={11} color="var(--mantine-color-teal-4)" />
-            <Text size="xs" ff="monospace" fw={600} c="teal.4">{fmt(liveDl)}</Text>
+            <Text size="xs" ff="monospace" fw={600} c="var(--smg-ok)">{fmt(liveDl)}</Text>
           </Group>
           <Group gap={6}>
             <Download size={11} color="var(--mantine-color-blue-4)" style={{ transform: 'rotate(180deg)' }} />
-            <Text size="xs" ff="monospace" fw={600} c="blue.4">{fmt(liveUl)}</Text>
+            <Text size="xs" ff="monospace" fw={600} c="var(--smg-info)">{fmt(liveUl)}</Text>
           </Group>
         </Group>
         <Group px="md" pb="sm" gap="xs">
@@ -250,7 +250,7 @@ export function MuleCard({ mule }: Readonly<Props>) {
           <Paper withBorder radius="md" p="md">
             <Stack align="center" gap={8}>
               <Loader size="xs" color="teal" />
-              <Text size="xs" fw={500} c="teal.4">Establishing tunnel...</Text>
+              <Text size="xs" fw={500} c="var(--smg-ok)">Establishing tunnel...</Text>
             </Stack>
           </Paper>
         )}
@@ -292,7 +292,7 @@ export function MuleCard({ mule }: Readonly<Props>) {
             }}
           >
             <Group gap="xs" wrap="nowrap">
-              <Text size="xs" fw={600} c="red.4" flex={1} ml={6}>
+              <Text size="xs" fw={600} c="var(--smg-bad)" flex={1} ml={6}>
                 {showConfirm === 'stop' ? 'Stop Gracefully?' : 'Kill Immediately?'}
               </Text>
               <Button

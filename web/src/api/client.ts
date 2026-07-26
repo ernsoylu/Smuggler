@@ -137,9 +137,6 @@ export { type MuleHealth, type WatchdogStatus } from './types';
 export const getWatchdogStatus = (): Promise<WatchdogStatus> =>
   api.get<WatchdogStatus>('/watchdog/').then(r => r.data);
 
-export const getMuleHealth = (name: string): Promise<MuleHealth> =>
-  api.get<MuleHealth>(`/mules/${name}/health`).then(r => r.data);
-
 export const evacuateMule = (name: string, kill = true): Promise<object> =>
   api.post(`/mules/${name}/evacuate`, null, { params: { kill } }).then(r => r.data);
 

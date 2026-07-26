@@ -179,14 +179,14 @@ export function SettingsPage() {
         </Button>
 
         {saved && (
-          <Group gap={6} c="teal.4">
+          <Group gap={6} c="var(--smg-ok)">
             <CheckCircle size={16} />
             <Text size="sm" fw={500}>Settings saved</Text>
           </Group>
         )}
 
         {save.isError && (
-          <Group gap={6} c="red.4">
+          <Group gap={6} c="var(--smg-bad)">
             <AlertCircle size={16} />
             <Text size="sm" fw={500}>Failed to save</Text>
           </Group>

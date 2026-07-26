@@ -414,7 +414,7 @@ export function ConfigsPage() {
 
         {error && (
           <Alert color="red" radius="md" p="sm" mt="md">
-            <Text size="sm" fw={500} c="red.4">{error}</Text>
+            <Text size="sm" fw={500} c="var(--smg-bad)">{error}</Text>
           </Alert>
         )}
       </Paper>
@@ -456,7 +456,7 @@ export function ConfigsPage() {
                     </Text>
                   </Group>
                   {!failed && <Progress size="xs" value={progressPct} color="blue" />}
-                  {failed && <Text size="xs" c="red.4" mt={4}>{m.error}</Text>}
+                  {failed && <Text size="xs" c="var(--smg-bad)" mt={4}>{m.error}</Text>}
                   {!failed && !done && <Text size="xs" c="dimmed" mt={8}>{m.detail}</Text>}
                 </Paper>
               );

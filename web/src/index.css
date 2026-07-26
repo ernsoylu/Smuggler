@@ -12,6 +12,33 @@ body,
   margin: 0;
 }
 
+/* ── Semantic status colours ──────────────────────────────────────────────────
+ *
+ * Status text was written as literal shades (c="teal.4", c="red.4"). Those are
+ * tuned for the near-black dark surface; on the light one they land around
+ * 1.9–2.7:1, well under WCAG AA, and every speed readout, status pill and the
+ * watchdog chip became unreadable when the theme flipped. The hue carries the
+ * meaning, so the hue is what must survive — the lightness has to move.
+ *
+ * Use these instead of a numbered shade for any text that means something:
+ *   c="var(--smg-ok)" rather than c="teal.4".
+ */
+:root {
+  --smg-ok: var(--mantine-color-teal-4);
+  --smg-info: var(--mantine-color-blue-4);
+  --smg-warn: var(--mantine-color-orange-4);
+  --smg-attention: var(--mantine-color-yellow-4);
+  --smg-bad: var(--mantine-color-red-4);
+}
+
+[data-mantine-color-scheme='light'] {
+  --smg-ok: var(--mantine-color-teal-8);
+  --smg-info: var(--mantine-color-blue-8);
+  --smg-warn: var(--mantine-color-orange-9);
+  --smg-attention: var(--mantine-color-yellow-9);
+  --smg-bad: var(--mantine-color-red-8);
+}
+
 /* ── Keyframe helpers ─────────────────────────────────────────────────────── */
 
 @keyframes smuggler-pulse {
@@ -29,6 +56,18 @@ body,
 
 .smuggler-spin {
   animation: smuggler-spin 1s linear infinite;
+}
+
+/* Respect a reduced-motion preference: the UI pulses, spins and slides. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* ── Dockview ↔ Mantine bridge ────────────────────────────────────────────── */

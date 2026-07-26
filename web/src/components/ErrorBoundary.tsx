@@ -63,7 +63,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <Text size="sm" c="dimmed">
               The rest of Smuggler is still running — your downloads are unaffected.
             </Text>
-            <Text size="xs" ff="monospace" c="red.4" style={{ wordBreak: 'break-word' }}>
+            <Text size="xs" ff="monospace" c="var(--smg-bad)" style={{ wordBreak: 'break-word' }}>
               {error.message}
             </Text>
             <Button
