@@ -3,6 +3,9 @@ version: 2
 # Security scanning tells you a CVE exists; this is what actually closes it.
 # Grouped so a week of patch bumps arrives as one reviewable PR per ecosystem
 # rather than a dozen, and security updates are never grouped away with them.
+# The 7-day cooldown skips just-published versions — the window in which a
+# hijacked package is most likely to be caught and yanked. Security updates
+# bypass cooldown, so CVE fixes still arrive immediately.
 updates:
   - package-ecosystem: uv
     directory: /
@@ -10,6 +13,8 @@ updates:
       interval: weekly
       day: monday
       time: "06:00"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     groups:
       python-minor-patch:
@@ -24,6 +29,8 @@ updates:
       interval: weekly
       day: monday
       time: "06:00"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     groups:
       frontend-minor-patch:
@@ -40,6 +47,8 @@ updates:
       interval: weekly
       day: monday
       time: "06:00"
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
     groups:
       actions:
@@ -53,6 +62,8 @@ updates:
     directory: /docker
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "deps(docker)"
 
@@ -60,6 +71,8 @@ updates:
     directory: /worker_image
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "deps(docker)"
 
@@ -67,5 +80,7 @@ updates:
     directory: /worker_image_ovpn
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "deps(docker)"

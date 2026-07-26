@@ -222,8 +222,12 @@ def _add_torrent_file(aria2: Aria2Client, mule_name: str):
         file.save(tmp.name)
         options: dict = {}
         if file.filename:
-            base_name = Path(file.filename).stem.strip().replace("/", "_")
-            if base_name:
+            base_name = Path(file.filename).stem.strip().replace("/", "_")  # nosemgrep: python.flask.file.tainted-path-traversal-stdlib-flask.tainted-path-traversal-stdlib-flask
+            # A dot-only stem ("..", or "...torrent" on Python <3.14 where it
+            # stems to "..") would escape /downloads; anything else is a single
+            # path component (no separators), so the taint finding above is a
+            # false positive.
+            if base_name and base_name.strip("."):
                 options["dir"] = f"/downloads/{base_name}"
         gid = aria2.add_torrent_file(tmp.name, options=options or None)
         log.info("POST /api/torrents/%s: torrent file added gid=%s", safe, log_safe(gid))
