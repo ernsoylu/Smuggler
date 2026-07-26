@@ -252,8 +252,9 @@ MAX_RETRIES=10
 for i in $(seq 1 "${MAX_RETRIES}"); do
     log "Connectivity check $i/${MAX_RETRIES}..."
 
-    # 1. Try a raw IP check first (very lightweight, no TLS/DNS complexity)
-    if curl -v -sf -4 --interface "${WG_IFACE}" --max-time 5 "http://1.1.1.1" >/dev/null 2>&1; then
+    # 1. Try a raw IP check first (no DNS involved; https so nothing leaves the
+    #    tunnel in cleartext — 1.1.1.1's certificate covers the bare IP)
+    if curl -v -sf -4 --interface "${WG_IFACE}" --max-time 5 "https://1.1.1.1" >/dev/null 2>&1; then
         log "Tunnel is ROUTING (IP-based check passed)"
     else
         warn "Tunnel is NOT routing yet (IP check failed)"

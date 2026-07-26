@@ -55,8 +55,10 @@ export function DeploymentProvider({ children }: Readonly<{ children: ReactNode 
   const { push, update } = useNotifications();
   const [deployments, setDeployments] = useState<DeploymentView[]>([]);
 
-  const notifIds = useRef<Record<string, string>>({});
-  const lastPhase = useRef<Record<string, string>>({});
+  // Maps rather than plain objects: the keys are server-supplied job ids, and
+  // indexing an object with untrusted keys opens prototype pollution.
+  const notifIds = useRef(new Map<string, string>());
+  const lastPhase = useRef(new Map<string, string>());
 
   const start = useCallback(async (configId: number, configName: string) => {
     const notificationId = push({
@@ -67,7 +69,7 @@ export function DeploymentProvider({ children }: Readonly<{ children: ReactNode 
     });
     try {
       const job = await startDeployment(configId);
-      notifIds.current[job.id] = notificationId;
+      notifIds.current.set(job.id, notificationId);
       setDeployments(prev => [...prev, { ...job, configName }]);
       return job;
     } catch (err: unknown) {
@@ -96,7 +98,7 @@ export function DeploymentProvider({ children }: Readonly<{ children: ReactNode 
                 setDeployments(cur =>
                   cur.map(p => (p.id === job.id ? { ...p, ...job } : p)),
                 );
-                const notificationId = notifIds.current[job.id];
+                const notificationId = notifIds.current.get(job.id);
                 if (!notificationId) return;
 
                 if (job.state === 'succeeded') {
@@ -118,8 +120,8 @@ export function DeploymentProvider({ children }: Readonly<{ children: ReactNode 
                     progress: undefined,
                   });
                   qc.invalidateQueries({ queryKey: ['configs'] });
-                } else if (lastPhase.current[job.id] !== job.phase) {
-                  lastPhase.current[job.id] = job.phase;
+                } else if (lastPhase.current.get(job.id) !== job.phase) {
+                  lastPhase.current.set(job.id, job.phase);
                   update(notificationId, {
                     message: job.detail || PHASE_LABELS[job.phase],
                     progress: {

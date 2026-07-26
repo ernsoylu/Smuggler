@@ -32,13 +32,17 @@ interface NotificationContextValue {
 
 const NotificationContext = createContext<NotificationContextValue | null>(null);
 
+// Notification ids only need to be unique within this tab, so a counter does —
+// randomness has no role here.
+let idSeq = 0;
+
 export function NotificationProvider({ children }: Readonly<{ children: ReactNode }>) {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
   const push = useCallback((n: Omit<AppNotification, 'id' | 'timestamp' | 'read'>): string => {
     const entry: AppNotification = {
       ...n,
-      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      id: `${Date.now()}-${++idSeq}`,
       timestamp: Date.now(),
       read: false,
     };
