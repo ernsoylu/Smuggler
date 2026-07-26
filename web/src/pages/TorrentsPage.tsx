@@ -16,6 +16,7 @@ import {
   type FilterStatus, type SortKey, type SortState,
 } from '../lib/torrentList';
 import { useUiActions } from '../context/UiActionsContext';
+import { useNotifications } from '../context/NotificationContext';
 import {
   Plus, Search, X, ArrowUp, ArrowDown, Pause, Play, Trash2, Tag, Rows2, Rows3,
 } from 'lucide-react';
@@ -37,9 +38,17 @@ const UNCAT_VALUE = '\u0000uncategorised';
 
 const DENSITY_KEY = 'smuggler.torrents.density';
 
+/** Past tense, for the summary a finished bulk action reports. */
+const BULK_VERB: Record<'pause' | 'resume' | 'remove', string> = {
+  pause: 'Paused',
+  resume: 'Resumed',
+  remove: 'Removed',
+};
+
 export function TorrentsPage() {
   const qc = useQueryClient();
   const { openAddTorrent } = useUiActions();
+  const { push } = useNotifications();
   const [filter, setFilter] = useState<FilterStatus>('all');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortState | null>(null);
@@ -147,14 +156,31 @@ export function TorrentsPage() {
     mutationFn: async (action: BulkAction) => {
       const targets = selectedVisible;
       // Settled, not all: one failing torrent should not abandon the rest.
-      await Promise.allSettled(
+      const results = await Promise.allSettled(
         targets.map(t => {
           if (action.kind === 'pause') return pauseTorrent(t.mule, t.gid);
           if (action.kind === 'resume') return resumeTorrent(t.mule, t.gid);
           return removeTorrent(t.mule, t.gid, action.deleteFiles);
         }),
       );
+      const failed = results.filter(r => r.status === 'rejected').length;
+      return { verb: BULK_VERB[action.kind], total: targets.length, failed };
     },
+    // Those results used to be discarded, so a bulk action that half-failed
+    // looked identical to one that worked: rows just stopped changing.
+    onSuccess: ({ verb, total, failed }) => {
+      if (failed === 0) {
+        push({ type: 'success', title: `${verb} ${total} torrent${total === 1 ? '' : 's'}` });
+      } else {
+        push({
+          type: 'error',
+          title: `${failed} of ${total} could not be ${verb.toLowerCase()}`,
+          message: 'The rest were handled. Check the mule is still running.',
+        });
+      }
+    },
+    onError: (e: Error) =>
+      push({ type: 'error', title: 'Bulk action failed', message: e.message }),
     onSettled: () => {
       setConfirmBulkRemove(false);
       clearSelection();

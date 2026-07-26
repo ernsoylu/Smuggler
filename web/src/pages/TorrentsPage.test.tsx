@@ -21,6 +21,18 @@ vi.mock('../api/client', () => ({
 
 const client = await import('../api/client');
 const { TorrentsPage } = await import('./TorrentsPage');
+const { useNotifications } = await import('../context/NotificationContext');
+
+/**
+ * Renders pushed notifications as plain text.
+ *
+ * The bell is not mounted here, so asserting on it would test the popover
+ * rather than what the page decided to report.
+ */
+function NotificationProbe() {
+  const { notifications } = useNotifications();
+  return <ul>{notifications.map(n => <li key={n.id}>{n.title}</li>)}</ul>;
+}
 
 const setup = (torrents: Torrent[], { running = true } = {}) => {
   vi.mocked(client.getAllTorrents).mockResolvedValue(torrents);
@@ -227,5 +239,55 @@ describe('TorrentsPage list ergonomics', () => {
     expect(localStorage.getItem('smuggler.torrents.density')).toBe('compact');
     expect(screen.getByRole('button', { name: /switch to comfortable rows/i }))
       .toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+describe('TorrentsPage bulk feedback', () => {
+  const two = [
+    makeTorrent({ gid: 'a', name: 'alpha.iso' }),
+    makeTorrent({ gid: 'b', name: 'beta.iso' }),
+  ];
+
+  const runBulkPause = async () => {
+    await selectRow(/select alpha\.iso/i);
+    await selectRow(/select beta\.iso/i);
+    await userEvent.click(within(bulkBar()).getByRole('button', { name: /pause/i }));
+  };
+
+  it('confirms a bulk action that fully succeeded', async () => {
+    setup(two);
+    renderWithProviders(<><TorrentsPage /><NotificationProbe /></>);
+    await screen.findByText('alpha.iso');
+
+    await runBulkPause();
+
+    expect(await screen.findByText(/paused 2 torrents/i)).toBeInTheDocument();
+  });
+
+  it('reports a partial failure instead of looking like success', async () => {
+    setup(two);
+    // One of the two rejects: the results used to be discarded entirely, so
+    // this was indistinguishable from everything working.
+    vi.mocked(client.pauseTorrent)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('mule gone'));
+    renderWithProviders(<><TorrentsPage /><NotificationProbe /></>);
+    await screen.findByText('alpha.iso');
+
+    await runBulkPause();
+
+    expect(await screen.findByText(/1 of 2 could not be paused/i)).toBeInTheDocument();
+  });
+
+  it('does not claim success when every item failed', async () => {
+    setup(two);
+    vi.mocked(client.pauseTorrent).mockRejectedValue(new Error('mule gone'));
+    renderWithProviders(<><TorrentsPage /><NotificationProbe /></>);
+    await screen.findByText('alpha.iso');
+
+    await runBulkPause();
+
+    expect(await screen.findByText(/2 of 2 could not be paused/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^paused 2 torrents$/i)).not.toBeInTheDocument();
   });
 });

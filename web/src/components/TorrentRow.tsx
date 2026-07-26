@@ -556,7 +556,8 @@ export function TorrentRow({
               variant="light"
               color="blue"
               onClick={() => resume.mutate()}
-              disabled={startDisabled || resume.isPending}
+              disabled={startDisabled}
+              loading={resume.isPending}
               title="Start"
             >
               <Play size={15} />
@@ -564,7 +565,8 @@ export function TorrentRow({
             <ActionIcon
               variant="default"
               onClick={() => pause.mutate()}
-              disabled={stopDisabled || pause.isPending}
+              disabled={stopDisabled}
+              loading={pause.isPending}
               title="Stop"
             >
               <Pause size={15} />
