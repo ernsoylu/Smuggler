@@ -157,7 +157,12 @@ export function StatusFooter() {
       </Collapse>
 
       {/* Status bar */}
-      <Group px="md" py={6} gap="md" wrap="nowrap">
+      {/*
+        Seven segments do not fit a 380px phone. Speeds and the tunnel-health
+        chip stay at every width — they are the two things worth glancing at —
+        and the rest appear as room allows.
+      */}
+      <Group px="md" py={6} gap="sm" wrap="nowrap" style={{ overflowX: 'auto' }}>
         <UnstyledButton
           onClick={() => setExpanded(v => !v)}
           title={expanded ? 'Collapse graph' : 'Expand graph'}
@@ -171,19 +176,19 @@ export function StatusFooter() {
 
         <Divider orientation="vertical" h={16} style={{ alignSelf: 'center' }} />
 
-        <Group gap={6} wrap="nowrap" miw={90}>
+        <Group gap={6} wrap="nowrap" miw={{ base: 0, xs: 90 }}>
           <Download size={13} color="var(--mantine-color-teal-5)" />
           <Text size="xs" ff="monospace" fw={600} c="var(--smg-ok)">{formatBytes(dl)}/s</Text>
         </Group>
 
-        <Group gap={6} wrap="nowrap" miw={90}>
+        <Group gap={6} wrap="nowrap" miw={{ base: 0, xs: 90 }}>
           <Upload size={13} color="var(--mantine-color-blue-5)" />
           <Text size="xs" ff="monospace" fw={600} c="var(--smg-info)">{formatBytes(ul)}/s</Text>
         </Group>
 
-        <Divider orientation="vertical" h={16} style={{ alignSelf: 'center' }} />
+        <Divider orientation="vertical" h={16} style={{ alignSelf: 'center' }} visibleFrom="xs" />
 
-        <Group gap={6} wrap="nowrap">
+        <Group gap={6} wrap="nowrap" visibleFrom="xs">
           <Box
             w={6} h={6}
             bg={active > 0 ? 'teal.5' : 'gray.6'}
@@ -195,9 +200,9 @@ export function StatusFooter() {
           {waiting > 0 && <Text size="xs" c="dimmed">· {waiting} queued</Text>}
         </Group>
 
-        <Divider orientation="vertical" h={16} style={{ alignSelf: 'center' }} />
+        <Divider orientation="vertical" h={16} style={{ alignSelf: 'center' }} visibleFrom="sm" />
 
-        <Group gap={6} wrap="nowrap">
+        <Group gap={6} wrap="nowrap" visibleFrom="sm">
           <Server size={12} color="var(--mantine-color-dimmed)" />
           <Text size="xs" fw={600}>{mules}</Text>
           <Text size="xs" c="dimmed">mule{mules === 1 ? '' : 's'}</Text>
