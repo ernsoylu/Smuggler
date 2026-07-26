@@ -1,67 +1,52 @@
-@import "tailwindcss";
-
 /*
- * Light theme.
- *
- * The UI was written dark-first: ~525 hardcoded `neutral-*` / `white` / `black`
- * utility classes across fifteen components. Rewriting those into semantic
- * tokens would have been a large, error-prone change touching every file.
- *
- * Tailwind v4 emits its palette as CSS custom properties and every utility
- * resolves through them at runtime, so redefining the variables under a
- * `[data-theme]` selector flips the whole app without editing a component.
- * Light mode is the neutral ramp inverted end-for-end (950 takes 50's value and
- * so on) plus swapped white/black anchors — in this codebase `text-white` means
- * "primary text" and `bg-white/10` means "subtle raised surface", and both
- * invert correctly.
- *
- * Accent colours (blue, emerald, amber, red) are deliberately left alone: they
- * carry meaning — healthy, warning, error — and must not invert.
+ * Global styles. Component styling lives in Mantine (theme.ts); this file only
+ * carries what Mantine cannot express: root sizing, the few keyframe helpers,
+ * and the dockview theme variables bridged onto Mantine's CSS variables so the
+ * workbench chrome matches the rest of the app in both color schemes.
  */
-@custom-variant light-theme (&:where([data-theme=light], [data-theme=light] *));
 
-:root[data-theme="light"] {
-  --color-neutral-50:  oklch(0.145 0 0);
-  --color-neutral-100: oklch(0.205 0 0);
-  --color-neutral-200: oklch(0.269 0 0);
-  --color-neutral-300: oklch(0.371 0 0);
-  --color-neutral-400: oklch(0.470 0 0);
-  --color-neutral-500: oklch(0.556 0 0);
-  --color-neutral-600: oklch(0.640 0 0);
-  --color-neutral-700: oklch(0.800 0 0);
-  --color-neutral-800: oklch(0.900 0 0);
-  --color-neutral-900: oklch(0.968 0 0);
-  --color-neutral-950: oklch(0.995 0 0);
-
-  --color-white: oklch(0.180 0 0);
-  --color-black: oklch(1 0 0);
-
-  color-scheme: light;
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
 }
 
-:root[data-theme="dark"] {
-  color-scheme: dark;
+/* ── Keyframe helpers ─────────────────────────────────────────────────────── */
+
+@keyframes smuggler-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
-/* No explicit choice yet — follow the OS. ThemeContext writes data-theme only
-   once the user picks a side, so this is the genuine "system" state. */
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme]) {
-    --color-neutral-50:  oklch(0.145 0 0);
-    --color-neutral-100: oklch(0.205 0 0);
-    --color-neutral-200: oklch(0.269 0 0);
-    --color-neutral-300: oklch(0.371 0 0);
-    --color-neutral-400: oklch(0.470 0 0);
-    --color-neutral-500: oklch(0.556 0 0);
-    --color-neutral-600: oklch(0.640 0 0);
-    --color-neutral-700: oklch(0.800 0 0);
-    --color-neutral-800: oklch(0.900 0 0);
-    --color-neutral-900: oklch(0.968 0 0);
-    --color-neutral-950: oklch(0.995 0 0);
+.smuggler-pulse {
+  animation: smuggler-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
 
-    --color-white: oklch(0.180 0 0);
-    --color-black: oklch(1 0 0);
+@keyframes smuggler-spin {
+  to { transform: rotate(360deg); }
+}
 
-    color-scheme: light;
-  }
+.smuggler-spin {
+  animation: smuggler-spin 1s linear infinite;
+}
+
+/* ── Dockview ↔ Mantine bridge ────────────────────────────────────────────── */
+
+.dockview-theme-dark,
+.dockview-theme-light {
+  --dv-font-family: var(--mantine-font-family);
+  --dv-group-view-background-color: var(--mantine-color-body);
+  --dv-tabs-and-actions-container-background-color: var(--mantine-color-body);
+  --dv-separator-border: var(--mantine-color-default-border);
+  --dv-drag-over-background-color: var(--mantine-color-smuggler-light);
+  --dv-drag-over-border-color: var(--mantine-color-smuggler-5);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--mantine-color-default-hover);
+  --dv-activegroup-visiblepanel-tab-color: var(--mantine-color-text);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--mantine-color-body);
+  --dv-activegroup-hiddenpanel-tab-color: var(--mantine-color-dimmed);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--mantine-color-default-hover);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--mantine-color-text);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--mantine-color-body);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--mantine-color-dimmed);
 }

@@ -1,5 +1,6 @@
 import { Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
+import { Button, Center, Paper, Stack, Text, ThemeIcon, Title } from '@mantine/core';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
 
 interface Props {
@@ -41,24 +42,41 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.props.fallback) return this.props.fallback;
 
     return (
-      <div className="flex items-center justify-center p-10">
-        <div className="max-w-md w-full rounded-2xl border border-red-500/20 bg-red-500/5 p-6 text-center">
-          <div className="w-12 h-12 rounded-full bg-red-500/10 flex items-center justify-center mx-auto mb-4">
-            <AlertTriangle className="text-red-400" size={22} />
-          </div>
-          <h2 className="text-lg font-bold text-white tracking-tight">Something broke rendering this view</h2>
-          <p className="text-sm text-neutral-400 mt-2">
-            The rest of Smuggler is still running — your downloads are unaffected.
-          </p>
-          <p className="mt-3 text-xs font-mono text-red-300/80 break-words">{error.message}</p>
-          <button
-            onClick={this.reset}
-            className="mt-5 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-sm font-semibold text-white transition-colors"
-          >
-            <RotateCcw size={15} /> Try again
-          </button>
-        </div>
-      </div>
+      <Center p="xl" h="100%">
+        <Paper
+          withBorder
+          p="lg"
+          radius="lg"
+          maw={420}
+          w="100%"
+          style={{
+            textAlign: 'center',
+            borderColor: 'var(--mantine-color-red-light-color)',
+            background: 'var(--mantine-color-red-light)',
+          }}
+        >
+          <Stack align="center" gap="xs">
+            <ThemeIcon variant="light" color="red" size={48} radius="xl">
+              <AlertTriangle size={22} />
+            </ThemeIcon>
+            <Title order={3}>Something broke rendering this view</Title>
+            <Text size="sm" c="dimmed">
+              The rest of Smuggler is still running — your downloads are unaffected.
+            </Text>
+            <Text size="xs" ff="monospace" c="red.4" style={{ wordBreak: 'break-word' }}>
+              {error.message}
+            </Text>
+            <Button
+              mt="sm"
+              variant="default"
+              leftSection={<RotateCcw size={15} />}
+              onClick={this.reset}
+            >
+              Try again
+            </Button>
+          </Stack>
+        </Paper>
+      </Center>
     );
   }
 }

@@ -1,8 +1,7 @@
-import { useCallback, useMemo, useState } from 'react';
-import { MulesPage } from './pages/MulesPage';
-import { TorrentsPage } from './pages/TorrentsPage';
-import { SettingsPage } from './pages/SettingsPage';
-import { ConfigsPage } from './pages/ConfigsPage';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { ActionIcon, Button, Group, Kbd, MantineProvider, Text, Tooltip } from '@mantine/core';
+import type { DockviewApi } from 'dockview-react';
+import type { ReactNode } from 'react';
 import { StatusFooter } from './components/StatusFooter';
 import { NotificationBell } from './components/NotificationBell';
 import { NotificationProvider } from './context/NotificationContext';
@@ -10,22 +9,23 @@ import { DeploymentProvider } from './context/DeploymentContext';
 import { ThemeProvider, useTheme } from './context/ThemeContext';
 import { UiActionsContext } from './context/UiActionsContext';
 import { TorrentDropZone } from './components/TorrentDropZone';
-import { ErrorBoundary } from './components/ErrorBoundary';
 import { CommandPalette } from './components/CommandPalette';
 import { AddTorrentModal } from './components/AddTorrentModal';
 import { DeployMuleModal } from './components/DeployMuleModal';
+import { Workbench } from './workbench/Workbench';
 import { useHashRoute } from './hooks/useHashRoute';
 import { useKeyboardShortcuts, type Shortcut } from './hooks/useKeyboardShortcuts';
 import { PAGES, type Page } from './lib/router';
+import { theme } from './theme';
 import {
-  LayoutDashboard, Server, Settings, FileKey2, Command, Sun, Moon, Monitor,
+  LayoutDashboard, Server, Settings, FileKey2, Command, Sun, Moon, Monitor, LayoutTemplate,
 } from 'lucide-react';
 
-const TAB_ICONS: Record<Page, React.ReactNode> = {
-  torrents: <LayoutDashboard size={16} />,
-  mules: <Server size={16} />,
-  configs: <FileKey2 size={16} />,
-  settings: <Settings size={16} />,
+const TAB_ICONS: Record<Page, ReactNode> = {
+  torrents: <LayoutDashboard size={15} />,
+  mules: <Server size={15} />,
+  configs: <FileKey2 size={15} />,
+  settings: <Settings size={15} />,
 };
 
 const TAB_LABELS: Record<Page, string> = {
@@ -41,14 +41,17 @@ function ThemeToggle() {
     preference === 'light' ? <Sun size={16} /> :
     preference === 'dark' ? <Moon size={16} /> : <Monitor size={16} />;
   return (
-    <button
-      onClick={cycle}
-      title={`Theme: ${preference} (click to change)`}
-      aria-label={`Theme: ${preference}. Activate to change.`}
-      className="p-2 rounded-lg text-neutral-400 hover:text-neutral-200 hover:bg-white/5 transition-colors"
-    >
-      {icon}
-    </button>
+    <Tooltip label={`Theme: ${preference}`} withArrow>
+      <ActionIcon
+        variant="subtle"
+        color="gray"
+        size="lg"
+        onClick={cycle}
+        aria-label={`Theme: ${preference}. Activate to change.`}
+      >
+        {icon}
+      </ActionIcon>
+    </Tooltip>
   );
 }
 
@@ -57,6 +60,7 @@ function Shell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [addTorrentOpen, setAddTorrentOpen] = useState(false);
   const [deployMuleOpen, setDeployMuleOpen] = useState(false);
+  const dockApiRef = useRef<DockviewApi | null>(null);
 
   const openAddTorrent = useCallback(() => setAddTorrentOpen(true), []);
   const openDeployMule = useCallback(() => setDeployMuleOpen(true), []);
@@ -86,92 +90,125 @@ function Shell() {
 
   return (
     <UiActionsContext.Provider value={uiActions}>
-    <div className="min-h-screen bg-neutral-950 text-neutral-200 flex flex-col font-sans selection:bg-blue-500/30">
-      {/* Top Navbar */}
-      <header className="sticky top-0 z-40 bg-neutral-950/80 backdrop-blur-xl border-b border-white/5">
-        <div className="flex items-center gap-8 px-6 py-3.5 max-w-7xl mx-auto w-full">
-          <div className="flex items-center gap-3 select-none cursor-pointer group">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-600 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/20 group-hover:shadow-amber-500/40 transition-shadow text-base leading-none">
+      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Top bar */}
+        <Group
+          component="header"
+          px="md"
+          py={8}
+          gap="lg"
+          wrap="nowrap"
+          style={{ borderBottom: '1px solid var(--mantine-color-default-border)', flexShrink: 0 }}
+        >
+          <Group gap="xs" wrap="nowrap" style={{ userSelect: 'none' }}>
+            <div
+              aria-hidden
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: 10,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 16,
+                background: 'linear-gradient(45deg, var(--mantine-color-smuggler-7), var(--mantine-color-smuggler-5))',
+                boxShadow: '0 2px 10px rgba(249, 115, 22, .35)',
+              }}
+            >
               🫏
             </div>
-            <span className="text-white font-bold text-lg tracking-wide uppercase bg-clip-text text-transparent bg-gradient-to-r from-white to-neutral-400">
-              Smuggler
-            </span>
-          </div>
+            <Text fw={700} tt="uppercase" size="md" lts={1}>Smuggler</Text>
+          </Group>
 
-          <nav className="flex gap-2" aria-label="Primary">
+          <Group component="nav" gap={4} wrap="nowrap" aria-label="Primary">
             {PAGES.map(key => (
-              <a
+              <Button
                 key={key}
+                component="a"
                 href={`#/${key}`}
+                size="compact-sm"
+                variant={page === key ? 'light' : 'subtle'}
+                color={page === key ? 'smuggler' : 'gray'}
+                leftSection={TAB_ICONS[key]}
                 aria-current={page === key ? 'page' : undefined}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  page === key
-                    ? 'bg-white/10 text-white shadow-sm ring-1 ring-white/10'
-                    : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'
-                }`}
               >
-                {TAB_ICONS[key]} {TAB_LABELS[key]}
-              </a>
+                {TAB_LABELS[key]}
+              </Button>
             ))}
-          </nav>
+          </Group>
 
-          <div className="ml-auto flex items-center gap-1">
-            <button
+          <Group gap={4} wrap="nowrap" ml="auto">
+            <Tooltip label="Restore default layout" withArrow>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="lg"
+                aria-label="Restore default panel layout"
+                onClick={() => window.dispatchEvent(new Event('smuggler:reset-layout'))}
+              >
+                <LayoutTemplate size={16} />
+              </ActionIcon>
+            </Tooltip>
+            <Button
+              variant="subtle"
+              color="gray"
+              size="compact-sm"
+              visibleFrom="sm"
+              leftSection={<Command size={14} />}
+              rightSection={<Kbd size="xs">Ctrl K</Kbd>}
               onClick={() => setPaletteOpen(true)}
-              title="Command palette (Ctrl+K)"
               aria-label="Open command palette"
-              className="hidden sm:flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-neutral-500 hover:text-neutral-200 hover:bg-white/5 transition-colors"
-            >
-              <Command size={14} />
-              <kbd className="text-[10px] font-mono border border-white/10 rounded px-1.5 py-0.5">Ctrl K</kbd>
-            </button>
+            />
             <ThemeToggle />
             <NotificationBell />
-          </div>
+          </Group>
+        </Group>
+
+        {/* Dockable panel workbench */}
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <Workbench onApi={api => { dockApiRef.current = api; }} />
         </div>
-      </header>
 
-      {/* Page content — pb-14 to clear the fixed footer */}
-      <main className="flex-1 w-full max-w-7xl mx-auto pb-14">
-        {/* Keyed by page so switching tabs clears a previous page's error. */}
-        <ErrorBoundary key={page}>
-          {page === 'torrents' && <TorrentsPage />}
-          {page === 'mules'    && <MulesPage />}
-          {page === 'configs'  && <ConfigsPage />}
-          {page === 'settings' && <SettingsPage />}
-        </ErrorBoundary>
-      </main>
+        {/* Persistent status bar + graph footer */}
+        <StatusFooter />
 
-      {/* Persistent status bar + graph footer */}
-      <StatusFooter />
+        {/* Window-wide .torrent drop target */}
+        <TorrentDropZone />
 
-      {/* Window-wide .torrent drop target */}
-      <TorrentDropZone />
+        {/* Shell-owned modals, so the palette can open them from any page */}
+        {addTorrentOpen && <AddTorrentModal onClose={() => setAddTorrentOpen(false)} />}
+        {deployMuleOpen && <DeployMuleModal onClose={() => setDeployMuleOpen(false)} />}
 
-      {/* Shell-owned modals, so the palette can open them from any page */}
-      {addTorrentOpen && <AddTorrentModal onClose={() => setAddTorrentOpen(false)} />}
-      {deployMuleOpen && <DeployMuleModal onClose={() => setDeployMuleOpen(false)} />}
-
-      {paletteOpen && <CommandPalette
-        onClose={() => setPaletteOpen(false)}
-        onNavigate={navigate}
-        onAddTorrent={openAddTorrent}
-        onDeployMule={openDeployMule}
-      />}
-    </div>
+        {paletteOpen && <CommandPalette
+          onClose={() => setPaletteOpen(false)}
+          onNavigate={navigate}
+          onAddTorrent={openAddTorrent}
+          onDeployMule={openDeployMule}
+        />}
+      </div>
     </UiActionsContext.Provider>
+  );
+}
+
+function MantineRoot({ children }: Readonly<{ children: ReactNode }>) {
+  const { resolved } = useTheme();
+  return (
+    <MantineProvider theme={theme} forceColorScheme={resolved}>
+      {children}
+    </MantineProvider>
   );
 }
 
 export default function App() {
   return (
     <ThemeProvider>
-      <NotificationProvider>
-        <DeploymentProvider>
-          <Shell />
-        </DeploymentProvider>
-      </NotificationProvider>
+      <MantineRoot>
+        <NotificationProvider>
+          <DeploymentProvider>
+            <Shell />
+          </DeploymentProvider>
+        </NotificationProvider>
+      </MantineRoot>
     </ThemeProvider>
   );
 }

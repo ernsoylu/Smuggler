@@ -1,5 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
+import {
+  ActionIcon, Badge, Box, Button, Card, Collapse, Group, Loader, Paper, Progress,
+  Stack, Text,
+} from '@mantine/core';
 import { stopMule, killMule, getMuleTorrents } from '../api/client';
 import type { Mule, Torrent } from '../api/types';
 import { SpeedGraph } from './SpeedGraph';
@@ -25,10 +29,26 @@ function fmtBytes(b: number): string {
 }
 
 function torrentStatusColor(status: string): string {
-  if (status === 'active')   return 'text-emerald-400';
-  if (status === 'paused')   return 'text-amber-400';
-  if (status === 'error')    return 'text-red-400';
-  return 'text-neutral-500';
+  if (status === 'active')   return 'teal.4';
+  if (status === 'paused')   return 'yellow.4';
+  if (status === 'error')    return 'red.4';
+  return 'dimmed';
+}
+
+function InfoRow({ icon, label, value, mono }: Readonly<{
+  icon?: React.ReactNode; label: string; value: string; mono?: boolean;
+}>) {
+  return (
+    <Group justify="space-between" gap="md" wrap="nowrap">
+      <Text size="xs" fw={600} tt="uppercase" c="dimmed" lts={1}
+        style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+        {icon} {label}
+      </Text>
+      <Text size="xs" fw={500} ff={mono ? 'monospace' : undefined} truncate>
+        {value}
+      </Text>
+    </Group>
+  );
 }
 
 interface ExpandedStatsPanelProps {
@@ -46,78 +66,71 @@ interface ExpandedStatsPanelProps {
 
 function ExpandedStatsPanel({ history, torrents, liveDl, liveUl, activeCount, pausedCount, completeCount, totalDl, totalUl, expanded }: Readonly<ExpandedStatsPanelProps>) {
   return (
-    <div className="overflow-hidden transition-all duration-300 ease-in-out" style={{ maxHeight: expanded ? '600px' : '0px' }}>
-      <div className="border-t border-white/5 bg-neutral-950/30">
-        <div className="px-4 pt-4 pb-2">
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-neutral-500 mb-2">Speed</p>
+    <Collapse expanded={expanded}>
+      <Box style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
+        <Box px="md" pt="md" pb="xs">
+          <Text size="10px" fw={600} tt="uppercase" lts={2} c="dimmed" mb={8}>Speed</Text>
           <SpeedGraph data={history} height={110} />
-        </div>
-        <div className="px-4 pb-3 flex gap-3">
-          <div className="flex items-center gap-1.5 text-xs">
-            <Download size={11} className="text-emerald-400" />
-            <span className="font-mono font-semibold text-emerald-300">{fmt(liveDl)}</span>
-          </div>
-          <div className="flex items-center gap-1.5 text-xs">
-            <Download size={11} className="text-blue-400 rotate-180" />
-            <span className="font-mono font-semibold text-blue-300">{fmt(liveUl)}</span>
-          </div>
-        </div>
-        <div className="px-4 pb-3 flex flex-wrap gap-2">
+        </Box>
+        <Group px="md" pb="sm" gap="md">
+          <Group gap={6}>
+            <Download size={11} color="var(--mantine-color-teal-4)" />
+            <Text size="xs" ff="monospace" fw={600} c="teal.4">{fmt(liveDl)}</Text>
+          </Group>
+          <Group gap={6}>
+            <Download size={11} color="var(--mantine-color-blue-4)" style={{ transform: 'rotate(180deg)' }} />
+            <Text size="xs" ff="monospace" fw={600} c="blue.4">{fmt(liveUl)}</Text>
+          </Group>
+        </Group>
+        <Group px="md" pb="sm" gap="xs">
           {activeCount > 0 && (
-            <span className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/15">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <Badge variant="light" color="teal" size="sm" radius="md" tt="none">
               {activeCount} active
-            </span>
+            </Badge>
           )}
           {pausedCount > 0 && (
-            <span className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/15">
-              <PauseCircle size={11} />
+            <Badge variant="light" color="yellow" size="sm" radius="md" tt="none" leftSection={<PauseCircle size={11} />}>
               {pausedCount} paused
-            </span>
+            </Badge>
           )}
           {completeCount > 0 && (
-            <span className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-lg bg-neutral-700/60 text-neutral-400 border border-white/5">
-              <CheckCircle2 size={11} />
+            <Badge variant="default" size="sm" radius="md" tt="none" leftSection={<CheckCircle2 size={11} />}>
               {completeCount} done
-            </span>
+            </Badge>
           )}
           {torrents.length === 0 && (
-            <span className="text-[11px] text-neutral-500 italic">No torrents</span>
+            <Text size="11px" c="dimmed" fs="italic">No torrents</Text>
           )}
-        </div>
+        </Group>
         {(totalDl > 0 || totalUl > 0) && (
-          <div className="px-4 pb-4 flex gap-4 text-xs text-neutral-500">
-            <span>↓ {fmtBytes(totalDl)}</span>
-            <span>↑ {fmtBytes(totalUl)}</span>
-          </div>
+          <Group px="md" pb="sm" gap="md">
+            <Text size="xs" c="dimmed">↓ {fmtBytes(totalDl)}</Text>
+            <Text size="xs" c="dimmed">↑ {fmtBytes(totalUl)}</Text>
+          </Group>
         )}
         {torrents.length > 0 && (
-          <div className="px-4 pb-4 flex flex-col gap-1">
+          <Stack px="md" pb="md" gap={6}>
             {torrents.slice(0, 5).map(t => {
               const pct = t.total_length > 0 ? Math.round((t.completed_length / t.total_length) * 100) : 0;
-              const statusColor = torrentStatusColor(t.status);
               return (
-                <div key={t.gid} className="flex items-center gap-2 text-[11px]">
-                  <div className="flex-1 min-w-0">
-                    <p className={`truncate font-medium ${statusColor}`}>{t.name || t.gid}</p>
-                    <div className="w-full h-0.5 bg-neutral-800 rounded-full mt-0.5 overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${t.status === 'complete' ? 'bg-neutral-500' : 'bg-emerald-500'}`}
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                  </div>
-                  <span className="text-neutral-500 shrink-0 font-mono">{pct}%</span>
-                </div>
+                <Group key={t.gid} gap="xs" wrap="nowrap">
+                  <Stack gap={2} flex={1} miw={0}>
+                    <Text size="11px" fw={500} c={torrentStatusColor(t.status)} truncate>
+                      {t.name || t.gid}
+                    </Text>
+                    <Progress size={3} value={pct} color={t.status === 'complete' ? 'gray' : 'teal'} />
+                  </Stack>
+                  <Text size="11px" c="dimmed" ff="monospace" style={{ flexShrink: 0 }}>{pct}%</Text>
+                </Group>
               );
             })}
             {torrents.length > 5 && (
-              <p className="text-[10px] text-neutral-600 mt-1">+{torrents.length - 5} more</p>
+              <Text size="10px" c="dimmed">+{torrents.length - 5} more</Text>
             )}
-          </div>
+          </Stack>
         )}
-      </div>
-    </div>
+      </Box>
+    </Collapse>
   );
 }
 
@@ -171,10 +184,6 @@ export function MuleCard({ mule }: Readonly<Props>) {
   }, [torrents, expanded]);
 
   const isRunning = mule.status === 'running';
-  const statusColor = isRunning ? 'bg-emerald-500' : 'bg-neutral-500';
-  const statusText  = isRunning ? 'text-emerald-400' : 'text-neutral-400';
-  const statusBg    = isRunning ? 'bg-emerald-500/10' : 'bg-neutral-500/10';
-  const statusRing  = isRunning ? 'ring-emerald-500/20' : 'ring-neutral-500/20';
   const ip = mule.ip_info;
 
   // Derived torrent stats when expanded
@@ -187,80 +196,77 @@ export function MuleCard({ mule }: Readonly<Props>) {
   const liveUl  = torrents.reduce((s, t) => s + (t.upload_speed ?? 0), 0);
 
   return (
-    <div className="bg-neutral-900/40 backdrop-blur-sm border border-white/5 hover:border-white/10 shadow-xl rounded-2xl flex flex-col transition-all group overflow-hidden">
+    <Card withBorder radius="lg" p={0} style={{ display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
-      <div className="p-5 border-b border-white/5 bg-neutral-900/50">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex gap-3 min-w-0">
-            <div className={`mt-1 w-2.5 h-2.5 rounded-full ${statusColor} shrink-0`} />
-            <div className="min-w-0">
-              <p className="font-semibold text-white tracking-tight truncate text-base">{mule.name}</p>
-              <p className="text-xs text-neutral-500 font-mono tracking-tighter mt-0.5">{mule.id.slice(0, 12)}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <span className={`text-xs px-2.5 py-1 rounded-md font-semibold capitalize ring-1 inset-ring ${statusText} ${statusBg} ${statusRing}`}>
+      <Box p="md" style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}>
+        <Group justify="space-between" align="flex-start" gap="md" wrap="nowrap">
+          <Group gap="sm" wrap="nowrap" miw={0}>
+            <Box
+              w={10} h={10} mt={6}
+              bg={isRunning ? 'teal.5' : 'gray.6'}
+              style={{ borderRadius: '50%', flexShrink: 0 }}
+            />
+            <Stack gap={0} miw={0}>
+              <Text fw={600} truncate>{mule.name}</Text>
+              <Text size="xs" c="dimmed" ff="monospace">{mule.id.slice(0, 12)}</Text>
+            </Stack>
+          </Group>
+          <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
+            <Badge variant="light" color={isRunning ? 'teal' : 'gray'} tt="capitalize" radius="sm">
               {mule.status}
-            </span>
-            {/* Expand toggle */}
+            </Badge>
             {isRunning && (
-              <button
+              <ActionIcon
+                variant="default"
+                size="sm"
                 onClick={() => setExpanded(v => !v)}
-                className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white transition-colors"
                 title={expanded ? 'Collapse' : 'Expand stats'}
+                aria-expanded={expanded}
               >
                 {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              </button>
+              </ActionIcon>
             )}
-          </div>
-        </div>
-      </div>
+          </Group>
+        </Group>
+      </Box>
 
       {/* Body */}
-      <div className="p-5 flex flex-col gap-4 flex-1">
-
+      <Stack p="md" gap="sm" flex={1}>
         {/* Network info */}
         {ip && (
-          <div className="bg-neutral-950/50 rounded-xl p-3 border border-white/5 flex flex-col gap-2.5">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-neutral-500 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider"><Globe2 size={14}/> IP</span>
-              <span className="font-mono text-neutral-200 font-medium">{ip.ip}</span>
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-neutral-500 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider"><Shield size={14}/> Loc</span>
-              <span className="text-neutral-300 font-medium truncate ml-4">
-                {[ip.city, ip.region, ip.country].filter(Boolean).join(', ')}
-              </span>
-            </div>
-            {ip.org && (
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-neutral-500 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider"><Radio size={14}/> ISP</span>
-                <span className="text-neutral-400 truncate max-w-[150px] text-right">{ip.org}</span>
-              </div>
-            )}
-          </div>
+          <Paper withBorder radius="md" p="sm">
+            <Stack gap={8}>
+              <InfoRow icon={<Globe2 size={14} />} label="IP" value={ip.ip} mono />
+              <InfoRow
+                icon={<Shield size={14} />}
+                label="Loc"
+                value={[ip.city, ip.region, ip.country].filter(Boolean).join(', ')}
+              />
+              {ip.org && <InfoRow icon={<Radio size={14} />} label="ISP" value={ip.org} />}
+            </Stack>
+          </Paper>
         )}
         {!ip && isRunning && (
-          <div className="bg-neutral-950/50 rounded-xl p-4 border border-white/5 flex flex-col items-center justify-center gap-2">
-            <div className="w-5 h-5 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin"></div>
-            <span className="text-xs font-medium text-emerald-400">Establishing tunnel...</span>
-          </div>
+          <Paper withBorder radius="md" p="md">
+            <Stack align="center" gap={8}>
+              <Loader size="xs" color="teal" />
+              <Text size="xs" fw={500} c="teal.4">Establishing tunnel...</Text>
+            </Stack>
+          </Paper>
         )}
 
         {/* Config meta */}
-        <div className="flex flex-col gap-2 text-sm mt-auto">
-          <div className="flex justify-between items-center bg-white/5 px-3 py-2 rounded-lg">
-            <span className="text-neutral-500 font-medium text-xs">Config</span>
-            <span className="text-neutral-300 font-mono text-xs truncate max-w-[140px]">{mule.vpn_config}</span>
-          </div>
-          <div className="flex justify-between items-center bg-white/5 px-3 py-2 rounded-lg">
-            <span className="text-neutral-500 font-medium text-xs flex items-center gap-1.5"><TerminalSquare size={14}/> RPC Port</span>
-            <span className="text-neutral-300 font-mono text-xs font-semibold">{mule.rpc_port}</span>
-          </div>
-        </div>
-      </div>
+        <Stack gap={6} mt="auto">
+          <Paper radius="md" px="sm" py={8} bg="var(--mantine-color-default-hover)">
+            <InfoRow label="Config" value={mule.vpn_config} mono />
+          </Paper>
+          <Paper radius="md" px="sm" py={8} bg="var(--mantine-color-default-hover)">
+            <InfoRow icon={<TerminalSquare size={14} />} label="RPC Port" value={String(mule.rpc_port)} mono />
+          </Paper>
+        </Stack>
+      </Stack>
 
-      {/* ── Expanded stats panel ─────────────────────────────────────────────── */}
+      {/* Expanded stats panel */}
       <ExpandedStatsPanel
         history={history}
         torrents={torrents}
@@ -275,48 +281,60 @@ export function MuleCard({ mule }: Readonly<Props>) {
       />
 
       {/* Footer — actions */}
-      <div className="p-4 bg-neutral-950/50 border-t border-white/5 mt-auto">
+      <Box p="sm" mt="auto" style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
         {showConfirm ? (
-          <div className="flex items-center gap-2 bg-red-500/10 p-1.5 rounded-xl ring-1 ring-red-500/20">
-            <span className="text-xs font-semibold text-red-400 flex-1 ml-2">
-              {showConfirm === 'stop' ? 'Stop Gracefully?' : 'Kill Immediately?'}
-            </span>
-            <button
-              className="text-xs px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-semibold transition-colors"
-              onClick={() => {
-                if (showConfirm === 'stop') stop.mutate();
-                else kill.mutate();
-                setShowConfirm(null);
-              }}
-            >
-              Yes
-            </button>
-            <button
-              className="text-xs px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white font-semibold transition-colors"
-              onClick={() => setShowConfirm(null)}
-            >
-              Cancel
-            </button>
-          </div>
+          <Paper
+            radius="md"
+            p={6}
+            style={{
+              background: 'var(--mantine-color-red-light)',
+              border: '1px solid var(--mantine-color-red-light-color)',
+            }}
+          >
+            <Group gap="xs" wrap="nowrap">
+              <Text size="xs" fw={600} c="red.4" flex={1} ml={6}>
+                {showConfirm === 'stop' ? 'Stop Gracefully?' : 'Kill Immediately?'}
+              </Text>
+              <Button
+                size="compact-xs"
+                color="red"
+                onClick={() => {
+                  if (showConfirm === 'stop') stop.mutate();
+                  else kill.mutate();
+                  setShowConfirm(null);
+                }}
+              >
+                Yes
+              </Button>
+              <Button size="compact-xs" variant="default" onClick={() => setShowConfirm(null)}>
+                Cancel
+              </Button>
+            </Group>
+          </Paper>
         ) : (
-          <div className="flex gap-2">
-            <button
-              className="flex items-center justify-center gap-1.5 flex-1 text-sm font-semibold py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white transition-colors disabled:opacity-50"
+          <Group gap="xs" grow>
+            <Button
+              variant="default"
+              size="xs"
+              leftSection={<Power size={15} />}
               onClick={() => setShowConfirm('stop')}
               disabled={stop.isPending || kill.isPending}
             >
-              <Power size={16} /> Stop
-            </button>
-            <button
-              className="flex items-center justify-center gap-1.5 flex-1 text-sm font-semibold py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-500 transition-colors disabled:opacity-50"
+              Stop
+            </Button>
+            <Button
+              variant="light"
+              color="red"
+              size="xs"
+              leftSection={<Trash2 size={15} />}
               onClick={() => setShowConfirm('kill')}
               disabled={stop.isPending || kill.isPending}
             >
-              <Trash2 size={16} /> Kill
-            </button>
-          </div>
+              Kill
+            </Button>
+          </Group>
         )}
-      </div>
-    </div>
+      </Box>
+    </Card>
   );
 }

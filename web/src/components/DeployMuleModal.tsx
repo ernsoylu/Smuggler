@@ -1,10 +1,12 @@
-import { useModalA11y, modalA11yProps } from '../hooks/useModalA11y';
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
+import {
+  Alert, Box, Button, Group, Loader, Modal, Paper, ScrollArea, Stack, Text, ThemeIcon,
+} from '@mantine/core';
 import { getConfigs } from '../api/client';
 import type { VpnConfig } from '../api/client';
 import { useDeployments } from '../context/DeploymentContext';
-import { X, Rocket, Shield, FileKey2 } from 'lucide-react';
+import { Rocket, Shield, FileKey2 } from 'lucide-react';
 
 interface Props {
   onClose: () => void;
@@ -14,8 +16,6 @@ export function DeployMuleModal({ onClose }: Readonly<Props>) {
   const [deployingId, setDeployingId] = useState<number | null>(null);
   const [error, setError] = useState('');
   const { start } = useDeployments();
-  // Deployment is irreversible once started, so Escape is disabled while it runs.
-  const dialogRef = useModalA11y(deployingId ? undefined : onClose);
 
   const { data: configs = [], isLoading } = useQuery({
     queryKey: ['configs'],
@@ -42,124 +42,104 @@ export function DeployMuleModal({ onClose }: Readonly<Props>) {
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
-      <button
-        type="button"
-        aria-label="Close modal"
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm border-0 p-0 cursor-default"
-        onClick={deployingId ? undefined : onClose}
-        disabled={!!deployingId}
-      />
-
-      {/* Modal */}
-      <div
-        ref={dialogRef}
-        {...modalA11yProps}
-        aria-labelledby="deploy-mule-title"
-        className="relative bg-neutral-900 border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl flex flex-col max-h-[80vh] overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-white/5">
-          <h2 id="deploy-mule-title" className="text-white font-bold text-xl tracking-tight flex items-center gap-2">
-            <Rocket size={22} className="text-blue-400" /> Deploy Mule
-          </h2>
-          <button
-            className="p-1.5 text-neutral-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors disabled:opacity-50"
-            onClick={onClose}
-            disabled={!!deployingId}
-          >
-            <X size={20} />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {isLoading && (
-            <div className="flex items-center justify-center gap-3 py-12 text-neutral-500">
-              <div className="w-5 h-5 border-2 border-neutral-500 border-t-transparent rounded-full animate-spin" />
-              <span className="text-sm font-medium">Loading configs...</span>
-            </div>
-          )}
-          {!isLoading && configs.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <FileKey2 size={40} className="text-neutral-700 mb-3" strokeWidth={1} />
-              <p className="text-neutral-400 font-medium text-sm">No VPN configurations stored.</p>
-              <p className="text-neutral-500 text-xs mt-1">Go to the Configs tab to upload one.</p>
-            </div>
-          )}
-          {!isLoading && configs.length > 0 && (
-            <div className="space-y-2">
-              {configs.map(cfg => {
-                const inUse = !!cfg.in_use_by_mule;
-                const disabled = !!deployingId || inUse;
-                return (
-                <div
-                  key={cfg.id}
-                  className={`flex items-center justify-between gap-4 p-4 rounded-xl border transition-all ${
-                    deployingId === cfg.id
-                      ? 'bg-blue-500/5 border-blue-500/20'
-                      : inUse
-                        ? 'bg-neutral-950/30 border-white/5 opacity-60'
-                        : 'bg-neutral-950/50 border-white/5 hover:border-white/10'
-                  }`}
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-9 h-9 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400 shrink-0">
-                      <Shield size={18} />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-white truncate">{cfg.name}</p>
-                      <p className="text-xs text-neutral-500 font-mono truncate">{cfg.filename}</p>
-                      {inUse && (
-                        <p className="text-[11px] text-amber-400/80 mt-0.5 truncate">
-                          In use by mule <span className="font-mono">{cfg.in_use_by_mule}</span>
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <button
-                    className="shrink-0 py-2 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-xs text-white font-bold shadow-lg shadow-blue-500/15 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center gap-1.5"
-                    onClick={() => deploy.mutate(cfg)}
-                    disabled={disabled}
-                    title={inUse ? `Already deployed as ${cfg.in_use_by_mule}` : undefined}
-                  >
-                    {deployingId === cfg.id ? (
-                      <>
-                        <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                        Deploying...
-                      </>
-                    ) : inUse ? (
-                      <>In use</>
-                    ) : (
-                      <>
-                        <Rocket size={13} /> Deploy
-                      </>
-                    )}
-                  </button>
-                </div>
-                );
-              })}
-            </div>
-          )}
-
-          {error && (
-            <div className="mt-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
-              <p className="text-sm font-medium text-red-400">{error}</p>
-            </div>
-          )}
-        </div>
-
-        {/* Footer hint */}
-        {deployingId && (
-          <div className="p-4 border-t border-white/5 bg-blue-500/5">
-            <div className="flex items-center gap-3">
-              <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-              <p className="text-sm font-medium text-blue-400">Negotiating VPN handshake... (up to 90s)</p>
-            </div>
-          </div>
+    <Modal
+      opened
+      onClose={onClose}
+      centered
+      radius="lg"
+      size="lg"
+      title={
+        <Group gap="xs">
+          <Rocket size={22} color="var(--mantine-color-blue-4)" />
+          <Text fw={700} size="xl">Deploy Mule</Text>
+        </Group>
+      }
+      // Deployment is irreversible once started, so Escape is disabled while it runs.
+      closeOnEscape={!deployingId}
+      closeOnClickOutside={!deployingId}
+      withCloseButton={!deployingId}
+    >
+      <ScrollArea.Autosize mah="60vh">
+        {isLoading && (
+          <Group justify="center" gap="sm" py="xl">
+            <Loader size="sm" color="gray" />
+            <Text size="sm" fw={500} c="dimmed">Loading configs...</Text>
+          </Group>
         )}
-      </div>
-    </div>
+        {!isLoading && configs.length === 0 && (
+          <Stack align="center" py="xl" gap={4}>
+            <FileKey2 size={40} strokeWidth={1} color="var(--mantine-color-dimmed)" />
+            <Text size="sm" fw={500} c="dimmed" mt="xs">No VPN configurations stored.</Text>
+            <Text size="xs" c="dimmed">Go to the Configs tab to upload one.</Text>
+          </Stack>
+        )}
+        {!isLoading && configs.length > 0 && (
+          <Stack gap="xs">
+            {configs.map(cfg => {
+              const inUse = !!cfg.in_use_by_mule;
+              const disabled = !!deployingId || inUse;
+              return (
+                <Paper
+                  key={cfg.id}
+                  withBorder
+                  radius="md"
+                  p="md"
+                  opacity={inUse ? 0.6 : 1}
+                  style={deployingId === cfg.id ? {
+                    background: 'var(--mantine-color-blue-light)',
+                    borderColor: 'var(--mantine-color-blue-light-color)',
+                  } : undefined}
+                >
+                  <Group justify="space-between" gap="md" wrap="nowrap">
+                    <Group gap="sm" wrap="nowrap" miw={0}>
+                      <ThemeIcon variant="light" color="teal" size={36} radius="md">
+                        <Shield size={18} />
+                      </ThemeIcon>
+                      <Stack gap={0} miw={0}>
+                        <Text size="sm" fw={600} truncate>{cfg.name}</Text>
+                        <Text size="xs" c="dimmed" ff="monospace" truncate>{cfg.filename}</Text>
+                        {inUse && (
+                          <Text size="11px" c="yellow.4" truncate>
+                            In use by mule <Text component="span" ff="monospace" size="11px">{cfg.in_use_by_mule}</Text>
+                          </Text>
+                        )}
+                      </Stack>
+                    </Group>
+
+                    <Button
+                      size="xs"
+                      leftSection={deployingId === cfg.id || inUse ? undefined : <Rocket size={13} />}
+                      onClick={() => deploy.mutate(cfg)}
+                      disabled={disabled && deployingId !== cfg.id}
+                      loading={deployingId === cfg.id}
+                      title={inUse ? `Already deployed as ${cfg.in_use_by_mule}` : undefined}
+                      style={{ flexShrink: 0 }}
+                    >
+                      {inUse ? 'In use' : 'Deploy'}
+                    </Button>
+                  </Group>
+                </Paper>
+              );
+            })}
+          </Stack>
+        )}
+
+        {error && (
+          <Alert color="red" radius="md" p="sm" mt="md">
+            <Text size="sm" fw={500} c="red.4">{error}</Text>
+          </Alert>
+        )}
+      </ScrollArea.Autosize>
+
+      {/* Footer hint */}
+      {deployingId && (
+        <Paper mt="md" p="sm" radius="md" style={{ background: 'var(--mantine-color-blue-light)' }}>
+          <Group gap="sm">
+            <Box w={8} h={8} bg="blue.5" style={{ borderRadius: '50%' }} className="smuggler-pulse" />
+            <Text size="sm" fw={500} c="blue.4">Negotiating VPN handshake... (up to 90s)</Text>
+          </Group>
+        </Paper>
+      )}
+    </Modal>
   );
 }
