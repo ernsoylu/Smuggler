@@ -59,8 +59,8 @@ export function CommandPalette({ onClose, onNavigate, onAddTorrent, onDeployMule
       preference === 'light' ? <Sun size={16} /> :
       preference === 'dark' ? <Moon size={16} /> : <Monitor size={16} />;
     return [
-      { id: 'add-torrent', label: 'Add torrent', hint: 'N', icon: <Plus size={16} />, run: onAddTorrent },
-      { id: 'deploy-mule', label: 'Deploy mule', icon: <Rocket size={16} />, run: onDeployMule },
+      { id: 'add-torrent', label: 'Add Torrent', hint: 'N', icon: <Plus size={16} />, run: onAddTorrent },
+      { id: 'deploy-mule', label: 'Deploy Mule', icon: <Rocket size={16} />, run: onDeployMule },
       ...nav,
       { id: 'theme', label: `Theme: ${preference} — switch`, icon: themeIcon, run: cycle },
     ];

@@ -1,8 +1,7 @@
 /*
  * Global styles. Component styling lives in Mantine (theme.ts); this file only
- * carries what Mantine cannot express: root sizing, the few keyframe helpers,
- * and the dockview theme variables bridged onto Mantine's CSS variables so the
- * workbench chrome matches the rest of the app in both color schemes.
+ * carries what Mantine cannot express: root sizing, the semantic status colours
+ * and the few keyframe helpers.
  */
 
 html,
@@ -31,13 +30,30 @@ body,
   --smg-bad: var(--mantine-color-red-4);
 }
 
+/*
+ * Light-scheme values, each measured against the white body. The first pass
+ * here moved these off the dark shades but never verified the result: teal-8
+ * landed at 3.95:1, orange-9 at 4.30:1 and yellow-9 at 3.00:1 — all still under
+ * AA — and red-8 passed by 0.01. Every value below is now ≥ 5:1.
+ *
+ * Two are raw hexes because Mantine's ramps bottom out too light to reach AA on
+ * white: orange stops at orange-9 (#d9480f, 4.30:1) and yellow at yellow-9
+ * (#e67700, 3.00:1). Keep the hue, take the lightness down until it passes.
+ */
 [data-mantine-color-scheme='light'] {
-  --smg-ok: var(--mantine-color-teal-8);
-  --smg-info: var(--mantine-color-blue-8);
-  --smg-warn: var(--mantine-color-orange-9);
-  --smg-attention: var(--mantine-color-yellow-9);
-  --smg-bad: var(--mantine-color-red-8);
+  --smg-ok: var(--mantine-color-teal-9);        /* #087f5b — 5.00:1 */
+  --smg-info: var(--mantine-color-blue-8);      /* #1971c2 — 5.02:1 */
+  --smg-warn: #b93c0d;                          /* 5.65:1 (orange-9 is 4.30:1) */
+  --smg-attention: #a16207;                     /* 4.92:1 (yellow-9 is 3.00:1) */
+  --smg-bad: var(--mantine-color-red-9);        /* #c92a2a — 5.46:1 */
 }
+
+/*
+ * `dimmed` is calibrated against the page body and drops under AA on any filled
+ * surface (4.45:1 even on a neutral gray-0 card). Prefer an accent border or
+ * icon to mark state, and leave the surface alone, rather than tinting a
+ * container that holds dimmed text.
+ */
 
 /* ── Keyframe helpers ─────────────────────────────────────────────────────── */
 
@@ -70,22 +86,3 @@ body,
   }
 }
 
-/* ── Dockview ↔ Mantine bridge ────────────────────────────────────────────── */
-
-.dockview-theme-dark,
-.dockview-theme-light {
-  --dv-font-family: var(--mantine-font-family);
-  --dv-group-view-background-color: var(--mantine-color-body);
-  --dv-tabs-and-actions-container-background-color: var(--mantine-color-body);
-  --dv-separator-border: var(--mantine-color-default-border);
-  --dv-drag-over-background-color: var(--mantine-color-smuggler-light);
-  --dv-drag-over-border-color: var(--mantine-color-smuggler-5);
-  --dv-activegroup-visiblepanel-tab-background-color: var(--mantine-color-default-hover);
-  --dv-activegroup-visiblepanel-tab-color: var(--mantine-color-text);
-  --dv-activegroup-hiddenpanel-tab-background-color: var(--mantine-color-body);
-  --dv-activegroup-hiddenpanel-tab-color: var(--mantine-color-dimmed);
-  --dv-inactivegroup-visiblepanel-tab-background-color: var(--mantine-color-default-hover);
-  --dv-inactivegroup-visiblepanel-tab-color: var(--mantine-color-text);
-  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--mantine-color-body);
-  --dv-inactivegroup-hiddenpanel-tab-color: var(--mantine-color-dimmed);
-}

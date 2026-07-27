@@ -18,19 +18,23 @@ const COPY: Record<SetupStepId, { title: string; detail: string; cta: string; ic
   config: {
     title: 'Upload a VPN config',
     detail: 'A WireGuard .conf or OpenVPN .ovpn file. Nothing leaves your machine unencrypted.',
-    cta: 'Upload config',
+    cta: 'Upload Config',
     icon: <FileKey2 size={14} />,
   },
   mule: {
     title: 'Deploy a mule',
-    detail: 'An isolated container that brings up the tunnel and arms its kill-switch before aria2 starts.',
-    cta: 'Deploy mule',
+    // A mule is the app's one coined term and the first-run card is where it is
+    // met; define it here rather than assuming the metaphor lands. `aria2` was
+    // an implementation detail leaking into the promise — what the user is
+    // being told is *when* downloading starts, not which engine does it.
+    detail: 'A sealed container running one VPN tunnel. It arms its kill-switch and verifies the tunnel before any download starts.',
+    cta: 'Deploy Mule',
     icon: <Rocket size={14} />,
   },
   torrent: {
     title: 'Add a torrent',
     detail: 'Paste a magnet link, or drop a .torrent anywhere in the window.',
-    cta: 'Add torrent',
+    cta: 'Add Torrent',
     icon: <Plus size={14} />,
   },
 };
@@ -43,6 +47,21 @@ export function SetupLadder() {
 
   const runningMules = mules.filter(m => m.status === 'running').length;
   const { steps, current } = setupState(configs.length, runningMules);
+
+  /*
+   * A ticked step 1 and a populated Configs panel were two facts the user had
+   * to join up themselves — the tick asserted "done" without ever saying what
+   * satisfied it. Name the count instead. Guarded on configs.length because a
+   * mule can be running after its config was deleted, in which case the step is
+   * still done (see setupState) but there is nothing to point at.
+   */
+  const detailFor = (id: SetupStepId, done: boolean): string => {
+    if (id === 'config' && done && configs.length > 0) {
+      const n = configs.length;
+      return `${n} config${n === 1 ? '' : 's'} stored, ready to deploy from.`;
+    }
+    return COPY[id].detail;
+  };
 
   const run: Record<SetupStepId, () => void> = {
     config: () => navigate('configs'),
@@ -69,17 +88,31 @@ export function SetupLadder() {
               px="md"
               py="sm"
               radius="md"
+              /*
+               * The current step used to be filled with `smuggler-light` and
+               * bordered with `smuggler-light-color`. On the dark surface that
+               * resolves to a maroon fill (#3e1709) behind a near-white border
+               * — Mantine's `-light-color` is a *content* colour, not a border
+               * one — so the active step read as a danger callout sitting under
+               * a green tick. An orange left accent says "you are here" without
+               * colouring the whole row, and leaving the surface alone keeps
+               * c="dimmed" on the background it was calibrated against (any
+               * fill, even a neutral one, drops it under AA).
+               */
               style={isCurrent ? {
-                background: 'var(--mantine-color-smuggler-light)',
-                borderColor: 'var(--mantine-color-smuggler-light-color)',
+                boxShadow: 'inset 3px 0 0 0 var(--mantine-color-smuggler-5)',
               } : undefined}
             >
               <Group gap="md" wrap="nowrap">
+                {/* One badge, three states: done, current, still to come. */}
                 <ThemeIcon
                   size={28}
                   radius="xl"
-                  variant="light"
-                  color={step.done ? 'teal' : 'gray'}
+                  variant={isCurrent ? 'filled' : 'light'}
+                  color={(() => {
+                    if (step.done) return 'teal';
+                    return isCurrent ? 'smuggler' : 'gray';
+                  })()}
                   aria-hidden
                 >
                   {step.done ? <Check size={14} /> : <Text size="xs" fw={700}>{i + 1}</Text>}
@@ -90,7 +123,7 @@ export function SetupLadder() {
                     {copy.title}
                     {step.done && <VisuallyHidden> — done</VisuallyHidden>}
                   </Text>
-                  <Text size="xs" c="dimmed" mt={2}>{copy.detail}</Text>
+                  <Text size="xs" c="dimmed" mt={2}>{detailFor(step.id, step.done)}</Text>
                 </div>
 
                 {!step.done && (

@@ -217,9 +217,12 @@ export function TorrentsPage() {
           <Title order={2}>Torrents</Title>
           <Text size="sm" c="dimmed" mt={2}>Manage active downloads across all routing mules.</Text>
         </div>
-        <Button leftSection={<Plus size={16} strokeWidth={2.5} />} onClick={openAddTorrent}>
-          Add Torrent
-        </Button>
+        {/* The N shortcut existed but was advertised only inside the palette. */}
+        <Tooltip label="Add Torrent (N)" withArrow>
+          <Button leftSection={<Plus size={16} strokeWidth={2.5} />} onClick={openAddTorrent}>
+            Add Torrent
+          </Button>
+        </Tooltip>
       </Group>
 
       <Stack gap="md">
@@ -255,7 +258,7 @@ export function TorrentsPage() {
           <TextInput
             type="search"
             aria-label="Search torrents by name or mule"
-            placeholder="Search name or mule…"
+            placeholder="Search name or mule…  /"
             value={search}
             onChange={e => handleSearch(e.currentTarget.value)}
             leftSection={<Search size={15} />}

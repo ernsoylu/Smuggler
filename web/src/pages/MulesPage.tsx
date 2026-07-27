@@ -10,13 +10,6 @@ import { useNotifications } from '../context/NotificationContext';
 import { useUiActions } from '../context/UiActionsContext';
 import { ShieldCheck, Rocket, Shield, ShieldAlert, ShieldOff, RefreshCw, LogOut } from 'lucide-react';
 
-function tinted(color: string): React.CSSProperties {
-  return {
-    background: `var(--mantine-color-${color}-light)`,
-    borderColor: `var(--mantine-color-${color}-light-color)`,
-  };
-}
-
 function WatchdogPanel({ watchdog }: Readonly<{ watchdog: WatchdogStatus | undefined }>) {
   const qc = useQueryClient();
   const [confirmEvac, setConfirmEvac] = useState<string | null>(null);
@@ -37,31 +30,58 @@ function WatchdogPanel({ watchdog }: Readonly<{ watchdog: WatchdogStatus | undef
   if (!watchdog) return null;
 
   const unhealthy = watchdog.mules.filter(m => !m.healthy);
-  const healthy   = watchdog.mules.filter(m => m.healthy);
   const allHealthy = unhealthy.length === 0;
   const mulesPlural = unhealthy.length > 1 ? 's' : '';
   const watchdogTitle = allHealthy ? 'All VPN connections secure' : `${unhealthy.length} mule${mulesPlural} compromised`;
   const panelColor = allHealthy ? 'teal' : 'red';
 
   return (
-    <Paper withBorder radius="lg" p="md" mb="lg" style={tinted(panelColor)}>
-      <Group justify="space-between" mb="sm">
-        <Group gap="sm">
+    /*
+     * A status strip, not a panel. This was a full tinted card carrying a
+     * two-line header plus a large badge per healthy mule — a big block whose
+     * whole message, most of the time, is "nothing is wrong". The healthy list
+     * is also pure duplication: every one of those mules is rendered with its
+     * IP in Active Deployments immediately below. Only the failure case earns
+     * vertical space, so only the failure case gets any.
+     */
+    /*
+     * Accent border rather than a tinted fill. The tint was carrying `teal.4`
+     * title text at 1.56:1 and `dimmed` meta at 3.42:1 — numbered shades are
+     * calibrated for the dark surface, and `dimmed` for the page body, so both
+     * collapse on a light-scheme tint. On the plain surface the semantic
+     * variables hold their contract in both schemes.
+     */
+    <Paper
+      withBorder
+      radius="md"
+      px="md"
+      py={8}
+      mb="md"
+      style={{ boxShadow: `inset 3px 0 0 0 var(--mantine-color-${panelColor}-5)` }}
+    >
+      <Group justify="space-between" gap="sm" wrap="nowrap">
+        <Group gap="sm" wrap="nowrap" miw={0}>
           {allHealthy
-            ? <Shield size={18} color="var(--mantine-color-teal-4)" />
-            : <ShieldAlert size={18} color="var(--mantine-color-red-4)" />}
-          <div>
-            <Text size="sm" fw={700} c={`${panelColor}.4`}>{watchdogTitle}</Text>
-            <Text size="11px" c="dimmed" mt={2}>
-              Watchdog · interval {watchdog.config.interval_seconds}s · {watchdog.stats.total_sweeps} sweeps · {watchdog.stats.total_evacuations} evacuations
-              {watchdog.stats.last_run_at && ` · last check ${new Date(watchdog.stats.last_run_at).toLocaleTimeString()}`}
-            </Text>
-          </div>
+            ? <Shield size={15} color="var(--mantine-color-teal-5)" style={{ flexShrink: 0 }} />
+            : <ShieldAlert size={15} color="var(--mantine-color-red-5)" style={{ flexShrink: 0 }} />}
+          <Text
+            size="sm"
+            fw={600}
+            c={allHealthy ? 'var(--smg-ok)' : 'var(--smg-bad)'}
+            style={{ flexShrink: 0 }}
+          >
+            {watchdogTitle}
+          </Text>
+          <Text size="11px" c="dimmed" truncate>
+            {watchdog.config.interval_seconds}s · {watchdog.stats.total_sweeps} sweeps · {watchdog.stats.total_evacuations} evacuations
+            {watchdog.stats.last_run_at && ` · ${new Date(watchdog.stats.last_run_at).toLocaleTimeString()}`}
+          </Text>
         </Group>
         <Button
           size="compact-xs"
           variant="default"
-          leftSection={<RefreshCw size={13} className={sweep.isPending ? 'smuggler-spin' : undefined} />}
+          style={{ flexShrink: 0 }}
+          leftSection={<RefreshCw size={12} className={sweep.isPending ? 'smuggler-spin' : undefined} />}
           onClick={() => sweep.mutate()}
           disabled={sweep.isPending}
         >
@@ -69,17 +89,24 @@ function WatchdogPanel({ watchdog }: Readonly<{ watchdog: WatchdogStatus | undef
         </Button>
       </Group>
 
-      {/* Unhealthy mules */}
+      {/* Unhealthy mules — the only case that expands the strip */}
       {unhealthy.length > 0 && (
-        <Stack gap="xs" mb="sm">
+        <Stack gap="xs" mt="sm">
           {unhealthy.map(m => (
-            <Paper key={m.name} withBorder radius="md" px="md" py="sm" style={tinted('red')}>
+            <Paper
+              key={m.name}
+              withBorder
+              radius="md"
+              px="md"
+              py="sm"
+              style={{ boxShadow: 'inset 3px 0 0 0 var(--mantine-color-red-5)' }}
+            >
               <Group justify="space-between" gap="sm" wrap="nowrap">
                 <Group gap="sm" wrap="nowrap" miw={0}>
-                  <ShieldOff size={14} color="var(--mantine-color-red-4)" style={{ flexShrink: 0 }} />
+                  <ShieldOff size={14} color="var(--mantine-color-red-5)" style={{ flexShrink: 0 }} />
                   <Stack gap={0} miw={0}>
                     <Text size="sm" fw={600} c="var(--smg-bad)" truncate>{m.name}</Text>
-                    <Text size="11px" c="red.5" truncate>{m.reason}</Text>
+                    <Text size="11px" c="dimmed" truncate>{m.reason}</Text>
                   </Stack>
                   {(m.consecutive_failures ?? 0) > 0 && (
                     <Badge size="xs" color="red" variant="light">
@@ -124,25 +151,6 @@ function WatchdogPanel({ watchdog }: Readonly<{ watchdog: WatchdogStatus | undef
         </Stack>
       )}
 
-      {/* Healthy mule mini-list */}
-      {healthy.length > 0 && (
-        <Group gap="xs">
-          {healthy.map(m => (
-            <Badge
-              key={m.name}
-              variant="light"
-              color="teal"
-              size="lg"
-              radius="md"
-              tt="none"
-              leftSection={<Shield size={11} />}
-              styles={{ label: { fontFamily: 'var(--mantine-font-family-monospace)', fontWeight: 500 } }}
-            >
-              {m.name}{m.ip ? ` ${m.ip}` : ''}
-            </Badge>
-          ))}
-        </Group>
-      )}
     </Paper>
   );
 }
@@ -179,7 +187,7 @@ export function MulesPage() {
 
   return (
     <Box p="lg">
-      <Group justify="space-between" align="flex-start" mb="xl" gap="md">
+      <Group justify="space-between" align="flex-start" mb="md" gap="md">
         <div>
           <Title order={2}>Mules</Title>
           <Text size="sm" c="dimmed" mt={2}>Deploy and manage isolated VPN containers for secure proxying.</Text>
@@ -204,18 +212,19 @@ export function MulesPage() {
           <Text size="sm" fw={500} c="dimmed">Querying active mules...</Text>
         </Group>
       )}
+      {/*
+        Solid border, not dashed: a dashed rectangle reads as a drop target
+        everywhere else in the OS, and nothing can be dropped here.
+      */}
       {!isLoading && mules.length === 0 && (
-        <Paper
-          radius="lg"
-          p={48}
-          style={{ border: '2px dashed var(--mantine-color-default-border)', textAlign: 'center' }}
-        >
-          <Stack align="center" gap="sm">
-            <ShieldCheck size={48} strokeWidth={1} color="var(--mantine-color-dimmed)" />
-            <Text c="dimmed" fw={500} maw={380}>
-              No mules are currently running. Click "Deploy Mule" to get started.
-            </Text>
-          </Stack>
+        <Paper withBorder radius="md" p="lg">
+          <Group justify="center" gap="sm">
+            <ShieldCheck size={18} strokeWidth={1.5} color="var(--mantine-color-dimmed)" />
+            <Text size="sm" c="dimmed" fw={500}>No mules running.</Text>
+            <Button size="compact-sm" variant="default" leftSection={<Rocket size={13} />} onClick={openDeployMule}>
+              Deploy Mule
+            </Button>
+          </Group>
         </Paper>
       )}
       {!isLoading && mules.length > 0 && (
