@@ -1,15 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import {
-  ActionIcon, Badge, Box, Button, Card, Collapse, Group, Loader, Paper, Progress,
-  Stack, Text, Tooltip,
+  ActionIcon, Badge, Box, Button, Card, Collapse, Divider, Group, Loader, Paper,
+  Progress, Stack, Text, Tooltip,
 } from '@mantine/core';
 import { stopMule, killMule, getMuleTorrents } from '../api/client';
 import type { Mule, Torrent } from '../api/types';
 import { SpeedGraph } from './SpeedGraph';
 import type { DataPoint } from './SpeedGraph';
 import {
-  Power, Trash2, Globe2, Shield, Radio, TerminalSquare,
+  Power, Trash2, Globe2, Shield, Radio, TerminalSquare, FileKey2,
   ChevronDown, ChevronUp, CheckCircle2, PauseCircle, Download,
 } from 'lucide-react';
 
@@ -35,15 +35,23 @@ function torrentStatusColor(status: string): string {
   return 'dimmed';
 }
 
+/**
+ * One fact, as a label/value line.
+ *
+ * These used to be wrapped one-per-`Paper` — a filled box around a single short
+ * value — so a card showing five facts rendered as five stacked boxes and the
+ * whole grid became a wall of nested containers. A row is just a row; the card
+ * border is the only container that needs to exist.
+ */
 function InfoRow({ icon, label, value, mono }: Readonly<{
   icon?: React.ReactNode; label: string; value: string; mono?: boolean;
 }>) {
   return (
-    <Group justify="space-between" gap="md" wrap="nowrap">
-      <Text size="xs" fw={600} tt="uppercase" c="dimmed" lts={1}
-        style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-        {icon} {label}
-      </Text>
+    <Group justify="space-between" gap="sm" wrap="nowrap">
+      <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }} c="dimmed">
+        {icon}
+        <Text size="10px" fw={600} tt="uppercase" c="dimmed" lts={0.8}>{label}</Text>
+      </Group>
       <Text size="xs" fw={500} ff={mono ? 'monospace' : undefined} truncate>
         {value}
       </Text>
@@ -198,21 +206,21 @@ export function MuleCard({ mule }: Readonly<Props>) {
   return (
     <Card withBorder radius="lg" p={0} style={{ display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
-      <Box p="md" style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}>
-        <Group justify="space-between" align="flex-start" gap="md" wrap="nowrap">
+      <Box px="sm" py={10} style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}>
+        <Group justify="space-between" align="center" gap="sm" wrap="nowrap">
           <Group gap="sm" wrap="nowrap" miw={0}>
             <Box
-              w={10} h={10} mt={6}
+              w={8} h={8}
               bg={isRunning ? 'teal.5' : 'gray.6'}
               style={{ borderRadius: '50%', flexShrink: 0 }}
             />
             <Stack gap={0} miw={0}>
-              <Text fw={600} truncate>{mule.name}</Text>
-              <Text size="xs" c="dimmed" ff="monospace">{mule.id.slice(0, 12)}</Text>
+              <Text size="sm" fw={600} truncate>{mule.name}</Text>
+              <Text size="10px" c="dimmed" ff="monospace">{mule.id.slice(0, 12)}</Text>
             </Stack>
           </Group>
-          <Group gap="xs" wrap="nowrap" style={{ flexShrink: 0 }}>
-            <Badge variant="light" color={isRunning ? 'teal' : 'gray'} tt="capitalize" radius="sm">
+          <Group gap={6} wrap="nowrap" style={{ flexShrink: 0 }}>
+            <Badge size="sm" variant="light" color={isRunning ? 'teal' : 'gray'} tt="capitalize" radius="sm">
               {mule.status}
             </Badge>
             {isRunning && (
@@ -230,40 +238,30 @@ export function MuleCard({ mule }: Readonly<Props>) {
         </Group>
       </Box>
 
-      {/* Body */}
-      <Stack p="md" gap="sm" flex={1}>
-        {/* Network info */}
+      {/* Body — one flat list of facts, grouped by a divider rather than boxes */}
+      <Stack px="sm" py={10} gap={6} flex={1}>
         {ip && (
-          <Paper withBorder radius="md" p="sm">
-            <Stack gap={8}>
-              <InfoRow icon={<Globe2 size={14} />} label="IP" value={ip.ip} mono />
-              <InfoRow
-                icon={<Shield size={14} />}
-                label="Loc"
-                value={[ip.city, ip.region, ip.country].filter(Boolean).join(', ')}
-              />
-              {ip.org && <InfoRow icon={<Radio size={14} />} label="ISP" value={ip.org} />}
-            </Stack>
-          </Paper>
+          <>
+            <InfoRow icon={<Globe2 size={12} />} label="IP" value={ip.ip} mono />
+            <InfoRow
+              icon={<Shield size={12} />}
+              label="Loc"
+              value={[ip.city, ip.region, ip.country].filter(Boolean).join(', ')}
+            />
+            {ip.org && <InfoRow icon={<Radio size={12} />} label="ISP" value={ip.org} />}
+          </>
         )}
         {!ip && isRunning && (
-          <Paper withBorder radius="md" p="md">
-            <Stack align="center" gap={8}>
-              <Loader size="xs" color="teal" />
-              <Text size="xs" fw={500} c="var(--smg-ok)">Establishing tunnel...</Text>
-            </Stack>
-          </Paper>
+          <Group gap={8} wrap="nowrap">
+            <Loader size={12} color="teal" />
+            <Text size="xs" fw={500} c="var(--smg-ok)">Establishing tunnel…</Text>
+          </Group>
         )}
 
-        {/* Config meta */}
-        <Stack gap={6} mt="auto">
-          <Paper radius="md" px="sm" py={8} bg="var(--mantine-color-default-hover)">
-            <InfoRow label="Config" value={mule.vpn_config} mono />
-          </Paper>
-          <Paper radius="md" px="sm" py={8} bg="var(--mantine-color-default-hover)">
-            <InfoRow icon={<TerminalSquare size={14} />} label="RPC Port" value={String(mule.rpc_port)} mono />
-          </Paper>
-        </Stack>
+        <Divider my={2} />
+
+        <InfoRow icon={<FileKey2 size={12} />} label="Config" value={mule.vpn_config} mono />
+        <InfoRow icon={<TerminalSquare size={12} />} label="RPC" value={String(mule.rpc_port)} mono />
       </Stack>
 
       {/* Expanded stats panel */}
@@ -281,7 +279,7 @@ export function MuleCard({ mule }: Readonly<Props>) {
       />
 
       {/* Footer — actions */}
-      <Box p="sm" mt="auto" style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
+      <Box px="sm" py={8} mt="auto" style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
         {showConfirm ? (
           <Paper
             radius="md"
@@ -319,12 +317,12 @@ export function MuleCard({ mule }: Readonly<Props>) {
            * abrupt option was one slipped click from the graceful one. Both are
            * still one click plus a confirm — only the visual pull differs.
            */
-          <Group gap="xs" wrap="nowrap">
+          <Group gap={6} wrap="nowrap">
             <Button
               variant="default"
-              size="xs"
+              size="compact-sm"
               flex={1}
-              leftSection={<Power size={15} />}
+              leftSection={<Power size={13} />}
               onClick={() => setShowConfirm('stop')}
               disabled={stop.isPending || kill.isPending}
             >
@@ -334,12 +332,12 @@ export function MuleCard({ mule }: Readonly<Props>) {
               <ActionIcon
                 variant="subtle"
                 color="red"
-                size="lg"
+                size="md"
                 aria-label="Kill mule immediately"
                 onClick={() => setShowConfirm('kill')}
                 disabled={stop.isPending || kill.isPending}
               >
-                <Trash2 size={15} />
+                <Trash2 size={14} />
               </ActionIcon>
             </Tooltip>
           </Group>

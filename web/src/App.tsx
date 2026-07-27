@@ -1,6 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ActionIcon, Box, Button, Group, Kbd, MantineProvider, Text, Tooltip } from '@mantine/core';
-import type { DockviewApi } from 'dockview-react';
 import type { ReactNode } from 'react';
 import { StatusFooter } from './components/StatusFooter';
 import { NotificationBell } from './components/NotificationBell';
@@ -12,13 +11,14 @@ import { TorrentDropZone } from './components/TorrentDropZone';
 import { CommandPalette } from './components/CommandPalette';
 import { AddTorrentModal } from './components/AddTorrentModal';
 import { DeployMuleModal } from './components/DeployMuleModal';
-import { Workbench } from './workbench/Workbench';
+import { PageView } from './pages/PageView';
 import { useHashRoute } from './hooks/useHashRoute';
 import { useKeyboardShortcuts, type Shortcut } from './hooks/useKeyboardShortcuts';
 import { PAGES, type Page } from './lib/router';
-import { theme } from './theme';
+import { modKeyLabel } from './lib/platform';
+import { theme, cssVariablesResolver } from './theme';
 import {
-  LayoutDashboard, Server, Settings, FileKey2, Command, Sun, Moon, Monitor, LayoutTemplate,
+  LayoutDashboard, Server, Settings, FileKey2, Command, Sun, Moon, Monitor,
   ScrollText,
 } from 'lucide-react';
 
@@ -63,7 +63,9 @@ function Shell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [addTorrentOpen, setAddTorrentOpen] = useState(false);
   const [deployMuleOpen, setDeployMuleOpen] = useState(false);
-  const dockApiRef = useRef<DockviewApi | null>(null);
+
+  // Read once: the platform does not change mid-session.
+  const modKey = useMemo(() => modKeyLabel(navigator.platform), []);
 
   const openAddTorrent = useCallback(() => setAddTorrentOpen(true), []);
   const openDeployMule = useCallback(() => setDeployMuleOpen(true), []);
@@ -151,36 +153,24 @@ function Shell() {
           </Group>
 
           <Group gap={4} wrap="nowrap" ml="auto">
-            <Tooltip label="Restore default layout" withArrow>
-              <ActionIcon
-                variant="subtle"
-                color="gray"
-                size="lg"
-                visibleFrom="sm"
-                aria-label="Restore default panel layout"
-                onClick={() => window.dispatchEvent(new Event('smuggler:reset-layout'))}
-              >
-                <LayoutTemplate size={16} />
-              </ActionIcon>
-            </Tooltip>
             <Button
               variant="subtle"
               color="gray"
               size="compact-sm"
               visibleFrom="sm"
               leftSection={<Command size={14} />}
-              rightSection={<Kbd size="xs">Ctrl K</Kbd>}
+              rightSection={<Kbd size="xs">{modKey} K</Kbd>}
               onClick={() => setPaletteOpen(true)}
-              aria-label="Open command palette"
+              aria-label={`Open command palette (${modKey} K)`}
             />
             <ThemeToggle />
             <NotificationBell />
           </Group>
         </Group>
 
-        {/* Dockable panel workbench */}
+        {/* The routed view */}
         <div style={{ flex: 1, minHeight: 0 }}>
-          <Workbench onApi={api => { dockApiRef.current = api; }} />
+          <PageView page={page} />
         </div>
 
         {/* Persistent status bar + graph footer */}
@@ -207,7 +197,11 @@ function Shell() {
 function MantineRoot({ children }: Readonly<{ children: ReactNode }>) {
   const { resolved } = useTheme();
   return (
-    <MantineProvider theme={theme} forceColorScheme={resolved}>
+    <MantineProvider
+      theme={theme}
+      forceColorScheme={resolved}
+      cssVariablesResolver={cssVariablesResolver}
+    >
       {children}
     </MantineProvider>
   );

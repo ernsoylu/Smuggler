@@ -68,8 +68,25 @@ Use **Mantine**. Reach for component props and `theme.ts` tokens before writing
 CSS; `style={{...}}` is for one-off layout Mantine cannot express, not for
 theming. Tailwind was removed — do not reintroduce utility classes.
 
-`web/src/index.css` carries only what Mantine cannot: root sizing, keyframes,
-the semantic status colours and the Dockview↔Mantine bridge.
+`web/src/index.css` carries only what Mantine cannot: root sizing, keyframes and
+the semantic status colours.
+
+Two accessibility settings live in `theme.ts` and must not be undone:
+
+- `autoContrast: true` with `luminanceThreshold: 0.2`, so filled buttons get a
+  dark label on the brand orange — white on it is 2.80:1 (dark) and 3.56:1
+  (light), both failing AA. Mantine's default threshold of 0.3 only fixes the
+  dark scheme; do not raise it back.
+- `cssVariablesResolver` re-points light-scheme `--mantine-color-dimmed` to
+  `#6c757d` (Mantine's gray-6 default is 3.32:1 on white). This *must* go
+  through the resolver: Mantine declares the variable at
+  `:root[data-mantine-color-scheme='light']`, which outspecifies a plain
+  attribute selector in `index.css`, so a CSS override silently loses.
+
+**`dimmed` is calibrated against the page body**, so it drops under AA on any
+filled surface — 4.45:1 on even a neutral gray-0 card. Mark state with an accent
+border or icon (as the setup ladder's current step does) rather than tinting a
+container that holds dimmed text.
 
 **Status colours go through the semantic variables**, never a numbered shade:
 
@@ -84,6 +101,11 @@ the semantic status colours and the Dockview↔Mantine bridge.
 Write `c="var(--smg-ok)"`, not `c="teal.4"`. The numbered shades are tuned for
 the dark surface and fall to roughly 2:1 on the light one, which is below WCAG
 AA — the variables keep the hue and move the lightness per colour scheme.
+
+Every light-scheme value is measured against the white body and is ≥ 4.9:1;
+`--smg-warn` and `--smg-attention` are raw hexes because Mantine's orange and
+yellow ramps bottom out at 4.30:1 and 3.00:1. If you change one, re-measure it —
+picking the darkest shade in a Mantine ramp is not by itself enough to pass.
 
 Never signal state with colour alone; pair it with text or an icon.
 
@@ -139,10 +161,14 @@ pull request — never by pushing to `main` directly.
     ```bash
     uv run ruff check api/ cli/ tests/
     uv run pytest tests/ -q
-    (cd web && npm ci --ignore-scripts && npx tsc --noEmit && npm run lint \
+    (cd web && npm ci --ignore-scripts && npm run typecheck && npm run lint \
        && npm run test:run && npm run build)
     docker compose config --quiet
     ```
+    Use `npm run typecheck` (`tsc -b`), never a bare `tsc --noEmit`: the root
+    `tsconfig.json` is `"files": []` plus project references, so a plain
+    invocation checks nothing and exits 0 on code that does not compile.
+
     For anything touching the mules, Dockerfiles or networking, also build the
     image and run the stack — a passing unit suite is not evidence that a
     container change works.

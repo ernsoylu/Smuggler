@@ -4,7 +4,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NotificationProvider } from '../context/NotificationContext';
 import { UiActionsContext, type UiActions } from '../context/UiActionsContext';
-import { theme } from '../theme';
+import { theme, cssVariablesResolver } from '../theme';
 import { vi } from 'vitest';
 
 /**
@@ -50,7 +50,12 @@ export function renderWithProviders(ui: ReactElement, options: Options = {}) {
   // visible in a browser.
   function Wrapper({ children }: Readonly<{ children: ReactNode }>) {
     return (
-      <MantineProvider theme={theme} forceColorScheme="dark" env="test">
+      <MantineProvider
+        theme={theme}
+        forceColorScheme="dark"
+        env="test"
+        cssVariablesResolver={cssVariablesResolver}
+      >
         <QueryClientProvider client={queryClient}>
           <NotificationProvider>
             <UiActionsContext.Provider value={uiActions}>{children}</UiActionsContext.Provider>

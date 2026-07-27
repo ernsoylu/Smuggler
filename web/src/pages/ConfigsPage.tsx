@@ -1,8 +1,8 @@
 import { useRef, useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  Alert, Badge, Box, Button, Card, Group, Loader, Paper, PasswordInput, Progress,
-  SimpleGrid, Stack, Text, TextInput, ThemeIcon, Title, UnstyledButton,
+  ActionIcon, Alert, Badge, Box, Button, Card, Group, Loader, Paper, PasswordInput,
+  Progress, SimpleGrid, Stack, Text, TextInput, ThemeIcon, Title, UnstyledButton,
 } from '@mantine/core';
 import { getConfigs, getMules, uploadConfig, deleteConfig } from '../api/client';
 import type { VpnConfig, DeployPhase } from '../api/types';
@@ -61,14 +61,18 @@ function VpnTypeBadge({ type }: Readonly<{ type: VpnType }>) {
   );
 }
 
+/**
+ * One fact, as a label/value line.
+ *
+ * Was a filled `Paper` per fact, so a config card rendered Type / Auth / Added
+ * as three stacked boxes inside a fourth. The card is the container.
+ */
 function MetaRow({ label, children }: Readonly<{ label: string; children: React.ReactNode }>) {
   return (
-    <Paper radius="md" px="sm" py={8} bg="var(--mantine-color-default-hover)">
-      <Group justify="space-between" gap="md" wrap="nowrap">
-        <Text size="xs" fw={500} c="dimmed">{label}</Text>
-        {children}
-      </Group>
-    </Paper>
+    <Group justify="space-between" gap="sm" wrap="nowrap">
+      <Text size="10px" fw={600} tt="uppercase" c="dimmed" lts={0.8}>{label}</Text>
+      {children}
+    </Group>
   );
 }
 
@@ -90,22 +94,23 @@ function ConfigCard({
   const isOvpn = cfg.vpn_type === 'openvpn';
 
   return (
-    <Card withBorder radius="lg" p="md" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <Group gap="sm" wrap="nowrap" align="flex-start">
-        <ThemeIcon variant="light" color={isOvpn ? 'violet' : 'teal'} size={36} radius="md">
-          {isOvpn ? <Lock size={18} /> : <Shield size={18} />}
+    <Card withBorder radius="md" p="sm" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <Group gap="sm" wrap="nowrap" align="center">
+        <ThemeIcon variant="light" color={isOvpn ? 'violet' : 'teal'} size={28} radius="md">
+          {isOvpn ? <Lock size={14} /> : <Shield size={14} />}
         </ThemeIcon>
-        <Stack gap={0} miw={0}>
+        <Stack gap={0} miw={0} flex={1}>
           <Text size="sm" fw={600} truncate>{cfg.name}</Text>
-          <Text size="xs" c="dimmed" ff="monospace" truncate>{cfg.filename}</Text>
+          <Text size="10px" c="dimmed" ff="monospace" truncate>{cfg.filename}</Text>
         </Stack>
+        <VpnTypeBadge type={cfg.vpn_type ?? 'wireguard'} />
       </Group>
 
-      <Stack gap={6}>
-        <MetaRow label="Type"><VpnTypeBadge type={cfg.vpn_type ?? 'wireguard'} /></MetaRow>
+      {/* Type moved up beside the name; only what is left needs a row. */}
+      <Stack gap={4}>
         {cfg.vpn_type === 'openvpn' && (
           <MetaRow label="Auth">
-            <Text size="xs" fw={600} c={cfg.requires_auth ? 'yellow.4' : 'dimmed'}>
+            <Text size="xs" fw={600} c={cfg.requires_auth ? 'var(--smg-attention)' : 'dimmed'}>
               {cfg.requires_auth ? 'Credentials stored' : 'Not required'}
             </Text>
           </MetaRow>
@@ -115,11 +120,11 @@ function ConfigCard({
         </MetaRow>
       </Stack>
 
-      <Group gap="xs" mt="auto" wrap="nowrap">
+      <Group gap={6} mt="auto" wrap="nowrap">
         <Button
           flex={1}
-          size="xs"
-          leftSection={isDeploying ? undefined : (isInUse ? <Shield size={14} /> : <Rocket size={14} />)}
+          size="compact-sm"
+          leftSection={isDeploying ? undefined : (isInUse ? <Shield size={13} /> : <Rocket size={13} />)}
           onClick={onDeploy}
           disabled={isInUse}
           loading={isDeploying}
@@ -127,17 +132,17 @@ function ConfigCard({
         >
           {isInUse ? 'In Use' : 'Deploy Mule'}
         </Button>
-        <Button
-          size="xs"
-          variant="light"
+        <ActionIcon
+          size="md"
+          variant="subtle"
           color="red"
-          px="xs"
           onClick={onDelete}
           disabled={isDeleting}
+          aria-label={`Delete ${cfg.name}`}
           title="Delete configuration"
         >
-          <Trash2 size={16} />
-        </Button>
+          <Trash2 size={14} />
+        </ActionIcon>
       </Group>
     </Card>
   );
@@ -306,66 +311,70 @@ export function ConfigsPage() {
         </Text>
       </Box>
 
-      {/* ── Upload Form ── */}
-      <Paper withBorder radius="lg" p="lg" mb="lg" maw={760}>
-        <Group gap="xs" mb="md">
-          <Plus size={20} color="var(--mantine-color-teal-4)" />
-          <Text fw={600}>Upload Configuration</Text>
-        </Group>
-
-        {/* Row 1: file + name + upload */}
-        <Group align="flex-end" gap="md">
-          <Box flex={1} miw={220}>
-            <Text size="xs" fw={600} tt="uppercase" c="dimmed" lts={1} mb={6}>Config File</Text>
-            <UnstyledButton
-              component="label"
-              htmlFor="config-file-input"
-              w="100%"
-              px="md"
-              py="sm"
-              style={{
-                display: 'flex', alignItems: 'center', gap: 12,
-                border: '1px solid var(--mantine-color-default-border)',
-                borderRadius: 'var(--mantine-radius-md)',
-                cursor: 'pointer',
-              }}
-            >
-              <ThemeIcon variant="light" color={file ? (vpnType === 'openvpn' ? 'violet' : 'teal') : 'gray'} size={32} radius="md">
-                <FileUp size={16} />
-              </ThemeIcon>
-              <input
-                id="config-file-input"
-                ref={fileRef}
-                type="file"
-                accept=".conf,.ovpn"
-                style={{ display: 'none' }}
-                onChange={handleFileChange}
-              />
-              <Stack gap={0} miw={0}>
-                <Text size="sm" fw={500} c={fileColor} truncate>
-                  {file ? file.name : 'Select .conf or .ovpn'}
-                </Text>
-                {file && (
-                  <Text size="xs" c="dimmed">
-                    {vpnType === 'openvpn' ? 'OpenVPN' : 'WireGuard'} detected
-                  </Text>
-                )}
-              </Stack>
-            </UnstyledButton>
-          </Box>
+      {/*
+        ── Upload Form ──
+        One row of controls at a single height, rather than a titled card
+        wrapping a tall picker, a labelled input and a button on three different
+        baselines. The heading is gone: the placeholder text already says what
+        the control takes.
+      */}
+      <Paper withBorder radius="md" p="sm" mb="lg" maw={760}>
+        <Group align="center" gap="sm" wrap="nowrap">
+          <UnstyledButton
+            component="label"
+            htmlFor="config-file-input"
+            flex={1}
+            miw={200}
+            px="sm"
+            py={6}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              border: '1px solid var(--mantine-color-default-border)',
+              borderRadius: 'var(--mantine-radius-sm)',
+              cursor: 'pointer',
+              minHeight: 36,
+            }}
+          >
+            <FileUp
+              size={15}
+              color={file
+                ? `var(--mantine-color-${vpnType === 'openvpn' ? 'violet' : 'teal'}-5)`
+                : 'var(--mantine-color-dimmed)'}
+              style={{ flexShrink: 0 }}
+            />
+            <input
+              id="config-file-input"
+              ref={fileRef}
+              type="file"
+              accept=".conf,.ovpn"
+              style={{ display: 'none' }}
+              onChange={handleFileChange}
+            />
+            <Text size="sm" fw={500} c={fileColor} truncate>
+              {file ? file.name : 'Select .conf or .ovpn'}
+            </Text>
+            {file && (
+              <Text size="10px" c="dimmed" style={{ flexShrink: 0, marginLeft: 'auto' }}>
+                {vpnType === 'openvpn' ? 'OpenVPN' : 'WireGuard'}
+              </Text>
+            )}
+          </UnstyledButton>
 
           <TextInput
             id="config-name-input"
-            label="Name (Optional)"
-            placeholder="e.g. US West"
+            aria-label="Configuration name (optional)"
+            placeholder="Name (optional)"
+            size="sm"
             value={name}
             onChange={e => setName(e.currentTarget.value)}
-            flex={0.6}
-            miw={160}
+            flex={0.5}
+            miw={140}
           />
 
           <Button
+            size="sm"
             color="teal"
+            leftSection={<Plus size={14} />}
             onClick={() => upload.mutate()}
             disabled={!file}
             loading={upload.isPending}

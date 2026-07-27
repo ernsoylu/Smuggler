@@ -2,7 +2,7 @@
 
 ## Tech Stack
 - **Backend:** Python 3.12+ (uv), Flask, Docker SDK, aria2-rpc. CI tests 3.12/3.13/3.14; the API image ships 3.14.
-- **Frontend:** React 19 (Vite), TS, **Mantine** + **Dockview** workbench, TanStack Query, D3. Tailwind was removed — do not reintroduce utility classes.
+- **Frontend:** React 19 (Vite), TS, **Mantine**, TanStack Query, D3. Tailwind was removed — do not reintroduce utility classes. Navigation is **single-view hash routing** — one route renders one full-page view (`src/pages/PageView.tsx`); the Dockview multi-pane workbench was removed deliberately, so do not reintroduce dockable panels or a second navigation layer.
 - **VPN:** WireGuard (raw wg/ip) & OpenVPN (tun0).
 - **Storage:** SQLite (WAL), Migration-aware.
 
@@ -28,7 +28,7 @@
 ## Directory Structure
 - `api/`: Flask blueprints, database, watchdog logic, observer/events audit engine.
 - `cli/`: Shared Docker/aria2 clients, CLI commands.
-- `web/`: React frontend (Vite + Mantine) — the only UI. `src/workbench/` is the Dockview panel layout, `src/lib/` the DOM-free logic, `src/test/` the render helper and fixtures.
+- `web/`: React frontend (Vite + Mantine) — the only UI. `src/pages/` holds the routed views and `PageView.tsx` (the route→view switch), `src/lib/` the DOM-free logic, `src/test/` the render helper and fixtures.
 - `worker_image/`: WireGuard mule Dockerfile/startup.
 - `worker_image_ovpn/`: OpenVPN mule Dockerfile/startup.
 - `docker/`: API/web Dockerfiles and the nginx template.
@@ -39,9 +39,13 @@
 
 ## Quality Standards
 - **SonarQube:** SonarCloud runs **Automatic Analysis** server-side on push, plus a `sonar.yml` workflow that self-skips without `SONAR_TOKEN`. There is no local scanner — the gate is checked on the PR. Fix all BLOCKERS; a failing gate blocks merge (Project: `ernsoylu_Smuggler`).
-- **Testing:** 473 backend tests + 201 frontend tests. Never let a change reduce the count; branding changes must update `tests/`. Frontend tests run as two vitest projects (`vitest.config.ts`): `unit` for `*.test.ts` in node, `components` for `*.test.tsx` in jsdom with Testing Library (`src/test/` holds the render helper, Mantine/jsdom shims and fixtures). Pure logic belongs in `web/src/lib/` so it stays testable without a DOM — prefer moving a decision there over driving a Mantine dropdown in jsdom.
+- **Testing:** 473 backend tests + 212 frontend tests. Never let a change reduce the count; branding changes must update `tests/`. Frontend tests run as two vitest projects (`vitest.config.ts`): `unit` for `*.test.ts` in node, `components` for `*.test.tsx` in jsdom with Testing Library (`src/test/` holds the render helper, Mantine/jsdom shims and fixtures). Pure logic belongs in `web/src/lib/` so it stays testable without a DOM — prefer moving a decision there over driving a Mantine dropdown in jsdom.
 - **Linting:** `lint.select` is pinned in `pyproject.toml` — widening it is a deliberate decision, not something a ruff upgrade should do silently.
-- **Typing:** Strict Python type hints and TypeScript interfaces.
+- **Typing:** Strict Python type hints and TypeScript interfaces. Typecheck the
+  frontend with `npm run typecheck` (`tsc -b`) from `web/`. **`tsc --noEmit` is a
+  no-op here** — the root `tsconfig.json` is `"files": []` plus project
+  references, so a plain invocation checks nothing and exits 0 on broken code.
+  Build mode is what actually reads `tsconfig.app.json`.
 
 ---
 **See [SKILLS.md](SKILLS.md) for procedural development guides.**

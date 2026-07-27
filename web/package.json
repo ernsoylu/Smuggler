@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "typecheck": "tsc -b",
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
@@ -19,7 +20,6 @@
     "@types/d3": "^7.4.3",
     "axios": "^1.15.0",
     "d3": "^7.9.0",
-    "dockview-react": "^7.0.4",
     "lucide-react": "^1.26.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
