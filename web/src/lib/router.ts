@@ -12,7 +12,7 @@
  * know the format, so swapping in a real router later is contained.
  */
 
-export const PAGES = ['torrents', 'mules', 'configs', 'settings'] as const;
+export const PAGES = ['torrents', 'mules', 'configs', 'events', 'settings'] as const;
 export type Page = (typeof PAGES)[number];
 export const DEFAULT_PAGE: Page = 'torrents';
 

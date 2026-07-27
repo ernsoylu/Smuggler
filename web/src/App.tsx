@@ -19,12 +19,14 @@ import { PAGES, type Page } from './lib/router';
 import { theme } from './theme';
 import {
   LayoutDashboard, Server, Settings, FileKey2, Command, Sun, Moon, Monitor, LayoutTemplate,
+  ScrollText,
 } from 'lucide-react';
 
 const TAB_ICONS: Record<Page, ReactNode> = {
   torrents: <LayoutDashboard size={15} />,
   mules: <Server size={15} />,
   configs: <FileKey2 size={15} />,
+  events: <ScrollText size={15} />,
   settings: <Settings size={15} />,
 };
 
@@ -32,6 +34,7 @@ const TAB_LABELS: Record<Page, string> = {
   torrents: 'Torrents',
   mules: 'Mules',
   configs: 'Configs',
+  events: 'Events',
   settings: 'Settings',
 };
 

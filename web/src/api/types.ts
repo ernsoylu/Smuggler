@@ -143,3 +143,33 @@ export interface Deployment {
   started_at: number;
   finished_at: number | null;
 }
+
+// ── Observability ─────────────────────────────────────────────────────────────
+
+export type EventSeverity = 'debug' | 'info' | 'warning' | 'error' | 'critical';
+
+/**
+ * A row from the observer's audit trail (`/api/events`).
+ *
+ * `payload` is whatever the emitter recorded, already JSON-parsed by the API;
+ * it is deliberately untyped because each `kind` carries a different shape.
+ */
+export interface AuditEvent {
+  id: number;
+  ts: string;
+  source: string;
+  kind: string;
+  severity: EventSeverity;
+  mule: string | null;
+  payload: Record<string, unknown> | null;
+}
+
+export interface EventQuery {
+  limit?: number;
+  before_id?: number;
+  source?: string;
+  kind?: string;
+  severity?: EventSeverity;
+  mule?: string;
+  since?: string;
+}
