@@ -1,12 +1,16 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
+import {
+  ActionIcon, Box, Group, Indicator, Popover, Progress, ScrollArea, Stack, Text, UnstyledButton,
+} from '@mantine/core';
 import { Bell, X, Trash2 } from 'lucide-react';
 import { useNotifications, type AppNotification, type NotificationType } from '../context/NotificationContext';
 
-const TYPE_STYLES: Record<NotificationType, { dot: string; rowBg: string }> = {
-  info:    { dot: 'bg-blue-400',    rowBg: 'bg-blue-500/5' },
-  success: { dot: 'bg-emerald-400', rowBg: 'bg-emerald-500/5' },
-  error:   { dot: 'bg-red-400',     rowBg: 'bg-red-500/5' },
-  warning: { dot: 'bg-amber-400',   rowBg: 'bg-amber-500/5' },
+/** Mantine color base per notification type — dot, progress and unread tint. */
+const TYPE_COLORS: Record<NotificationType, string> = {
+  info: 'blue',
+  success: 'teal',
+  error: 'red',
+  warning: 'yellow',
 };
 
 function timeAgo(ts: number): string {
@@ -18,53 +22,48 @@ function timeAgo(ts: number): string {
 }
 
 function NotificationItem({ n, onDismiss }: Readonly<{ n: AppNotification; onDismiss: () => void }>) {
-  const { dot, rowBg } = TYPE_STYLES[n.type];
+  const color = TYPE_COLORS[n.type];
   return (
-    <div className={`flex items-start gap-3 px-4 py-3 border-b border-white/5 last:border-0 transition-colors ${!n.read ? rowBg : 'hover:bg-white/[0.02]'}`}>
-      <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${dot}`} />
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-white leading-snug">{n.title}</p>
-        {n.message && <p className="text-xs text-neutral-400 mt-0.5 leading-snug">{n.message}</p>}
+    <Group
+      align="flex-start"
+      gap="sm"
+      px="md"
+      py="sm"
+      wrap="nowrap"
+      style={{
+        borderBottom: '1px solid var(--mantine-color-default-border)',
+        background: n.read ? undefined : `var(--mantine-color-${color}-light)`,
+      }}
+    >
+      <Box w={8} h={8} mt={6} bg={`${color}.5`} style={{ borderRadius: '50%', flexShrink: 0 }} />
+      <Stack gap={2} flex={1} miw={0}>
+        <Text size="sm" fw={500} lh={1.3}>{n.title}</Text>
+        {n.message && <Text size="xs" c="dimmed" lh={1.3}>{n.message}</Text>}
         {n.progress && (
-          <div className="mt-2 space-y-1">
-            <div className="flex justify-between items-center">
-              <span className="text-[10px] font-semibold text-blue-400">{n.progress.label}</span>
-              <span className="text-[10px] text-neutral-600">{n.progress.current + 1}/{n.progress.total}</span>
-            </div>
-            <div className="w-full h-1 bg-neutral-800 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-1000 ease-out"
-                style={{ width: `${((n.progress.current + 1) / n.progress.total) * 100}%` }}
-              />
-            </div>
-          </div>
+          <Stack gap={4} mt={4}>
+            <Group justify="space-between">
+              <Text size="10px" fw={600} c={`${color}.4`}>{n.progress.label}</Text>
+              <Text size="10px" c="dimmed">{n.progress.current + 1}/{n.progress.total}</Text>
+            </Group>
+            <Progress
+              size="xs"
+              color={color}
+              value={((n.progress.current + 1) / n.progress.total) * 100}
+            />
+          </Stack>
         )}
-        <p className="text-[11px] text-neutral-600 mt-1">{timeAgo(n.timestamp)}</p>
-      </div>
-      <button
-        onClick={onDismiss}
-        className="mt-0.5 text-neutral-600 hover:text-neutral-400 transition-colors"
-        aria-label="Dismiss notification"
-      >
+        <Text size="11px" c="dimmed" mt={2}>{timeAgo(n.timestamp)}</Text>
+      </Stack>
+      <ActionIcon variant="subtle" color="gray" size="sm" onClick={onDismiss} aria-label="Dismiss notification">
         <X size={14} />
-      </button>
-    </div>
+      </ActionIcon>
+    </Group>
   );
 }
 
 export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const { notifications, unreadCount, markAllRead, dismiss, clearAll } = useNotifications();
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener('mousedown', onClickOutside);
-    return () => document.removeEventListener('mousedown', onClickOutside);
-  }, [open]);
 
   const handleToggle = () => {
     setOpen(v => !v);
@@ -72,48 +71,50 @@ export function NotificationBell() {
   };
 
   return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={handleToggle}
-        className="relative w-9 h-9 flex items-center justify-center rounded-xl text-neutral-400 hover:text-white hover:bg-white/5 transition-colors"
-        aria-label="Notifications"
-      >
-        <Bell size={18} />
-        {unreadCount > 0 && (
-          <span className="absolute top-1 right-1 min-w-[16px] h-4 px-0.5 bg-blue-500 rounded-full text-[10px] font-bold text-white flex items-center justify-center leading-none">
-            {unreadCount > 9 ? '9+' : unreadCount}
-          </span>
-        )}
-      </button>
+    <Popover
+      width={320}
+      position="bottom-end"
+      shadow="xl"
+      opened={open}
+      onChange={setOpen}
+    >
+      <Popover.Target>
+        <Indicator
+          label={unreadCount > 9 ? '9+' : unreadCount}
+          size={16}
+          color="blue"
+          disabled={unreadCount === 0}
+          offset={4}
+        >
+          <ActionIcon variant="subtle" color="gray" size="lg" onClick={handleToggle} aria-label="Notifications">
+            <Bell size={18} />
+          </ActionIcon>
+        </Indicator>
+      </Popover.Target>
 
-      {open && (
-        <div className="absolute right-0 top-11 w-80 bg-neutral-900 border border-white/10 rounded-2xl shadow-2xl z-50 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-white/5">
-            <span className="text-sm font-semibold text-white">Notifications</span>
-            {notifications.length > 0 && (
-              <button
-                onClick={clearAll}
-                className="text-xs text-neutral-500 hover:text-neutral-300 transition-colors flex items-center gap-1"
-              >
-                <Trash2 size={12} /> Clear all
-              </button>
-            )}
-          </div>
+      <Popover.Dropdown p={0}>
+        <Group justify="space-between" px="md" py="sm" style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}>
+          <Text size="sm" fw={600}>Notifications</Text>
+          {notifications.length > 0 && (
+            <UnstyledButton onClick={clearAll} c="dimmed" fz="xs" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <Trash2 size={12} /> Clear all
+            </UnstyledButton>
+          )}
+        </Group>
 
-          <div className="max-h-96 overflow-y-auto">
-            {notifications.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-10 text-neutral-600">
-                <Bell size={28} strokeWidth={1.5} />
-                <p className="text-sm mt-2">No notifications</p>
-              </div>
-            ) : (
-              notifications.map(n => (
-                <NotificationItem key={n.id} n={n} onDismiss={() => dismiss(n.id)} />
-              ))
-            )}
-          </div>
-        </div>
-      )}
-    </div>
+        <ScrollArea.Autosize mah={384}>
+          {notifications.length === 0 ? (
+            <Stack align="center" py="xl" gap={6} c="dimmed">
+              <Bell size={28} strokeWidth={1.5} />
+              <Text size="sm">No notifications</Text>
+            </Stack>
+          ) : (
+            notifications.map(n => (
+              <NotificationItem key={n.id} n={n} onDismiss={() => dismiss(n.id)} />
+            ))
+          )}
+        </ScrollArea.Autosize>
+      </Popover.Dropdown>
+    </Popover>
   );
 }

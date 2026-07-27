@@ -23,6 +23,7 @@ API endpoints
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import threading
 import time
@@ -64,6 +65,19 @@ _FAILURE_THRESHOLDS = {
 
 def _threshold_for(result: dict) -> int:
     return _FAILURE_THRESHOLDS.get(result.get("kind", ""), FAILURE_THRESHOLD)
+
+
+def watchdog_enabled() -> bool:
+    """Whether the background sweep thread may start. On unless told otherwise.
+
+    Mirrors ``observer_enabled()``. The test suite turns this off: a live sweep
+    reaches ``requests`` through the aria2 and Docker clients, and ``responses``
+    patches ``requests`` process-wide, so a sweep landing inside a decorated
+    test appends to ``responses.calls`` and shifts the call the test asserts on.
+    """
+    return os.environ.get("SMG_WATCHDOG_ENABLED", "true").strip().lower() not in (
+        "false", "0", "no", "off",
+    )
 
 # ── Shared state (protected by _lock) ────────────────────────────────────────
 _lock = threading.Lock()
@@ -230,8 +244,15 @@ def start_watchdog() -> None:
 
     Safe to call multiple times — will not start a second thread.
     Should be called from ``create_app()`` after blueprints are registered.
+
+    Honours ``SMG_WATCHDOG_ENABLED``; the guard lives here rather than at the
+    call site so every caller gets it, not just ``create_app()``.
     """
     global _watchdog_thread
+
+    if not watchdog_enabled():
+        log.info("watchdog: disabled via SMG_WATCHDOG_ENABLED — not starting")
+        return
 
     with _start_lock:
         if _watchdog_thread is not None and _watchdog_thread.is_alive():

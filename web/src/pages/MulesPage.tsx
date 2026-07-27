@@ -1,11 +1,21 @@
 import { useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  Badge, Box, Button, Group, Loader, Paper, SimpleGrid, Stack, Text, Title,
+} from '@mantine/core';
 import { getMules, getWatchdogStatus, triggerWatchdogSweep, evacuateMule } from '../api/client';
 import type { WatchdogStatus } from '../api/types';
 import { MuleCard } from '../components/MuleCard';
 import { useNotifications } from '../context/NotificationContext';
 import { useUiActions } from '../context/UiActionsContext';
 import { ShieldCheck, Rocket, Shield, ShieldAlert, ShieldOff, RefreshCw, LogOut } from 'lucide-react';
+
+function tinted(color: string): React.CSSProperties {
+  return {
+    background: `var(--mantine-color-${color}-light)`,
+    borderColor: `var(--mantine-color-${color}-light-color)`,
+  };
+}
 
 function WatchdogPanel({ watchdog }: Readonly<{ watchdog: WatchdogStatus | undefined }>) {
   const qc = useQueryClient();
@@ -30,85 +40,91 @@ function WatchdogPanel({ watchdog }: Readonly<{ watchdog: WatchdogStatus | undef
   const allHealthy = unhealthy.length === 0;
   const mulesPlural = unhealthy.length > 1 ? 's' : '';
   const watchdogTitle = allHealthy ? 'All VPN connections secure' : `${unhealthy.length} mule${mulesPlural} compromised`;
+  const panelColor = allHealthy ? 'teal' : 'red';
 
   return (
-    <div className={`rounded-2xl border shadow-xl p-5 mb-8 ${
-      allHealthy
-        ? 'bg-emerald-500/5 border-emerald-500/15'
-        : 'bg-red-500/5 border-red-500/20'
-    }`}>
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
+    <Paper withBorder radius="lg" p="md" mb="lg" style={tinted(panelColor)}>
+      <Group justify="space-between" mb="sm">
+        <Group gap="sm">
           {allHealthy
-            ? <Shield size={18} className="text-emerald-400" />
-            : <ShieldAlert size={18} className="text-red-400" />}
+            ? <Shield size={18} color="var(--mantine-color-teal-4)" />
+            : <ShieldAlert size={18} color="var(--mantine-color-red-4)" />}
           <div>
-            <h3 className={`text-sm font-bold ${allHealthy ? 'text-emerald-300' : 'text-red-300'}`}>
-              {watchdogTitle}
-            </h3>
-            <p className="text-[11px] text-neutral-500 mt-0.5">
+            <Text size="sm" fw={700} c={`${panelColor}.4`}>{watchdogTitle}</Text>
+            <Text size="11px" c="dimmed" mt={2}>
               Watchdog · interval {watchdog.config.interval_seconds}s · {watchdog.stats.total_sweeps} sweeps · {watchdog.stats.total_evacuations} evacuations
               {watchdog.stats.last_run_at && ` · last check ${new Date(watchdog.stats.last_run_at).toLocaleTimeString()}`}
-            </p>
+            </Text>
           </div>
-        </div>
-        <button
+        </Group>
+        <Button
+          size="compact-xs"
+          variant="default"
+          leftSection={<RefreshCw size={13} className={sweep.isPending ? 'smuggler-spin' : undefined} />}
           onClick={() => sweep.mutate()}
           disabled={sweep.isPending}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-300 text-xs font-medium transition-colors"
         >
-          <RefreshCw size={13} className={sweep.isPending ? 'animate-spin' : ''} />
           Check now
-        </button>
-      </div>
+        </Button>
+      </Group>
 
       {/* Unhealthy mules */}
       {unhealthy.length > 0 && (
-        <div className="space-y-2 mb-3">
+        <Stack gap="xs" mb="sm">
           {unhealthy.map(m => (
-            <div key={m.name} className="flex items-center justify-between bg-red-500/10 rounded-xl px-4 py-3 border border-red-500/20 gap-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <ShieldOff size={14} className="text-red-400 shrink-0" />
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-red-300 truncate">{m.name}</p>
-                  <p className="text-[11px] text-red-400/70 truncate">{m.reason}</p>
-                </div>
-                {(m.consecutive_failures ?? 0) > 0 && (
-                  <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-300">
-                    {m.consecutive_failures} fail{(m.consecutive_failures ?? 0) > 1 ? 's' : ''}
-                  </span>
+            <Paper key={m.name} withBorder radius="md" px="md" py="sm" style={tinted('red')}>
+              <Group justify="space-between" gap="sm" wrap="nowrap">
+                <Group gap="sm" wrap="nowrap" miw={0}>
+                  <ShieldOff size={14} color="var(--mantine-color-red-4)" style={{ flexShrink: 0 }} />
+                  <Stack gap={0} miw={0}>
+                    <Text size="sm" fw={600} c="var(--smg-bad)" truncate>{m.name}</Text>
+                    <Text size="11px" c="red.5" truncate>{m.reason}</Text>
+                  </Stack>
+                  {(m.consecutive_failures ?? 0) > 0 && (
+                    <Badge size="xs" color="red" variant="light">
+                      {m.consecutive_failures} fail{(m.consecutive_failures ?? 0) > 1 ? 's' : ''}
+                    </Badge>
+                  )}
+                </Group>
+                {!m.evacuated && (
+                  <Button
+                    size="compact-xs"
+                    color="red"
+                    variant="light"
+                    leftSection={<LogOut size={12} />}
+                    onClick={() => evac.mutate(m.name)}
+                    disabled={evac.isPending}
+                  >
+                    Evacuate
+                  </Button>
                 )}
-              </div>
-              {!m.evacuated && (
-                <button
-                  onClick={() => evac.mutate(m.name)}
-                  disabled={evac.isPending}
-                  className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-xs font-semibold transition-colors"
-                >
-                  <LogOut size={12} /> Evacuate
-                </button>
-              )}
-              {m.evacuated && (
-                <span className="shrink-0 text-[11px] font-bold px-2.5 py-1 rounded bg-neutral-700 text-neutral-400">Evacuated</span>
-              )}
-            </div>
+                {m.evacuated && <Badge size="sm" color="gray" variant="filled">Evacuated</Badge>}
+              </Group>
+            </Paper>
           ))}
-        </div>
+        </Stack>
       )}
 
       {/* Healthy mule mini-list */}
       {healthy.length > 0 && (
-        <div className="flex flex-wrap gap-2">
+        <Group gap="xs">
           {healthy.map(m => (
-            <div key={m.name} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 border border-emerald-500/15 text-xs text-emerald-400">
-              <Shield size={11} />
-              <span className="font-mono font-medium">{m.name}</span>
-              {m.ip && <span className="text-emerald-500/60 font-mono">{m.ip}</span>}
-            </div>
+            <Badge
+              key={m.name}
+              variant="light"
+              color="teal"
+              size="lg"
+              radius="md"
+              tt="none"
+              leftSection={<Shield size={11} />}
+              styles={{ label: { fontFamily: 'var(--mantine-font-family-monospace)', fontWeight: 500 } }}
+            >
+              {m.name}{m.ip ? ` ${m.ip}` : ''}
+            </Badge>
           ))}
-        </div>
+        </Group>
       )}
-    </div>
+    </Paper>
   );
 }
 
@@ -142,51 +158,54 @@ export function MulesPage() {
     prevUnhealthyRef.current = new Set(unhealthy.map(m => m.name));
   }, [watchdog, pushNotification]);
 
-
   return (
-    <div className="p-6 md:p-8">
-      <div className="flex items-start justify-between mb-10 gap-4">
+    <Box p="lg">
+      <Group justify="space-between" align="flex-start" mb="xl" gap="md">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">Mules</h1>
-          <p className="text-neutral-400 text-sm mt-1">Deploy and manage isolated VPN containers for secure proxying.</p>
+          <Title order={2}>Mules</Title>
+          <Text size="sm" c="dimmed" mt={2}>Deploy and manage isolated VPN containers for secure proxying.</Text>
         </div>
-        <button
-          className="flex items-center gap-2 py-2.5 px-6 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-sm text-white font-semibold shadow-lg shadow-blue-500/20 transition-all active:scale-95"
-          onClick={openDeployMule}
-        >
-          <Rocket size={16} /> Deploy Mule
-        </button>
-      </div>
+        <Button leftSection={<Rocket size={16} />} onClick={openDeployMule}>
+          Deploy Mule
+        </Button>
+      </Group>
 
       {/* Watchdog security panel */}
       {watchdog && watchdog.mules.length > 0 && <WatchdogPanel watchdog={watchdog} />}
 
       {/* Active deployments */}
-      <div className="flex items-center gap-3 mb-6">
-        <h3 className="text-lg font-bold text-white tracking-tight">Active Deployments</h3>
-        <span className="px-2.5 py-0.5 rounded-full bg-neutral-800 text-neutral-400 text-xs font-semibold">{mules.length}</span>
-      </div>
+      <Group gap="sm" mb="md">
+        <Title order={4}>Active Deployments</Title>
+        <Badge variant="default" radius="xl">{mules.length}</Badge>
+      </Group>
 
       {isLoading && (
-        <div className="flex items-center justify-center p-12 text-neutral-500 gap-3">
-          <div className="w-5 h-5 border-2 border-neutral-500 border-t-transparent rounded-full animate-spin" />
-          <span className="font-medium text-sm">Querying active mules...</span>
-        </div>
+        <Group justify="center" p="xl" gap="sm">
+          <Loader size="sm" color="gray" />
+          <Text size="sm" fw={500} c="dimmed">Querying active mules...</Text>
+        </Group>
       )}
       {!isLoading && mules.length === 0 && (
-        <div className="border-2 border-dashed border-white/10 rounded-2xl p-16 text-center flex flex-col items-center justify-center">
-          <ShieldCheck size={48} className="text-neutral-700 mx-auto mb-4" strokeWidth={1} />
-          <p className="text-neutral-400 font-medium max-w-sm">No mules are currently running. Click "Deploy Mule" to get started.</p>
-        </div>
+        <Paper
+          radius="lg"
+          p={48}
+          style={{ border: '2px dashed var(--mantine-color-default-border)', textAlign: 'center' }}
+        >
+          <Stack align="center" gap="sm">
+            <ShieldCheck size={48} strokeWidth={1} color="var(--mantine-color-dimmed)" />
+            <Text c="dimmed" fw={500} maw={380}>
+              No mules are currently running. Click "Deploy Mule" to get started.
+            </Text>
+          </Stack>
+        </Paper>
       )}
       {!isLoading && mules.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <SimpleGrid type="container" cols={{ base: 1, '640px': 2, '1024px': 3, '1440px': 4 }} spacing="md">
           {mules.map(w => (
             <MuleCard key={w.name} mule={w} />
           ))}
-        </div>
+        </SimpleGrid>
       )}
-
-    </div>
+    </Box>
   );
 }

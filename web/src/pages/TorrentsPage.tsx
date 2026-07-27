@@ -1,7 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getAllTorrents, pauseTorrent, resumeTorrent, removeTorrent } from '../api/client';
+import {
+  ActionIcon, Badge, Box, Button, Checkbox, Group, Loader, Pagination, Paper,
+  SegmentedControl, Select, Stack, Table, Text, Title, UnstyledButton,
+} from '@mantine/core';
+import { getAllTorrents, getMules, pauseTorrent, resumeTorrent, removeTorrent } from '../api/client';
 import { TorrentRow } from '../components/TorrentRow';
+import { DeleteTorrentModal } from '../components/DeleteTorrentModal';
+import { SetupLadder } from '../components/SetupLadder';
+import { needsSetup } from '../lib/setup';
 import {
   filterTorrents, sortTorrents, nextSort, paginate, totalPages, statusCounts,
   torrentKey, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE, categoriesOf,
@@ -10,18 +17,21 @@ import {
 } from '../lib/torrentList';
 import { useUiActions } from '../context/UiActionsContext';
 import { Plus, Search, X, ArrowUp, ArrowDown, Pause, Play, Trash2, Tag } from 'lucide-react';
+import { TextInput } from '@mantine/core';
 
-const COLUMNS: { key: SortKey | null; label: string; align?: string }[] = [
+const COLUMNS: { key: SortKey | null; label: string; align?: 'right' | 'center' }[] = [
   { key: 'name',     label: 'Name' },
   { key: 'status',   label: 'Status' },
   { key: 'progress', label: 'Progress' },
-  { key: 'eta',      label: 'ETA',   align: 'text-right' },
-  { key: 'speed',    label: 'Speed', align: 'text-right' },
-  { key: 'peers',    label: 'Seeds / Peers', align: 'text-center' },
-  { key: 'ratio',    label: 'Ratio', align: 'text-right' },
+  { key: 'eta',      label: 'ETA',   align: 'right' },
+  { key: 'speed',    label: 'Speed', align: 'right' },
+  { key: 'peers',    label: 'Seeds / Peers', align: 'center' },
+  { key: 'ratio',    label: 'Ratio', align: 'right' },
   { key: 'mule',     label: 'Mule' },
-  { key: null,       label: 'Actions', align: 'text-right' },
+  { key: null,       label: 'Actions', align: 'right' },
 ];
+
+const UNCAT_VALUE = '\u0000uncategorised';
 
 export function TorrentsPage() {
   const qc = useQueryClient();
@@ -33,12 +43,18 @@ export function TorrentsPage() {
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   const [category, setCategory] = useState<string>(ALL_CATEGORIES);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmBulkRemove, setConfirmBulkRemove] = useState(false);
 
   const { data: torrents = [], isLoading } = useQuery({
     queryKey: ['torrents'],
     queryFn: getAllTorrents,
     refetchInterval: 2_000,
   });
+
+  // Only to decide which empty state to show. Shares the cache key the rest of
+  // the app already polls, so this adds no request.
+  const { data: mules = [] } = useQuery({ queryKey: ['mules'], queryFn: getMules });
+  const runningMules = mules.filter(m => m.status === 'running').length;
 
   const counts = useMemo(() => statusCounts(torrents), [torrents]);
   const visible = useMemo(
@@ -89,19 +105,25 @@ export function TorrentsPage() {
 
   const clearSelection = () => setSelected(new Set());
 
+  type BulkAction =
+    | { kind: 'pause' }
+    | { kind: 'resume' }
+    | { kind: 'remove'; deleteFiles: boolean };
+
   const bulk = useMutation({
-    mutationFn: async (action: 'pause' | 'resume' | 'delete') => {
+    mutationFn: async (action: BulkAction) => {
       const targets = selectedVisible;
       // Settled, not all: one failing torrent should not abandon the rest.
       await Promise.allSettled(
         targets.map(t => {
-          if (action === 'pause') return pauseTorrent(t.mule, t.gid);
-          if (action === 'resume') return resumeTorrent(t.mule, t.gid);
-          return removeTorrent(t.mule, t.gid, false);
+          if (action.kind === 'pause') return pauseTorrent(t.mule, t.gid);
+          if (action.kind === 'resume') return resumeTorrent(t.mule, t.gid);
+          return removeTorrent(t.mule, t.gid, action.deleteFiles);
         }),
       );
     },
     onSettled: () => {
+      setConfirmBulkRemove(false);
       clearSelection();
       qc.invalidateQueries({ queryKey: ['torrents'] });
     },
@@ -109,197 +131,204 @@ export function TorrentsPage() {
 
   const filters: FilterStatus[] = ['all', 'active', 'paused', 'complete', 'error'];
 
-  return (
-    <div className="p-6 md:p-8">
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-8 gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">Torrents</h1>
-          <p className="text-neutral-400 text-sm mt-1">Manage active downloads across all routing mules.</p>
-        </div>
-        <button
-          className="flex items-center gap-2 py-2 px-5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-sm text-white font-semibold shadow-lg shadow-blue-500/20 transition-all active:scale-95"
-          onClick={openAddTorrent}
-        >
-          <Plus size={18} strokeWidth={2.5}/> Add Torrent
-        </button>
-      </div>
+  // A narrowed-to-nothing view is a different problem from an empty system:
+  // only the latter gets the setup path.
+  const narrowed = !!search || category !== ALL_CATEGORIES || filter !== 'all';
 
-      <div className="flex flex-col gap-6">
+  const narrowedMessage = (() => {
+    if (search) return `No torrents match "${search}".`;
+    if (category !== ALL_CATEGORIES) {
+      return category !== UNCATEGORISED
+        ? `No torrents in "${category}".`
+        : 'No uncategorised torrents.';
+    }
+    return `No ${filter} torrents found.`;
+  })();
+
+  const categoryData = [
+    { value: ALL_CATEGORIES, label: 'All categories' },
+    ...categories.map(c => ({ value: c, label: c })),
+    ...(hasUncategorised ? [{ value: UNCAT_VALUE, label: 'Uncategorised' }] : []),
+  ];
+
+  return (
+    <Box p="lg">
+      <Group justify="space-between" align="flex-start" mb="lg" gap="md">
+        <div>
+          <Title order={2}>Torrents</Title>
+          <Text size="sm" c="dimmed" mt={2}>Manage active downloads across all routing mules.</Text>
+        </div>
+        <Button leftSection={<Plus size={16} strokeWidth={2.5} />} onClick={openAddTorrent}>
+          Add Torrent
+        </Button>
+      </Group>
+
+      <Stack gap="md">
         {/* Filters + search */}
-        <div className="flex flex-col md:flex-row md:items-center gap-3">
-          <div className="flex p-1.5 bg-neutral-900/50 backdrop-blur-md rounded-xl border border-white/5 w-max">
-            {filters.map(f => (
-              <button
-                key={f}
-                className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                  filter === f
-                    ? 'bg-white/10 text-white shadow-sm ring-1 ring-white/10'
-                    : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'
-                }`}
-                onClick={() => handleFilterChange(f)}
-              >
-                <span className="capitalize">{f}</span>
-                {counts[f] > 0 && (
-                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] uppercase font-bold leading-none ${filter === f ? 'bg-white/15 text-white' : 'bg-neutral-800 text-neutral-500'}`}>
-                    {counts[f]}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
+        <Group gap="sm" align="center">
+          <SegmentedControl
+            value={filter}
+            onChange={v => handleFilterChange(v as FilterStatus)}
+            data={filters.map(f => ({
+              value: f,
+              label: (
+                <Group gap={6} wrap="nowrap">
+                  <Text size="sm" tt="capitalize" component="span">{f}</Text>
+                  {counts[f] > 0 && <Badge size="xs" variant="default" circle={counts[f] < 10}>{counts[f]}</Badge>}
+                </Group>
+              ),
+            }))}
+          />
 
           {(categories.length > 0 || category !== ALL_CATEGORIES) && (
-            <label className="flex items-center gap-2 md:ml-auto">
-              <Tag size={14} className="text-neutral-500 shrink-0" />
-              <span className="sr-only">Filter by category</span>
-              <select
-                aria-label="Filter by category"
-                value={category}
-                onChange={e => handleCategory(e.target.value)}
-                className="bg-neutral-900/50 border border-white/5 rounded-xl text-sm text-neutral-200 py-2 pl-3 pr-8 focus:outline-none focus:border-blue-500/50"
-              >
-                <option value={ALL_CATEGORIES}>All categories</option>
-                {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                {hasUncategorised && <option value={UNCATEGORISED}>Uncategorised</option>}
-              </select>
-            </label>
+            <Select
+              aria-label="Filter by category"
+              leftSection={<Tag size={14} />}
+              data={categoryData}
+              value={category === UNCATEGORISED ? UNCAT_VALUE : category}
+              onChange={v => handleCategory(v === UNCAT_VALUE ? UNCATEGORISED : (v ?? ALL_CATEGORIES))}
+              w={200}
+              ml="auto"
+              comboboxProps={{ withinPortal: true }}
+            />
           )}
 
-          <div className={`relative w-full md:w-72 ${categories.length > 0 || category !== ALL_CATEGORIES ? '' : 'md:ml-auto'}`}>
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
-            <input
-              type="search"
-              aria-label="Search torrents by name or mule"
-              placeholder="Search name or mule…"
-              value={search}
-              onChange={e => handleSearch(e.target.value)}
-              className="w-full bg-neutral-900/50 border border-white/5 rounded-xl text-sm text-neutral-200 py-2 pl-9 pr-9 placeholder:text-neutral-600 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 transition-all"
-            />
-            {search && (
-              <button
-                aria-label="Clear search"
-                onClick={() => handleSearch('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-neutral-500 hover:text-neutral-200 hover:bg-white/10 transition-colors"
-              >
+          <TextInput
+            type="search"
+            aria-label="Search torrents by name or mule"
+            placeholder="Search name or mule…"
+            value={search}
+            onChange={e => handleSearch(e.currentTarget.value)}
+            leftSection={<Search size={15} />}
+            rightSection={search ? (
+              <ActionIcon variant="subtle" color="gray" size="sm" aria-label="Clear search" onClick={() => handleSearch('')}>
                 <X size={14} />
-              </button>
-            )}
-          </div>
-        </div>
+              </ActionIcon>
+            ) : null}
+            w={{ base: '100%', md: 280 }}
+            ml={categories.length > 0 || category !== ALL_CATEGORIES ? undefined : 'auto'}
+          />
+        </Group>
 
         {/* Bulk action bar — only present when something is selected */}
         {selectedVisible.length > 0 && (
-          <div className="flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl bg-blue-500/5 border border-blue-500/20">
-            <span className="text-sm font-semibold text-blue-300">
-              {selectedVisible.length} selected
-            </span>
-            <div className="flex items-center gap-2 ml-auto">
-              <button
-                onClick={() => bulk.mutate('pause')}
-                disabled={bulk.isPending}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-semibold text-neutral-200 transition-colors disabled:opacity-40"
-              >
-                <Pause size={13} /> Pause
-              </button>
-              <button
-                onClick={() => bulk.mutate('resume')}
-                disabled={bulk.isPending}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-semibold text-neutral-200 transition-colors disabled:opacity-40"
-              >
-                <Play size={13} /> Resume
-              </button>
-              <button
-                onClick={() => bulk.mutate('delete')}
-                disabled={bulk.isPending}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-xs font-semibold text-red-300 transition-colors disabled:opacity-40"
-                title="Removes the torrents; downloaded files are kept"
-              >
-                <Trash2 size={13} /> Remove
-              </button>
-              <button
-                onClick={clearSelection}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-neutral-400 hover:text-neutral-200 transition-colors"
-              >
-                Clear
-              </button>
-            </div>
-          </div>
+          <Paper
+            withBorder
+            px="md"
+            py="sm"
+            radius="md"
+            style={{
+              background: 'var(--mantine-color-blue-light)',
+              borderColor: 'var(--mantine-color-blue-light-color)',
+            }}
+          >
+            <Group gap="sm">
+              <Text size="sm" fw={600} c="var(--smg-info)">{selectedVisible.length} selected</Text>
+              <Group gap="xs" ml="auto">
+                <Button size="compact-xs" variant="default" leftSection={<Pause size={13} />}
+                  onClick={() => bulk.mutate({ kind: 'pause' })} disabled={bulk.isPending}>
+                  Pause
+                </Button>
+                <Button size="compact-xs" variant="default" leftSection={<Play size={13} />}
+                  onClick={() => bulk.mutate({ kind: 'resume' })} disabled={bulk.isPending}>
+                  Resume
+                </Button>
+                <Button size="compact-xs" variant="light" color="red" leftSection={<Trash2 size={13} />}
+                  onClick={() => setConfirmBulkRemove(true)} disabled={bulk.isPending}
+                  title="Remove the selected torrents">
+                  Remove
+                </Button>
+                <Button size="compact-xs" variant="subtle" color="gray" onClick={clearSelection}>
+                  Clear
+                </Button>
+              </Group>
+            </Group>
+          </Paper>
         )}
 
-        {/* Table container */}
-        <div className="bg-neutral-900/30 backdrop-blur-sm rounded-2xl border border-white/5 overflow-hidden shadow-xl">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="text-xs text-neutral-400 uppercase bg-neutral-900/50 border-b border-white/10">
-                <tr>
-                  <th scope="col" className="pl-6 pr-2 py-4 w-10">
-                    <input
-                      type="checkbox"
+        {/* Table */}
+        <Paper withBorder radius="lg" style={{ overflow: 'hidden' }}>
+          <Table.ScrollContainer minWidth={960}>
+            <Table verticalSpacing="sm" highlightOnHover>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th w={40} pl="md">
+                    <Checkbox
+                      size="xs"
                       aria-label="Select all torrents on this page"
                       checked={allPageSelected}
                       onChange={togglePage}
                       disabled={rows.length === 0}
-                      className="w-4 h-4 rounded accent-blue-600 cursor-pointer disabled:opacity-30"
                     />
-                  </th>
+                  </Table.Th>
                   {COLUMNS.map(col => {
                     const active = col.key && sort?.key === col.key;
+                    let ariaSort: 'ascending' | 'descending' | 'none' = 'none';
+                    if (active) ariaSort = sort?.direction === 'asc' ? 'ascending' : 'descending';
                     return (
-                      <th
+                      <Table.Th
                         key={col.label}
-                        scope="col"
-                        className={`px-4 py-4 font-semibold tracking-wider ${col.align ?? ''}`}
-                        aria-sort={
-                          active ? (sort?.direction === 'asc' ? 'ascending' : 'descending') : 'none'
-                        }
+                        ta={col.align}
+                        aria-sort={ariaSort}
+                        style={{ whiteSpace: 'nowrap' }}
                       >
                         {col.key ? (
-                          <button
+                          <UnstyledButton
                             onClick={() => handleSort(col.key as SortKey)}
-                            className={`inline-flex items-center gap-1 uppercase tracking-wider transition-colors ${
-                              active ? 'text-white' : 'hover:text-neutral-200'
-                            }`}
+                            fz="xs"
+                            fw={600}
+                            tt="uppercase"
+                            c={active ? undefined : 'dimmed'}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, letterSpacing: 1 }}
                           >
                             {col.label}
                             {active && (sort?.direction === 'asc'
                               ? <ArrowUp size={12} />
                               : <ArrowDown size={12} />)}
-                          </button>
-                        ) : col.label}
-                      </th>
+                          </UnstyledButton>
+                        ) : (
+                          <Text fz="xs" fw={600} tt="uppercase" c="dimmed" style={{ letterSpacing: 1 }}>
+                            {col.label}
+                          </Text>
+                        )}
+                      </Table.Th>
                     );
                   })}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5 bg-neutral-950/20">
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
                 {isLoading && (
-                  <tr>
-                    <td colSpan={10} className="px-6 py-8 text-center text-neutral-500">
-                      <div className="flex items-center justify-center gap-3">
-                         <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                         Loading torrents...
-                      </div>
-                    </td>
-                  </tr>
+                  <Table.Tr>
+                    <Table.Td colSpan={10} py="xl">
+                      <Group justify="center" gap="sm">
+                        <Loader size="xs" />
+                        <Text size="sm" c="dimmed">Loading torrents...</Text>
+                      </Group>
+                    </Table.Td>
+                  </Table.Tr>
                 )}
                 {!isLoading && visible.length === 0 && (
-                  <tr>
-                    <td colSpan={10} className="px-6 py-12 text-center">
-                       <p className="text-neutral-400 font-medium">
-                         {(() => {
-                           if (search) return `No torrents match "${search}".`;
-                           if (category !== ALL_CATEGORIES) {
-                             return category
-                               ? `No torrents in "${category}".`
-                               : 'No uncategorised torrents.';
-                           }
-                           return filter === 'all'
-                             ? 'No torrents are currently added.'
-                             : `No ${filter} torrents found.`;
-                         })()}
-                       </p>
-                    </td>
-                  </tr>
+                  <Table.Tr>
+                    <Table.Td colSpan={10} py={48}>
+                      {(() => {
+                        if (narrowed) {
+                          return <Text ta="center" c="dimmed" fw={500}>{narrowedMessage}</Text>;
+                        }
+                        if (needsSetup(runningMules)) return <SetupLadder />;
+                        return (
+                          <Stack align="center" gap="md">
+                            <Text ta="center" c="dimmed" fw={500}>
+                              No torrents yet. Paste a magnet link, or drop a{' '}
+                              <Text component="span" ff="monospace">.torrent</Text> anywhere in the window.
+                            </Text>
+                            <Button leftSection={<Plus size={16} strokeWidth={2.5} />} onClick={openAddTorrent}>
+                              Add Torrent
+                            </Button>
+                          </Stack>
+                        );
+                      })()}
+                    </Table.Td>
+                  </Table.Tr>
                 )}
                 {!isLoading && rows.map(t => (
                   <TorrentRow
@@ -309,54 +338,55 @@ export function TorrentsPage() {
                     onToggleSelected={() => toggleOne(torrentKey(t))}
                   />
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </Table.Tbody>
+            </Table>
+          </Table.ScrollContainer>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-t border-white/5 bg-neutral-900/50">
-            <div className="flex items-center gap-3 text-xs text-neutral-500">
-              <span>
+          <Group
+            justify="space-between"
+            px="md"
+            py="sm"
+            style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}
+          >
+            <Group gap="sm">
+              <Text size="xs" c="dimmed">
                 {visible.length === 0
                   ? 'No torrents'
                   : `Showing ${(Math.min(page, pageCount) - 1) * pageSize + 1}–${Math.min(page * pageSize, visible.length)} of ${visible.length}`}
-              </span>
-              <label className="flex items-center gap-1.5">
-                <span className="sr-only">Torrents per page</span>
-                <select
-                  aria-label="Torrents per page"
-                  value={pageSize}
-                  onChange={e => handlePageSize(Number(e.target.value))}
-                  className="bg-neutral-950 border border-white/10 rounded-lg text-xs text-neutral-300 py-1 pl-2 pr-6 focus:outline-none focus:border-blue-500/50"
-                >
-                  {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n} / page</option>)}
-                </select>
-              </label>
-            </div>
+              </Text>
+              <Select
+                aria-label="Torrents per page"
+                size="xs"
+                w={110}
+                data={PAGE_SIZE_OPTIONS.map(n => ({ value: String(n), label: `${n} / page` }))}
+                value={String(pageSize)}
+                onChange={v => handlePageSize(Number(v ?? DEFAULT_PAGE_SIZE))}
+                comboboxProps={{ withinPortal: true }}
+              />
+            </Group>
 
             {pageCount > 1 && (
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setPage(p => Math.max(1, p - 1))}
-                  disabled={page <= 1}
-                  className="px-3 py-1 text-xs font-semibold rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-30 transition-colors"
-                >
-                  Previous
-                </button>
-                <span className="text-xs font-mono text-neutral-400 px-1">
-                  {Math.min(page, pageCount)} / {pageCount}
-                </span>
-                <button
-                  onClick={() => setPage(p => Math.min(pageCount, p + 1))}
-                  disabled={page >= pageCount}
-                  className="px-3 py-1 text-xs font-semibold rounded bg-white/5 hover:bg-white/10 text-neutral-300 disabled:opacity-30 transition-colors"
-                >
-                  Next
-                </button>
-              </div>
+              <Pagination
+                size="xs"
+                total={pageCount}
+                value={Math.min(page, pageCount)}
+                onChange={setPage}
+              />
             )}
-          </div>
-        </div>
-      </div>
-    </div>
+          </Group>
+        </Paper>
+      </Stack>
+
+      <DeleteTorrentModal
+        // Selection is intersected with visibility, so it can empty out from a
+        // refetch while this is open — don't offer to remove nothing.
+        isOpen={confirmBulkRemove && selectedVisible.length > 0}
+        onClose={() => setConfirmBulkRemove(false)}
+        onConfirm={deleteFiles => bulk.mutate({ kind: 'remove', deleteFiles })}
+        isPending={bulk.isPending}
+        torrentName={selectedVisible[0]?.name ?? ''}
+        count={selectedVisible.length}
+      />
+    </Box>
   );
 }

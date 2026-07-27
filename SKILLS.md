@@ -64,7 +64,28 @@ logger = get_logger(__name__)
 - `UiActionsContext` — opens the shell-owned Add Torrent / Deploy Mule modals.
 
 ### Styling
-Use **Tailwind CSS**. Avoid inline styles. Use consistent component patterns from `web/src/components/`.
+Use **Mantine**. Reach for component props and `theme.ts` tokens before writing
+CSS; `style={{...}}` is for one-off layout Mantine cannot express, not for
+theming. Tailwind was removed — do not reintroduce utility classes.
+
+`web/src/index.css` carries only what Mantine cannot: root sizing, keyframes,
+the semantic status colours and the Dockview↔Mantine bridge.
+
+**Status colours go through the semantic variables**, never a numbered shade:
+
+| Variable | Means |
+|---|---|
+| `--smg-ok` | healthy, secure, download |
+| `--smg-info` | informational, upload, selection |
+| `--smg-warn` | queued, needs attention |
+| `--smg-attention` | caution |
+| `--smg-bad` | error, compromised |
+
+Write `c="var(--smg-ok)"`, not `c="teal.4"`. The numbered shades are tuned for
+the dark surface and fall to roughly 2:1 on the light one, which is below WCAG
+AA — the variables keep the hue and move the lightness per colour scheme.
+
+Never signal state with colour alone; pair it with text or an icon.
 
 ---
 

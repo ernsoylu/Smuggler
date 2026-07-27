@@ -1,23 +1,25 @@
 import { useRef, useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  Alert, Badge, Box, Button, Card, Group, Loader, Paper, PasswordInput, Progress,
+  SimpleGrid, Stack, Text, TextInput, ThemeIcon, Title, UnstyledButton,
+} from '@mantine/core';
 import { getConfigs, getMules, uploadConfig, deleteConfig } from '../api/client';
 import type { VpnConfig, DeployPhase } from '../api/types';
 import { useNotifications } from '../context/NotificationContext';
 import { useDeployments, type DeploymentView } from '../context/DeploymentContext';
 import {
-  FileUp, Trash2, Rocket, Shield, Plus, FileKey2, Lock, KeyRound, Eye, EyeOff,
+  FileUp, Trash2, Rocket, Shield, Plus, FileKey2, Lock, KeyRound, Check,
 } from 'lucide-react';
 
 type VpnType = 'wireguard' | 'openvpn';
 
-const PHASE_COLORS: Record<DeployPhase, { bg: string; text: string; ring: string }> = {
-  starting:    { bg: 'bg-amber-500/10',   text: 'text-amber-400',   ring: 'ring-amber-500/20' },
-  configuring: { bg: 'bg-orange-500/10',  text: 'text-orange-400',  ring: 'ring-orange-500/20' },
-  connecting:  { bg: 'bg-blue-500/10',    text: 'text-blue-400',    ring: 'ring-blue-500/20' },
-  deployed:    { bg: 'bg-emerald-500/10', text: 'text-emerald-400', ring: 'ring-emerald-500/20' },
+const PHASE_COLORS: Record<DeployPhase, string> = {
+  starting: 'yellow',
+  configuring: 'orange',
+  connecting: 'blue',
+  deployed: 'teal',
 };
-
-const FAILED_COLORS = { bg: 'bg-red-500/10', text: 'text-red-400', ring: 'ring-red-500/20' };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -35,20 +37,38 @@ async function detectRequiresAuth(file: File): Promise<boolean> {
   });
 }
 
+function tinted(color: string): React.CSSProperties {
+  return {
+    background: `var(--mantine-color-${color}-light)`,
+    borderColor: `var(--mantine-color-${color}-light-color)`,
+  };
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function VpnTypeBadge({ type }: Readonly<{ type: VpnType }>) {
-  if (type === 'openvpn') {
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-violet-500/10 text-violet-400 text-xs font-bold uppercase tracking-wider">
-        <Lock size={10} /> OpenVPN
-      </span>
-    );
-  }
+  const isOvpn = type === 'openvpn';
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 text-xs font-bold uppercase tracking-wider">
-      <Shield size={10} /> WireGuard
-    </span>
+    <Badge
+      variant="light"
+      color={isOvpn ? 'violet' : 'teal'}
+      size="sm"
+      radius="sm"
+      leftSection={isOvpn ? <Lock size={10} /> : <Shield size={10} />}
+    >
+      {isOvpn ? 'OpenVPN' : 'WireGuard'}
+    </Badge>
+  );
+}
+
+function MetaRow({ label, children }: Readonly<{ label: string; children: React.ReactNode }>) {
+  return (
+    <Paper radius="md" px="sm" py={8} bg="var(--mantine-color-default-hover)">
+      <Group justify="space-between" gap="md" wrap="nowrap">
+        <Text size="xs" fw={500} c="dimmed">{label}</Text>
+        {children}
+      </Group>
+    </Paper>
   );
 }
 
@@ -68,69 +88,58 @@ function ConfigCard({
   isInUse: boolean;
 }>) {
   const isOvpn = cfg.vpn_type === 'openvpn';
-  const iconBg = isOvpn ? 'bg-violet-500/10 text-violet-400' : 'bg-emerald-500/10 text-emerald-400';
 
   return (
-    <div className="bg-neutral-900/40 backdrop-blur-sm border border-white/5 hover:border-white/10 rounded-2xl p-5 flex flex-col gap-4 transition-all group">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex gap-3 min-w-0">
-          <div className={`mt-0.5 w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${iconBg}`}>
-            {isOvpn ? <Lock size={18} /> : <Shield size={18} />}
-          </div>
-          <div className="min-w-0">
-            <p className="font-semibold text-white text-sm truncate">{cfg.name}</p>
-            <p className="text-xs text-neutral-500 font-mono truncate mt-0.5">{cfg.filename}</p>
-          </div>
-        </div>
-      </div>
+    <Card withBorder radius="lg" p="md" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <Group gap="sm" wrap="nowrap" align="flex-start">
+        <ThemeIcon variant="light" color={isOvpn ? 'violet' : 'teal'} size={36} radius="md">
+          {isOvpn ? <Lock size={18} /> : <Shield size={18} />}
+        </ThemeIcon>
+        <Stack gap={0} miw={0}>
+          <Text size="sm" fw={600} truncate>{cfg.name}</Text>
+          <Text size="xs" c="dimmed" ff="monospace" truncate>{cfg.filename}</Text>
+        </Stack>
+      </Group>
 
-      <div className="flex flex-col gap-1.5">
-        <div className="flex justify-between items-center bg-white/5 px-3 py-2 rounded-lg">
-          <span className="text-neutral-500 font-medium text-xs">Type</span>
-          <VpnTypeBadge type={cfg.vpn_type ?? 'wireguard'} />
-        </div>
+      <Stack gap={6}>
+        <MetaRow label="Type"><VpnTypeBadge type={cfg.vpn_type ?? 'wireguard'} /></MetaRow>
         {cfg.vpn_type === 'openvpn' && (
-          <div className="flex justify-between items-center bg-white/5 px-3 py-2 rounded-lg">
-            <span className="text-neutral-500 font-medium text-xs">Auth</span>
-            <span className={`text-xs font-semibold ${cfg.requires_auth ? 'text-amber-400' : 'text-neutral-400'}`}>
+          <MetaRow label="Auth">
+            <Text size="xs" fw={600} c={cfg.requires_auth ? 'yellow.4' : 'dimmed'}>
               {cfg.requires_auth ? 'Credentials stored' : 'Not required'}
-            </span>
-          </div>
+            </Text>
+          </MetaRow>
         )}
-        <div className="flex justify-between items-center bg-white/5 px-3 py-2 rounded-lg">
-          <span className="text-neutral-500 font-medium text-xs">Added</span>
-          <span className="text-neutral-300 text-xs">{new Date(cfg.created_at).toLocaleDateString()}</span>
-        </div>
-      </div>
+        <MetaRow label="Added">
+          <Text size="xs">{new Date(cfg.created_at).toLocaleDateString()}</Text>
+        </MetaRow>
+      </Stack>
 
-      <div className="flex gap-2 mt-auto">
-        <button
-          className="flex items-center justify-center gap-1.5 flex-1 text-sm font-semibold py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-lg shadow-blue-500/10 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
+      <Group gap="xs" mt="auto" wrap="nowrap">
+        <Button
+          flex={1}
+          size="xs"
+          leftSection={isDeploying ? undefined : (isInUse ? <Shield size={14} /> : <Rocket size={14} />)}
           onClick={onDeploy}
-          disabled={isDeploying || isInUse}
+          disabled={isInUse}
+          loading={isDeploying}
           title={isInUse ? 'Config is already in use by an active mule' : undefined}
         >
-          {isDeploying ? (
-            <>
-              <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              Deploying...
-            </>
-          ) : isInUse ? (
-            <><Shield size={14} /> In Use</>
-          ) : (
-            <><Rocket size={14} /> Deploy Mule</>
-          )}
-        </button>
-        <button
-          className="p-2.5 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors disabled:opacity-50"
+          {isInUse ? 'In Use' : 'Deploy Mule'}
+        </Button>
+        <Button
+          size="xs"
+          variant="light"
+          color="red"
+          px="xs"
           onClick={onDelete}
           disabled={isDeleting}
           title="Delete configuration"
         >
           <Trash2 size={16} />
-        </button>
-      </div>
-    </div>
+        </Button>
+      </Group>
+    </Card>
   );
 }
 
@@ -153,9 +162,9 @@ function ConfigSection({
 }>) {
   if (configs.length === 0) return null;
   return (
-    <div className="mb-8">
-      <h4 className="text-sm font-bold text-neutral-400 uppercase tracking-wider mb-4">{title}</h4>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <Box mb="lg">
+      <Text size="sm" fw={700} tt="uppercase" c="dimmed" lts={1} mb="sm">{title}</Text>
+      <SimpleGrid type="container" cols={{ base: 1, '560px': 2, '960px': 3 }} spacing="md">
         {configs.map(cfg => (
           <ConfigCard
             key={cfg.id}
@@ -169,8 +178,8 @@ function ConfigSection({
             isInUse={inUseConfigIds.has(cfg.id)}
           />
         ))}
-      </div>
-    </div>
+      </SimpleGrid>
+    </Box>
   );
 }
 
@@ -188,7 +197,6 @@ export function ConfigsPage() {
   const [requiresAuth, setRequiresAuth] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
 
   // Deploy progress state
@@ -286,230 +294,206 @@ export function ConfigsPage() {
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
+  let fileColor = 'dimmed';
+  if (file) fileColor = vpnType === 'openvpn' ? 'violet.4' : 'teal.4';
+
   return (
-    <div className="p-6 md:p-8">
-      <div className="mb-10">
-        <h1 className="text-2xl font-bold tracking-tight text-white">VPN Configurations</h1>
-        <p className="text-neutral-400 text-sm mt-1">
+    <Box p="lg">
+      <Box mb="xl">
+        <Title order={2}>VPN Configurations</Title>
+        <Text size="sm" c="dimmed" mt={2}>
           Upload WireGuard (.conf) or OpenVPN (.ovpn) configs. Deploy mules directly from stored configurations.
-        </p>
-      </div>
+        </Text>
+      </Box>
 
       {/* ── Upload Form ── */}
-      <div className="bg-neutral-900/40 backdrop-blur-md border border-white/5 shadow-2xl rounded-2xl p-6 md:p-8 mb-8 relative overflow-hidden max-w-3xl">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 blur-[100px] rounded-full pointer-events-none" />
-
-        <h2 className="text-base font-semibold text-white mb-6 flex items-center gap-2">
-          <Plus size={20} className="text-emerald-400" /> Upload Configuration
-        </h2>
+      <Paper withBorder radius="lg" p="lg" mb="lg" maw={760}>
+        <Group gap="xs" mb="md">
+          <Plus size={20} color="var(--mantine-color-teal-4)" />
+          <Text fw={600}>Upload Configuration</Text>
+        </Group>
 
         {/* Row 1: file + name + upload */}
-        <div className="flex flex-col sm:flex-row gap-4 items-end">
-          <div className="flex-1 w-full group">
-            <p className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">Config File</p>
-            <label
+        <Group align="flex-end" gap="md">
+          <Box flex={1} miw={220}>
+            <Text size="xs" fw={600} tt="uppercase" c="dimmed" lts={1} mb={6}>Config File</Text>
+            <UnstyledButton
+              component="label"
               htmlFor="config-file-input"
-              className="w-full flex items-center gap-3 bg-neutral-950 hover:bg-neutral-900 border border-white/10 hover:border-emerald-500/50 transition-all rounded-xl px-4 py-3 cursor-pointer ring-4 ring-transparent focus-within:ring-emerald-500/10"
+              w="100%"
+              px="md"
+              py="sm"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                border: '1px solid var(--mantine-color-default-border)',
+                borderRadius: 'var(--mantine-radius-md)',
+                cursor: 'pointer',
+              }}
             >
-              {(() => {
-                let iconColor: string;
-                if (!file) { iconColor = 'text-neutral-400 group-hover:text-emerald-400'; }
-                else if (vpnType === 'openvpn') { iconColor = 'text-violet-400'; }
-                else { iconColor = 'text-emerald-400'; }
-                let fileTextColor: string;
-                if (!file) { fileTextColor = 'text-neutral-500'; }
-                else if (vpnType === 'openvpn') { fileTextColor = 'text-violet-400'; }
-                else { fileTextColor = 'text-emerald-400'; }
-                return (
-                  <>
-                    <div className={`w-8 h-8 rounded-md bg-white/5 flex items-center justify-center transition-colors ${iconColor}`}>
-                      <FileUp size={16} />
-                    </div>
-                    <input
-                      id="config-file-input"
-                      ref={fileRef}
-                      type="file"
-                      accept=".conf,.ovpn"
-                      className="hidden"
-                      onChange={handleFileChange}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <span className={`text-sm truncate font-medium block ${fileTextColor}`}>
-                        {file ? file.name : 'Select .conf or .ovpn'}
-                      </span>
-                      {file && (
-                        <span className="text-xs text-neutral-500 mt-0.5 block">
-                          {vpnType === 'openvpn' ? 'OpenVPN' : 'WireGuard'} detected
-                        </span>
-                      )}
-                    </div>
-                  </>
-                );
-              })()}
-            </label>
-          </div>
+              <ThemeIcon variant="light" color={file ? (vpnType === 'openvpn' ? 'violet' : 'teal') : 'gray'} size={32} radius="md">
+                <FileUp size={16} />
+              </ThemeIcon>
+              <input
+                id="config-file-input"
+                ref={fileRef}
+                type="file"
+                accept=".conf,.ovpn"
+                style={{ display: 'none' }}
+                onChange={handleFileChange}
+              />
+              <Stack gap={0} miw={0}>
+                <Text size="sm" fw={500} c={fileColor} truncate>
+                  {file ? file.name : 'Select .conf or .ovpn'}
+                </Text>
+                {file && (
+                  <Text size="xs" c="dimmed">
+                    {vpnType === 'openvpn' ? 'OpenVPN' : 'WireGuard'} detected
+                  </Text>
+                )}
+              </Stack>
+            </UnstyledButton>
+          </Box>
 
-          <div className="flex-[0.6] w-full">
-            <label htmlFor="config-name-input" className="block text-xs font-semibold uppercase tracking-wider text-neutral-400 mb-2">
-              Name <span className="text-neutral-600 font-normal normal-case">(Optional)</span>
-            </label>
-            <input
-              id="config-name-input"
-              type="text"
-              placeholder="e.g. US West"
-              className="w-full bg-neutral-950 border border-white/10 rounded-xl text-sm text-white px-4 py-3.5 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all placeholder:text-neutral-600"
-              value={name}
-              onChange={e => setName(e.target.value)}
-            />
-          </div>
+          <TextInput
+            id="config-name-input"
+            label="Name (Optional)"
+            placeholder="e.g. US West"
+            value={name}
+            onChange={e => setName(e.currentTarget.value)}
+            flex={0.6}
+            miw={160}
+          />
 
-          <button
-            className="w-full sm:w-auto py-3.5 px-8 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-sm text-white font-bold shadow-lg shadow-emerald-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
+          <Button
+            color="teal"
             onClick={() => upload.mutate()}
-            disabled={upload.isPending || !file}
+            disabled={!file}
+            loading={upload.isPending}
           >
-            {upload.isPending ? (
-              <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Uploading...</>
-            ) : 'Upload'}
-          </button>
-        </div>
+            Upload
+          </Button>
+        </Group>
 
         {/* Row 2: OpenVPN credentials (shown when auth required) */}
         {vpnType === 'openvpn' && requiresAuth && (
-          <div className="mt-5 p-4 rounded-xl border border-violet-500/20 bg-violet-500/5">
-            <p className="text-xs font-semibold text-violet-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
-              <KeyRound size={12} /> OpenVPN Credentials Required
-            </p>
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="flex-1">
-                <label htmlFor="config-ovpn-username" className="block text-xs font-medium text-neutral-400 mb-1.5">Username</label>
-                <input
-                  id="config-ovpn-username"
-                  type="text"
-                  placeholder="VPN username"
-                  autoComplete="off"
-                  className="w-full bg-neutral-950 border border-white/10 rounded-xl text-sm text-white px-4 py-3 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-all placeholder:text-neutral-600"
-                  value={username}
-                  onChange={e => setUsername(e.target.value)}
-                />
-              </div>
-              <div className="flex-1">
-                <label htmlFor="config-ovpn-password" className="block text-xs font-medium text-neutral-400 mb-1.5">Password</label>
-                <div className="relative">
-                  <input
-                    id="config-ovpn-password"
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="VPN password"
-                    autoComplete="new-password"
-                    className="w-full bg-neutral-950 border border-white/10 rounded-xl text-sm text-white px-4 py-3 pr-10 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-all placeholder:text-neutral-600"
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-neutral-300 transition-colors"
-                    onClick={() => setShowPassword(v => !v)}
-                    tabIndex={-1}
-                  >
-                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <Paper withBorder radius="md" p="md" mt="md" style={tinted('violet')}>
+            <Group gap={6} mb="sm">
+              <KeyRound size={12} color="var(--mantine-color-violet-4)" />
+              <Text size="xs" fw={600} tt="uppercase" c="violet.4" lts={1}>
+                OpenVPN Credentials Required
+              </Text>
+            </Group>
+            <Group gap="sm" grow>
+              <TextInput
+                id="config-ovpn-username"
+                label="Username"
+                placeholder="VPN username"
+                autoComplete="off"
+                value={username}
+                onChange={e => setUsername(e.currentTarget.value)}
+              />
+              <PasswordInput
+                id="config-ovpn-password"
+                label="Password"
+                placeholder="VPN password"
+                autoComplete="new-password"
+                value={password}
+                onChange={e => setPassword(e.currentTarget.value)}
+              />
+            </Group>
+          </Paper>
         )}
 
         {/* Hint when openvpn but no auth required */}
         {vpnType === 'openvpn' && !requiresAuth && file && (
-          <div className="mt-4 flex items-center gap-2 text-xs text-neutral-500">
-            <Lock size={12} className="text-violet-400" />
-            OpenVPN config detected — no credentials required.
-          </div>
+          <Group gap={6} mt="sm">
+            <Lock size={12} color="var(--mantine-color-violet-4)" />
+            <Text size="xs" c="dimmed">OpenVPN config detected — no credentials required.</Text>
+          </Group>
         )}
 
         {error && (
-          <div className="mt-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
-            <p className="text-sm font-medium text-red-400">{error}</p>
-          </div>
+          <Alert color="red" radius="md" p="sm" mt="md">
+            <Text size="sm" fw={500} c="var(--smg-bad)">{error}</Text>
+          </Alert>
         )}
-      </div>
+      </Paper>
 
       {/* ── Deploying Mule Cards ── */}
       {deployments.length > 0 && (
-        <div className="mb-8 max-w-3xl">
-          <h3 className="text-sm font-bold text-white tracking-tight mb-3 flex items-center gap-2">
-            <Rocket size={14} className="text-blue-400" /> Deploying
-          </h3>
-          <div className="space-y-3">
+        <Box mb="lg" maw={760}>
+          <Group gap="xs" mb="sm">
+            <Rocket size={14} color="var(--mantine-color-blue-4)" />
+            <Text size="sm" fw={700}>Deploying</Text>
+          </Group>
+          <Stack gap="sm">
             {deployments.map((m) => {
               const failed = m.state === 'failed';
               const done = m.state === 'succeeded';
-              const sc = failed ? FAILED_COLORS : PHASE_COLORS[m.phase];
+              const color = failed ? 'red' : PHASE_COLORS[m.phase];
               const progressPct = failed
                 ? 0
                 : ((m.phase_index + 1) / m.phase_count) * 100;
               return (
-                <div key={m.id} className={`p-4 rounded-xl border transition-all ${sc.bg} ${sc.ring} ring-1`}>
-                  <div className="flex items-center justify-between gap-4 mb-3">
-                    <div className="flex items-center gap-3">
-                      {!failed && !done && (
-                        <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                      )}
+                <Paper key={m.id} withBorder radius="md" p="md" style={tinted(color)}>
+                  <Group justify="space-between" gap="md" mb="sm">
+                    <Group gap="sm">
+                      {!failed && !done && <Loader size="xs" color="blue" />}
                       {failed && (
-                        <div className="w-5 h-5 rounded-full bg-red-500/20 flex items-center justify-center text-red-400 text-xs font-bold">!</div>
+                        <ThemeIcon variant="light" color="red" size={20} radius="xl">
+                          <Text size="xs" fw={700}>!</Text>
+                        </ThemeIcon>
                       )}
                       {!failed && done && (
-                        <div className="w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400"><polyline points="20 6 9 17 4 12" /></svg>
-                        </div>
+                        <ThemeIcon variant="light" color="teal" size={20} radius="xl">
+                          <Check size={12} strokeWidth={3} />
+                        </ThemeIcon>
                       )}
-                      <span className="text-sm font-semibold text-white">{m.configName}</span>
-                    </div>
-                    <span className={`text-xs font-bold uppercase tracking-wider ${sc.text}`}>
+                      <Text size="sm" fw={600}>{m.configName}</Text>
+                    </Group>
+                    <Text size="xs" fw={700} tt="uppercase" lts={1} c={`${color}.4`}>
                       {failed ? 'FAILED' : m.phase}
-                    </span>
-                  </div>
-                  {!failed && (
-                    <div className="w-full h-1 bg-black/20 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-1000 ease-out"
-                        style={{ width: `${progressPct}%` }}
-                      />
-                    </div>
-                  )}
-                  {failed && <p className="text-xs text-red-300 mt-1">{m.error}</p>}
-                  {!failed && !done && (
-                    <p className="text-xs text-neutral-400 mt-2">{m.detail}</p>
-                  )}
-                </div>
+                    </Text>
+                  </Group>
+                  {!failed && <Progress size="xs" value={progressPct} color="blue" />}
+                  {failed && <Text size="xs" c="var(--smg-bad)" mt={4}>{m.error}</Text>}
+                  {!failed && !done && <Text size="xs" c="dimmed" mt={8}>{m.detail}</Text>}
+                </Paper>
               );
             })}
-          </div>
-        </div>
+          </Stack>
+        </Box>
       )}
 
       {/* ── Configs List ── */}
-      <div className="flex items-center gap-3 mb-6 max-w-5xl">
-        <h3 className="text-lg font-bold text-white tracking-tight">Stored Configurations</h3>
-        <span className="px-2.5 py-0.5 rounded-full bg-neutral-800 text-neutral-400 text-xs font-semibold">{configs.length}</span>
-      </div>
+      <Group gap="sm" mb="md">
+        <Title order={4}>Stored Configurations</Title>
+        <Badge variant="default" radius="xl">{configs.length}</Badge>
+      </Group>
 
       {isLoading && (
-        <div className="flex items-center justify-center p-12 text-neutral-500 gap-3">
-          <div className="w-5 h-5 border-2 border-neutral-500 border-t-transparent rounded-full animate-spin" />
-          <span className="font-medium text-sm">Loading configurations...</span>
-        </div>
+        <Group justify="center" p="xl" gap="sm">
+          <Loader size="sm" color="gray" />
+          <Text size="sm" fw={500} c="dimmed">Loading configurations...</Text>
+        </Group>
       )}
       {!isLoading && configs.length === 0 && (
-        <div className="border-2 border-dashed border-white/10 rounded-2xl p-16 text-center flex flex-col items-center justify-center max-w-3xl">
-          <FileKey2 size={48} className="text-neutral-700 mx-auto mb-4" strokeWidth={1} />
-          <p className="text-neutral-400 font-medium max-w-sm">
-            No VPN configurations stored yet. Upload a WireGuard (.conf) or OpenVPN (.ovpn) config above.
-          </p>
-        </div>
+        <Paper
+          radius="lg"
+          p={48}
+          maw={760}
+          style={{ border: '2px dashed var(--mantine-color-default-border)', textAlign: 'center' }}
+        >
+          <Stack align="center" gap="sm">
+            <FileKey2 size={48} strokeWidth={1} color="var(--mantine-color-dimmed)" />
+            <Text c="dimmed" fw={500} maw={380}>
+              No VPN configurations stored yet. Upload a WireGuard (.conf) or OpenVPN (.ovpn) config above.
+            </Text>
+          </Stack>
+        </Paper>
       )}
       {!isLoading && configs.length > 0 && (
-        <div className="max-w-5xl">
+        <Box maw={1080}>
           <ConfigSection
             title="WireGuard"
             configs={wireguardConfigs}
@@ -528,8 +512,8 @@ export function ConfigsPage() {
             onDelete={id => remove.mutate(id)}
             deletingId={deletingId}
           />
-        </div>
+        </Box>
       )}
-    </div>
+    </Box>
   );
 }

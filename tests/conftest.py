@@ -15,6 +15,13 @@ from api import database
 # fixture-level env var would be too late to stop the observer thread.
 os.environ["SMG_OBSERVER_ENABLED"] = "false"
 
+# Same reason, different thread: a watchdog sweep reaches `requests` through the
+# aria2 and Docker clients, and `responses` patches `requests` process-wide. A
+# sweep landing inside a @responses.activate test appends to `responses.calls`
+# and shifts the call being asserted on — an intermittent failure that only
+# appears in a full run. Tests that need the thread opt back in explicitly.
+os.environ["SMG_WATCHDOG_ENABLED"] = "false"
+
 # The api.database import above pulls in cli.log, which loads the developer's
 # real .env at import time. A generated SMG_API_TOKEN would then turn every
 # unauthenticated test-client request into a 401. The suite must behave the

@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import { Group, Kbd, Paper, Text } from '@mantine/core';
 import { useModalA11y, modalA11yProps } from '../hooks/useModalA11y';
 import { PAGES, type Page } from '../lib/router';
 import { useTheme } from '../context/ThemeContext';
@@ -11,9 +12,9 @@ import {
 /**
  * Ctrl/Cmd-K command palette.
  *
- * The app had no keyboard affordances at all — every action required reaching
- * for the mouse. This covers navigation, the two "create" actions and the
- * theme, which is everything reachable from the shell.
+ * The DOM keeps the raw combobox/listbox structure (input + ul/li/button) so
+ * the existing keyboard and screen-reader behaviour survives the restyle —
+ * Mantine only provides the chrome around it.
  */
 
 export interface PaletteAction {
@@ -93,22 +94,37 @@ export function CommandPalette({ onClose, onNavigate, onAddTorrent, onDeployMule
   };
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-start justify-center pt-[15vh]">
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 300,
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+        paddingTop: '15vh',
+      }}
+    >
       <button
         type="button"
         aria-label="Close command palette"
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm border-0 p-0 cursor-default"
         onClick={onClose}
+        style={{
+          position: 'absolute', inset: 0, border: 0, padding: 0, cursor: 'default',
+          background: 'rgba(0, 0, 0, 0.55)', backdropFilter: 'blur(2px)',
+        }}
       />
-      <div
+      <Paper
         ref={dialogRef}
         {...modalA11yProps}
         aria-label="Command palette"
         onKeyDown={onKeyDown}
-        className="relative w-full max-w-lg mx-4 bg-neutral-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden"
+        withBorder
+        shadow="xl"
+        radius="lg"
+        w="100%"
+        maw={520}
+        mx="md"
+        style={{ position: 'relative', overflow: 'hidden' }}
       >
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-white/5">
-          <Command size={16} className="text-neutral-500 shrink-0" />
+        <Group gap="sm" px="md" py="sm" wrap="nowrap" style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}>
+          <Command size={16} color="var(--mantine-color-dimmed)" style={{ flexShrink: 0 }} />
           <input
             ref={inputRef}
             type="text"
@@ -120,37 +136,49 @@ export function CommandPalette({ onClose, onNavigate, onAddTorrent, onDeployMule
             placeholder="Type a command…"
             value={query}
             onChange={e => { setQuery(e.target.value); setCursor(0); }}
-            className="flex-1 bg-transparent text-sm text-neutral-100 placeholder:text-neutral-600 focus:outline-none"
+            style={{
+              flex: 1, background: 'transparent', border: 0, outline: 'none',
+              fontSize: 'var(--mantine-font-size-sm)', color: 'var(--mantine-color-text)',
+              fontFamily: 'inherit',
+            }}
           />
-          <kbd className="text-[10px] font-mono text-neutral-600 border border-white/10 rounded px-1.5 py-0.5">ESC</kbd>
-        </div>
+          <Kbd size="xs">ESC</Kbd>
+        </Group>
 
-        <ul id="command-palette-list" ref={listRef} role="listbox" aria-label="Commands" className="max-h-80 overflow-y-auto py-2">
+        <ul
+          id="command-palette-list"
+          ref={listRef}
+          role="listbox"
+          aria-label="Commands"
+          style={{ maxHeight: 320, overflowY: 'auto', padding: '8px 0', margin: 0, listStyle: 'none' }}
+        >
           {results.length === 0 && (
-            <li className="px-4 py-6 text-center text-sm text-neutral-500">No matching command</li>
+            <li>
+              <Text size="sm" c="dimmed" ta="center" py="lg">No matching command</Text>
+            </li>
           )}
           {results.map((a, i) => (
             <li key={a.id} id={`cmd-${a.id}`} role="option" aria-selected={i === active}>
               <button
                 onClick={() => choose(a)}
                 onMouseEnter={() => setCursor(i)}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors ${
-                  i === active ? 'bg-white/10 text-white' : 'text-neutral-300 hover:bg-white/5'
-                }`}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '10px 16px', textAlign: 'left', border: 0, cursor: 'pointer',
+                  fontSize: 'var(--mantine-font-size-sm)', fontFamily: 'inherit',
+                  background: i === active ? 'var(--mantine-color-default-hover)' : 'transparent',
+                  color: 'var(--mantine-color-text)',
+                }}
               >
-                <span className="text-neutral-500">{a.icon}</span>
-                <span className="flex-1">{a.label}</span>
-                {a.hint && (
-                  <kbd className="text-[10px] font-mono text-neutral-500 border border-white/10 rounded px-1.5 py-0.5">
-                    {a.hint}
-                  </kbd>
-                )}
-                {i === active && <CornerDownLeft size={13} className="text-neutral-500" />}
+                <span style={{ color: 'var(--mantine-color-dimmed)', display: 'flex' }}>{a.icon}</span>
+                <span style={{ flex: 1 }}>{a.label}</span>
+                {a.hint && <Kbd size="xs">{a.hint}</Kbd>}
+                {i === active && <CornerDownLeft size={13} color="var(--mantine-color-dimmed)" />}
               </button>
             </li>
           ))}
         </ul>
-      </div>
+      </Paper>
     </div>
   );
 }
