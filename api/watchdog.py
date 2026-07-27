@@ -79,8 +79,21 @@ def watchdog_enabled() -> bool:
         "false", "0", "no", "off",
     )
 
+
+# A user-initiated stop takes a few seconds (SIGTERM grace + remove) during
+# which the container shows "exited"/"removing". A sweep landing in that window
+# must not report the mule unhealthy — the UI turns that into a "VPN
+# compromised" warning for a teardown the user asked for. The TTL bounds the
+# suppression: a container that was told to stop but is somehow still around
+# after it goes back to being flagged like any other failure.
+EXPECTED_STOP_TTL = 60.0  # seconds
+
 # ── Shared state (protected by _lock) ────────────────────────────────────────
 _lock = threading.Lock()
+
+# mule_name → time.monotonic() deadline until which a non-running status is
+# treated as an intentional teardown rather than a failure.
+_expected_stops: dict[str, float] = {}
 
 # Guards start_watchdog() so repeated calls (multiple gunicorn workers, an app
 # factory invoked twice in tests) cannot spawn competing sweep threads.
@@ -103,6 +116,29 @@ _watchdog_stats = {
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def mark_expected_stop(mule_name: str, ttl: float = EXPECTED_STOP_TTL) -> None:
+    """Record that ``mule_name`` is about to be stopped deliberately.
+
+    Called by the stop/kill/evacuate endpoints just before teardown so the
+    sweep does not report the dying container as unhealthy (and the UI does
+    not raise a "VPN compromised" warning for a stop the user requested).
+    """
+    with _lock:
+        _expected_stops[mule_name] = time.monotonic() + ttl
+    log.debug("watchdog: expected stop marked for mule=%s (ttl=%.0fs)",
+              log_safe(mule_name), ttl)
+
+
+def _is_expected_stop(mule_name: str) -> bool:
+    """True while ``mule_name`` has an unexpired expected-stop marker."""
+    now = time.monotonic()
+    with _lock:
+        expired = [name for name, deadline in _expected_stops.items() if deadline <= now]
+        for name in expired:
+            del _expected_stops[name]
+        return mule_name in _expected_stops
 
 
 def _probe_mule(client, mule) -> dict:
@@ -182,6 +218,11 @@ def _finalise_sweep(all_names: set[str], checked_at: str) -> None:
         stale = [name for name in _mule_states if name not in all_names]
         for name in stale:
             del _mule_states[name]
+        # Once the container is gone the marker has done its job; dropping it
+        # here means a later same-named container is never masked by it.
+        done = [name for name in _expected_stops if name not in all_names]
+        for name in done:
+            del _expected_stops[name]
         _watchdog_stats["last_run_at"] = checked_at
         _watchdog_stats["total_sweeps"] += 1
 
@@ -202,6 +243,15 @@ def _run_sweep() -> list[dict]:
     results: list[dict] = []
 
     for mule in all_mules:
+        if mule.status != "running" and _is_expected_stop(mule.name):
+            # The container is mid-teardown because a user asked for it — a
+            # non-running status here is the stop completing, not a failure.
+            # Drop any prior state so the UI never surfaces it as unhealthy.
+            log.debug("watchdog: mule=%s stopping as requested — skipping", log_safe(mule.name))
+            with _lock:
+                _mule_states.pop(mule.name, None)
+            continue
+
         result = _probe_mule(client, mule)
         result["checked_at"] = checked_at
         threshold = _threshold_for(result)
@@ -328,6 +378,11 @@ def watchdog_evacuate(mule_name: str):
         client = get_docker_client()
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 500
+
+    if kill_after:
+        # The kill at the end of the evacuation is user-requested — don't let
+        # a sweep racing the teardown report it as a new failure.
+        mark_expected_stop(mule_name)
 
     try:
         report = evacuate_mule(client, mule_name, kill_after=kill_after)
