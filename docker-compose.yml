@@ -48,6 +48,12 @@ services:
     restart: unless-stopped
 
   smuggler-api:
+    # image + build together, so one compose file serves both deployment
+    # shapes. From a source checkout, `docker compose up --build` builds and
+    # tags the result with this name. From a registry install (install.sh),
+    # `docker compose pull` puts the image in place first, so compose never
+    # reaches for a build context that isn't on disk.
+    image: ghcr.io/ernsoylu/smuggler-api:${SMG_VERSION:-latest}
     build:
       context: .
       dockerfile: docker/Dockerfile.api
@@ -105,6 +111,8 @@ services:
     restart: unless-stopped
 
   smuggler-ui:
+    # See smuggler-api above for why both image and build are set.
+    image: ghcr.io/ernsoylu/smuggler-web:${SMG_VERSION:-latest}
     build:
       context: .
       dockerfile: docker/Dockerfile.web

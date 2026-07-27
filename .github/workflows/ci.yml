@@ -2,8 +2,13 @@ name: CI
 
 # Single entry point for all CI. Detects which areas changed, runs only the
 # relevant reusable workflows, and ends in one always-running "CI Gate" job.
-# Require just "CI / CI Gate" in branch protection: it reports on every PR and
+# Require just "CI Gate" in branch protection: it reports on every PR and
 # fails if any triggered area failed (skipped areas count as passing).
+#
+# The required-check string is "CI Gate", not "CI / CI Gate" — "CI" is this
+# workflow's name, which GitHub renders as a prefix in the Checks tab but is
+# not part of the status context. A rule naming "CI / CI Gate" matches nothing
+# and silently never enforces.
 on:
   push:
     branches: [main, master]
@@ -137,3 +142,16 @@ jobs:
             fi
           done
           echo "CI Gate: all triggered jobs passed."
+
+  # Publish images to GHCR. Deliberately NOT path-filtered: the api image
+  # embeds api/ + cli/ + requirements.txt and the web image embeds web/, so a
+  # commit that changes no Dockerfile still changes what `latest` should point
+  # at. Gated on ci-gate, so a red build never becomes `latest`.
+  publish:
+    name: Publish images
+    needs: [ci-gate]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/release-ci.yml
