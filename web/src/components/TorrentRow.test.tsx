@@ -42,26 +42,37 @@ describe('TorrentRow actions', () => {
     // The pre-Mantine markup hid these behind `opacity-0 group-hover:*`, which
     // made them undiscoverable on touch and invisible to a keyboard user
     // tabbing onto them. They must stay unconditionally rendered and visible.
-    for (const name of ['Start', 'Stop', 'Remove']) {
+    for (const name of ['Resume', 'Pause', 'Remove']) {
       expect(screen.getByRole('button', { name })).toBeVisible();
     }
   });
 
-  it('offers stop but not start while active', () => {
+  it('offers pause but not resume while active', () => {
     renderRow({ status: 'active' });
-    expect(screen.getByRole('button', { name: 'Start' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled();
   });
 
-  it('offers start but not stop while paused', () => {
+  it('offers resume but not pause while paused', () => {
     renderRow({ status: 'paused' });
-    expect(screen.getByRole('button', { name: 'Start' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Stop' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled();
+  });
+
+  it('names the row actions the same way the bulk bar does', () => {
+    // One operation, one verb: tooltips said Start/Stop while the bulk bar and
+    // the status vocabulary said Resume/Pause.
+    renderRow({ status: 'active' });
+    for (const name of ['Resume', 'Pause', 'Remove']) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole('button', { name: 'Start' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
   });
 
   it('pauses the torrent on its own mule and gid', async () => {
     renderRow({ mule: 'mule-7', gid: 'gid-xyz', status: 'active' });
-    await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Pause' }));
     await waitFor(() => expect(client.pauseTorrent).toHaveBeenCalledWith('mule-7', 'gid-xyz'));
   });
 

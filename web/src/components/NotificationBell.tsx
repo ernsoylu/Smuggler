@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   ActionIcon, Box, Group, Indicator, Popover, Progress, ScrollArea, Stack, Text, UnstyledButton,
 } from '@mantine/core';
-import { Bell, X, Trash2 } from 'lucide-react';
+import { Bell, X, Trash2, CheckCheck } from 'lucide-react';
 import { useNotifications, type AppNotification, type NotificationType } from '../context/NotificationContext';
 
 /** Mantine color base per notification type — dot, progress and unread tint. */
@@ -65,10 +65,15 @@ export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const { notifications, unreadCount, markAllRead, dismiss, clearAll } = useNotifications();
 
-  const handleToggle = () => {
-    setOpen(v => !v);
-    if (!open && unreadCount > 0) markAllRead();
-  };
+  /*
+   * Opening the panel no longer marks everything read.
+   *
+   * It used to, which meant glancing at a "VPN compromised" warning silently
+   * cleared its unread state — the one notification class you might open the
+   * panel to check is the one you would then lose track of. Marking read is an
+   * explicit action now.
+   */
+  const handleToggle = () => setOpen(v => !v);
 
   return (
     <Popover
@@ -95,11 +100,18 @@ export function NotificationBell() {
       <Popover.Dropdown p={0}>
         <Group justify="space-between" px="md" py="sm" style={{ borderBottom: '1px solid var(--mantine-color-default-border)' }}>
           <Text size="sm" fw={600}>Notifications</Text>
-          {notifications.length > 0 && (
-            <UnstyledButton onClick={clearAll} c="dimmed" fz="xs" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Trash2 size={12} /> Clear all
-            </UnstyledButton>
-          )}
+          <Group gap="sm">
+            {unreadCount > 0 && (
+              <UnstyledButton onClick={markAllRead} c="dimmed" fz="xs" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <CheckCheck size={12} /> Mark all read
+              </UnstyledButton>
+            )}
+            {notifications.length > 0 && (
+              <UnstyledButton onClick={clearAll} c="dimmed" fz="xs" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Trash2 size={12} /> Clear all
+              </UnstyledButton>
+            )}
+          </Group>
         </Group>
 
         <ScrollArea.Autosize mah={384}>

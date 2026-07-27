@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Badge, Box, Button, Group, Loader, Paper, SimpleGrid, Stack, Text, Title,
@@ -19,6 +19,7 @@ function tinted(color: string): React.CSSProperties {
 
 function WatchdogPanel({ watchdog }: Readonly<{ watchdog: WatchdogStatus | undefined }>) {
   const qc = useQueryClient();
+  const [confirmEvac, setConfirmEvac] = useState<string | null>(null);
 
   const sweep = useMutation({
     mutationFn: triggerWatchdogSweep,
@@ -86,17 +87,35 @@ function WatchdogPanel({ watchdog }: Readonly<{ watchdog: WatchdogStatus | undef
                     </Badge>
                   )}
                 </Group>
-                {!m.evacuated && (
+                {/* Confirmed like every other destructive action. This was
+                    the one that killed a container on a single click. */}
+                {!m.evacuated && confirmEvac !== m.name && (
                   <Button
                     size="compact-xs"
                     color="red"
                     variant="light"
                     leftSection={<LogOut size={12} />}
-                    onClick={() => evac.mutate(m.name)}
+                    onClick={() => setConfirmEvac(m.name)}
                     disabled={evac.isPending}
                   >
                     Evacuate
                   </Button>
+                )}
+                {!m.evacuated && confirmEvac === m.name && (
+                  <Group gap={6} wrap="nowrap">
+                    <Text size="xs" fw={600} c="var(--smg-bad)">Evacuate and kill?</Text>
+                    <Button
+                      size="compact-xs"
+                      color="red"
+                      onClick={() => { setConfirmEvac(null); evac.mutate(m.name); }}
+                      disabled={evac.isPending}
+                    >
+                      Yes
+                    </Button>
+                    <Button size="compact-xs" variant="default" onClick={() => setConfirmEvac(null)}>
+                      Cancel
+                    </Button>
+                  </Group>
                 )}
                 {m.evacuated && <Badge size="sm" color="gray" variant="filled">Evacuated</Badge>}
               </Group>
