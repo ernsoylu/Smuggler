@@ -24,6 +24,7 @@ from cli.docker_client import (
     evacuate_mule,
     MuleInfo,
 )
+from api.watchdog import mark_expected_stop
 
 log = get_logger(__name__)
 mules_bp = Blueprint("mules", __name__, url_prefix="/api/mules")
@@ -137,6 +138,7 @@ def create():
             )
             # Best-effort cleanup
             try:
+                mark_expected_stop(mule.name)
                 stop_mule(client, mule.name, remove=True)
             except RuntimeError as cleanup_exc:
                 log.warning(
@@ -185,6 +187,9 @@ def remove(mule_name: str):
     log.info("DELETE /api/mules/%s keep=%s", safe, keep)
     client = get_docker_client()
     try:
+        # Flag the teardown as user-requested BEFORE stopping, so a watchdog
+        # sweep racing the SIGTERM window doesn't report "VPN compromised".
+        mark_expected_stop(mule_name)
         stop_mule(client, mule_name, remove=not keep)
     except RuntimeError as exc:
         log.warning("DELETE /api/mules/%s: error — %s", safe, exc)
@@ -202,6 +207,7 @@ def force_kill(mule_name: str):
     log.info("POST /api/mules/%s/kill keep=%s", safe, keep)
     client = get_docker_client()
     try:
+        mark_expected_stop(mule_name)
         kill_mule(client, mule_name, remove=not keep)
     except RuntimeError as exc:
         log.warning("POST /api/mules/%s/kill: error — %s", safe, exc)
@@ -238,6 +244,8 @@ def evacuate(mule_name: str):
     log.info("POST /api/mules/%s/evacuate kill_after=%s", safe, kill_after)
     client = get_docker_client()
     try:
+        if kill_after:
+            mark_expected_stop(mule_name)
         report = evacuate_mule(client, mule_name, kill_after=kill_after)
     except RuntimeError as exc:
         log.error("POST /api/mules/%s/evacuate: error — %s", safe, exc)

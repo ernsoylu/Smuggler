@@ -372,22 +372,33 @@ class TestCollectDeletePaths:
 
 
 class TestDropFromAria2:
-    def test_removes_active_download(self):
+    def test_removes_active_download_and_purges_result(self):
+        """Regression: forceRemove alone leaves a "removed" ghost row in the
+        torrent list — the stopped result must be purged in the same call."""
         from api.torrents import _drop_from_aria2
         aria2 = MagicMock()
         _drop_from_aria2(aria2, "gid1", "active")
         aria2.remove.assert_called_once_with("gid1")
+        aria2.remove_download_result.assert_called_once_with("gid1")
 
     def test_purges_stopped_download(self):
         from api.torrents import _drop_from_aria2
         aria2 = MagicMock()
         _drop_from_aria2(aria2, "gid1", "complete")
         aria2.remove_download_result.assert_called_once_with("gid1")
+        aria2.remove.assert_not_called()
 
     def test_handles_aria2_error_gracefully(self):
         from api.torrents import _drop_from_aria2
         aria2 = MagicMock()
         aria2.remove.side_effect = Aria2Error("Not found")
+        _drop_from_aria2(aria2, "gid1", "active")  # should not raise
+        aria2.remove_download_result.assert_called_once_with("gid1")
+
+    def test_handles_purge_error_gracefully(self):
+        from api.torrents import _drop_from_aria2
+        aria2 = MagicMock()
+        aria2.remove_download_result.side_effect = Aria2Error("still stopping")
         _drop_from_aria2(aria2, "gid1", "active")  # should not raise
 
 
