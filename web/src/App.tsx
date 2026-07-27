@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { ActionIcon, Button, Group, Kbd, MantineProvider, Text, Tooltip } from '@mantine/core';
+import { ActionIcon, Box, Button, Group, Kbd, MantineProvider, Text, Tooltip } from '@mantine/core';
 import type { DockviewApi } from 'dockview-react';
 import type { ReactNode } from 'react';
 import { StatusFooter } from './components/StatusFooter';
@@ -123,20 +123,30 @@ function Shell() {
             <Text fw={700} tt="uppercase" size="md" lts={1}>Smuggler</Text>
           </Group>
 
+          {/*
+            Five labelled tabs plus the logo and four right-hand controls
+            overflow a phone. Below `md` the labels drop and the tabs become
+            icons; the accessible name comes from aria-label either way, so
+            nothing is lost to a screen reader — only to pixels.
+          */}
           <Group component="nav" gap={4} wrap="nowrap" aria-label="Primary">
             {PAGES.map(key => (
-              <Button
-                key={key}
-                component="a"
-                href={`#/${key}`}
-                size="compact-sm"
-                variant={page === key ? 'light' : 'subtle'}
-                color={page === key ? 'smuggler' : 'gray'}
-                leftSection={TAB_ICONS[key]}
-                aria-current={page === key ? 'page' : undefined}
-              >
-                {TAB_LABELS[key]}
-              </Button>
+              <Tooltip key={key} label={TAB_LABELS[key]} withArrow hiddenFrom="md">
+                <Button
+                  component="a"
+                  href={`#/${key}`}
+                  size="compact-sm"
+                  px={{ base: 8, md: 12 }}
+                  variant={page === key ? 'light' : 'subtle'}
+                  color={page === key ? 'smuggler' : 'gray'}
+                  leftSection={TAB_ICONS[key]}
+                  aria-label={TAB_LABELS[key]}
+                  aria-current={page === key ? 'page' : undefined}
+                  styles={{ section: { marginInlineEnd: 0 } }}
+                >
+                  <Box visibleFrom="md" ml={6}>{TAB_LABELS[key]}</Box>
+                </Button>
+              </Tooltip>
             ))}
           </Group>
 
@@ -146,6 +156,7 @@ function Shell() {
                 variant="subtle"
                 color="gray"
                 size="lg"
+                visibleFrom="sm"
                 aria-label="Restore default panel layout"
                 onClick={() => window.dispatchEvent(new Event('smuggler:reset-layout'))}
               >

@@ -90,6 +90,7 @@ services:
       - DOCKER_HOST=tcp://smuggler-docker-proxy:2375
       # Observer / event-trail tuning. Empty values fall back to the in-code
       # defaults (enabled, 30s sweeps, 14-day / 50k-row retention).
+      - SMG_WATCHDOG_ENABLED=${SMG_WATCHDOG_ENABLED:-}
       - SMG_OBSERVER_ENABLED=${SMG_OBSERVER_ENABLED:-}
       - SMG_OBSERVER_INTERVAL=${SMG_OBSERVER_INTERVAL:-}
       - SMG_EVENTS_RETENTION_DAYS=${SMG_EVENTS_RETENTION_DAYS:-}

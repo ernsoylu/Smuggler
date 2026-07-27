@@ -20,10 +20,13 @@ const mule = (name: string, healthy: boolean): MuleHealth => ({
   name, healthy, ip: null, reason: healthy ? 'ok' : 'exit IP matches host',
 });
 
-const setup = (mules: MuleHealth[] | null) => {
+const GB = 1024 ** 3;
+
+const setup = (mules: MuleHealth[] | null, disk?: { free: number | null; total: number | null }) => {
   vi.mocked(client.getStats).mockResolvedValue({
     download_speed: 0, upload_speed: 0, num_active: 0,
     num_waiting: 0, num_stopped: 0, num_mules: mules?.length ?? 0,
+    disk_free: disk?.free ?? null, disk_total: disk?.total ?? null,
   });
   vi.mocked(client.getAllTorrents).mockResolvedValue([]);
   vi.mocked(client.getWatchdogStatus).mockResolvedValue({
@@ -81,5 +84,31 @@ describe('StatusFooter tunnel health', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: /compromised/i }));
     expect(uiActions.navigate).toHaveBeenCalledWith('mules');
+  });
+});
+
+describe('StatusFooter disk headroom', () => {
+  it('shows free space, which /api/stats always returned and nothing displayed', async () => {
+    setup([mule('a', true)], { free: 40 * GB, total: 100 * GB });
+    renderWithProviders(<StatusFooter />);
+
+    expect(await screen.findByText(/40\.00 GB free/)).toBeInTheDocument();
+  });
+
+  it('says nothing rather than guessing when the API reports unknown', async () => {
+    // The API sends null when the download dir does not resolve. Rendering
+    // that as 0 bytes free would be a false alarm.
+    setup([mule('a', true)], { free: null, total: null });
+    renderWithProviders(<StatusFooter />);
+
+    await waitFor(() => expect(client.getStats).toHaveBeenCalled());
+    expect(screen.queryByText(/free/i)).not.toBeInTheDocument();
+  });
+
+  it('states the amount in text, not by colour alone', async () => {
+    setup([mule('a', true)], { free: 1 * GB, total: 100 * GB });
+    renderWithProviders(<StatusFooter />);
+
+    expect(await screen.findByText(/1\.00 GB free/)).toBeInTheDocument();
   });
 });

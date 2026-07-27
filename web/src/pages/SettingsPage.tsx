@@ -4,6 +4,7 @@ import {
   Box, Button, Code, Group, Loader, Paper, SimpleGrid, Stack, Text, TextInput, Title,
 } from '@mantine/core';
 import { getSettings, saveSettings } from '../api/client';
+import { SpeedLimitInput } from '../components/SpeedLimitInput';
 import { FolderOpen, Save, CheckCircle, AlertCircle, Gauge, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react';
 
 function FieldLabel({ icon, children }: Readonly<{ icon?: React.ReactNode; children: React.ReactNode }>) {
@@ -132,33 +133,27 @@ export function SettingsPage() {
               <div>
                 <FieldLabel icon={<ArrowDownToLine size={12} />}>Max Download Speed</FieldLabel>
                 <Text size="xs" c="dimmed" mt={4} mb={6}>
-                  Global download rate limit in bytes/sec. Set to <Code>0</Code> for unlimited.
+                  Global download rate limit. Set to <Code>0</Code> for unlimited.
                 </Text>
-                <TextInput
+                <SpeedLimitInput
                   id="setting-max-dl-speed"
-                  type="number"
-                  min={0}
-                  value={form.max_download_speed}
-                  onChange={e => updateField('max_download_speed', e.currentTarget.value)}
-                  rightSection={<Text size="xs" c="dimmed" fw={500}>B/s</Text>}
-                  rightSectionWidth={40}
-                  styles={monoInput}
+                  label="Max download speed"
+                  visibleLabel={false}
+                  value={Number(form.max_download_speed) || 0}
+                  onChange={v => updateField('max_download_speed', String(v))}
                 />
               </div>
               <div>
                 <FieldLabel icon={<ArrowUpFromLine size={12} />}>Max Upload Speed</FieldLabel>
                 <Text size="xs" c="dimmed" mt={4} mb={6}>
-                  Global upload rate limit in bytes/sec. Set to <Code>0</Code> for unlimited.
+                  Global upload rate limit. Set to <Code>0</Code> for unlimited.
                 </Text>
-                <TextInput
+                <SpeedLimitInput
                   id="setting-max-ul-speed"
-                  type="number"
-                  min={0}
-                  value={form.max_upload_speed}
-                  onChange={e => updateField('max_upload_speed', e.currentTarget.value)}
-                  rightSection={<Text size="xs" c="dimmed" fw={500}>B/s</Text>}
-                  rightSectionWidth={40}
-                  styles={monoInput}
+                  label="Max upload speed"
+                  visibleLabel={false}
+                  value={Number(form.max_upload_speed) || 0}
+                  onChange={v => updateField('max_upload_speed', String(v))}
                 />
               </div>
             </Stack>

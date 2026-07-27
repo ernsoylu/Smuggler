@@ -14,8 +14,9 @@ import { SpeedGraph } from './SpeedGraph';
 import type { DataPoint } from './SpeedGraph';
 import { useUiActions } from '../context/UiActionsContext';
 import { healthSummary, healthLabel } from '../lib/watchdog';
+import { diskSummary } from '../lib/disk';
 import {
-  ChevronUp, ChevronDown, Activity, Download, Upload, Server, Shield, ShieldAlert,
+  ChevronUp, ChevronDown, Activity, Download, Upload, Server, Shield, ShieldAlert, HardDrive,
 } from 'lucide-react';
 
 const MAX_POINTS = 60;
@@ -25,6 +26,19 @@ function formatBytes(bytes: number): string {
   if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
   if (bytes >= 1_024) return `${(bytes / 1_024).toFixed(0)} KB`;
   return `${bytes} B`;
+}
+
+/* Colour follows the same contract as everything else: amber warns, red fails. */
+function diskColor(critical: boolean, low: boolean): string {
+  if (critical) return 'var(--mantine-color-red-5)';
+  if (low) return 'var(--mantine-color-orange-5)';
+  return 'var(--mantine-color-dimmed)';
+}
+
+function diskTextColor(critical: boolean, low: boolean): string {
+  if (critical) return 'var(--smg-bad)';
+  if (low) return 'var(--smg-warn)';
+  return 'dimmed';
 }
 
 function SummaryRow({ label, value }: Readonly<{ label: string; value: string }>) {
@@ -73,6 +87,7 @@ export function StatusFooter() {
     refetchInterval: 15_000,
   });
   const health = healthSummary(watchdog);
+  const disk = diskSummary(stats?.disk_free, stats?.disk_total);
 
   // Build a rolling speed history from polled stats. Genuine time-series
   // accumulation keyed on Date.now() (impure — must run in an effect), so the
@@ -146,18 +161,24 @@ export function StatusFooter() {
           <Stack gap="xs" miw={200} justify="center">
             <Text size="10px" tt="uppercase" fw={600} c="dimmed" lts={2}>Distribution</Text>
             <SimpleGrid cols={2} spacing="lg" verticalSpacing={8}>
+              {/* Same colour contract as STATUS_COLORS in TorrentRow. */}
               <CountCell label="Active" value={counts.active} color="teal.5" />
-              <CountCell label="Complete" value={counts.complete} color="gray.5" />
-              <CountCell label="Queued" value={counts.waiting} color="smuggler.5" />
+              <CountCell label="Complete" value={counts.complete} color="blue.5" />
+              <CountCell label="Queued" value={counts.waiting} color="orange.5" />
               <CountCell label="Error" value={counts.error} color="red.5" />
-              <CountCell label="Paused" value={counts.paused} color="blue.5" />
+              <CountCell label="Paused" value={counts.paused} color="gray.5" />
             </SimpleGrid>
           </Stack>
         </Group>
       </Collapse>
 
       {/* Status bar */}
-      <Group px="md" py={6} gap="md" wrap="nowrap">
+      {/*
+        Seven segments do not fit a 380px phone. Speeds and the tunnel-health
+        chip stay at every width — they are the two things worth glancing at —
+        and the rest appear as room allows.
+      */}
+      <Group px="md" py={6} gap="sm" wrap="nowrap" style={{ overflowX: 'auto' }}>
         <UnstyledButton
           onClick={() => setExpanded(v => !v)}
           title={expanded ? 'Collapse graph' : 'Expand graph'}
@@ -171,19 +192,19 @@ export function StatusFooter() {
 
         <Divider orientation="vertical" h={16} style={{ alignSelf: 'center' }} />
 
-        <Group gap={6} wrap="nowrap" miw={90}>
+        <Group gap={6} wrap="nowrap" miw={{ base: 0, xs: 90 }}>
           <Download size={13} color="var(--mantine-color-teal-5)" />
           <Text size="xs" ff="monospace" fw={600} c="var(--smg-ok)">{formatBytes(dl)}/s</Text>
         </Group>
 
-        <Group gap={6} wrap="nowrap" miw={90}>
+        <Group gap={6} wrap="nowrap" miw={{ base: 0, xs: 90 }}>
           <Upload size={13} color="var(--mantine-color-blue-5)" />
           <Text size="xs" ff="monospace" fw={600} c="var(--smg-info)">{formatBytes(ul)}/s</Text>
         </Group>
 
-        <Divider orientation="vertical" h={16} style={{ alignSelf: 'center' }} />
+        <Divider orientation="vertical" h={16} style={{ alignSelf: 'center' }} visibleFrom="xs" />
 
-        <Group gap={6} wrap="nowrap">
+        <Group gap={6} wrap="nowrap" visibleFrom="xs">
           <Box
             w={6} h={6}
             bg={active > 0 ? 'teal.5' : 'gray.6'}
@@ -195,9 +216,9 @@ export function StatusFooter() {
           {waiting > 0 && <Text size="xs" c="dimmed">· {waiting} queued</Text>}
         </Group>
 
-        <Divider orientation="vertical" h={16} style={{ alignSelf: 'center' }} />
+        <Divider orientation="vertical" h={16} style={{ alignSelf: 'center' }} visibleFrom="sm" />
 
-        <Group gap={6} wrap="nowrap">
+        <Group gap={6} wrap="nowrap" visibleFrom="sm">
           <Server size={12} color="var(--mantine-color-dimmed)" />
           <Text size="xs" fw={600}>{mules}</Text>
           <Text size="xs" c="dimmed">mule{mules === 1 ? '' : 's'}</Text>
@@ -232,6 +253,29 @@ export function StatusFooter() {
         )}
 
         <Box flex={1} />
+
+        {/*
+          Free space on the download volume. /api/stats has always returned
+          disk_free and disk_total; nothing displayed them, so the one number
+          that decides whether the next payload fits was invisible.
+        */}
+        {disk.known && (
+          <Group gap={6} wrap="nowrap" visibleFrom="md">
+            <HardDrive
+              size={12}
+              color={diskColor(disk.critical, disk.low)}
+            />
+            <Text
+              size="xs"
+              fw={500}
+              c={diskTextColor(disk.critical, disk.low)}
+              style={{ whiteSpace: 'nowrap' }}
+              title={`${formatBytes(disk.free)} free of ${formatBytes(disk.total)} on the download volume`}
+            >
+              {formatBytes(disk.free)} free
+            </Text>
+          </Group>
+        )}
 
         <Text size="10px" c="dimmed" ff="monospace" visibleFrom="sm" style={{ userSelect: 'none' }}>
           Smuggler

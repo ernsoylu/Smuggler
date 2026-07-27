@@ -295,14 +295,21 @@ def _collect_delete_paths(status: dict, host_dl_dir: str) -> list[Path]:
 
 
 def _drop_from_aria2(aria2: Aria2Client, gid: str, aria2_status: str | None) -> None:
-    """Remove the download from aria2 — active ones are force-removed, others purged."""
-    try:
-        if aria2_status in ("active", "waiting", "paused"):
+    """Remove the download from aria2 — force-stop it if running, then purge the result.
+
+    forceRemove only stops a running download and flags it "removed"; the entry
+    stays in aria2's stopped list (and thus the torrent list) until
+    removeDownloadResult purges it, so both calls are needed for running downloads.
+    """
+    if aria2_status in ("active", "waiting", "paused"):
+        try:
             aria2.remove(gid)
-        else:
-            aria2.remove_download_result(gid)
+        except Aria2Error as exc:
+            log.warning("aria2 removal step failed gid=%s — %s", log_safe(gid), exc)
+    try:
+        aria2.remove_download_result(gid)
     except Aria2Error as exc:
-        log.warning("aria2 removal step failed gid=%s — %s", log_safe(gid), exc)
+        log.warning("aria2 result purge failed gid=%s — %s", log_safe(gid), exc)
 
 
 def _unlink_and_prune(paths: list[Path], host_dl_dir: str) -> None:

@@ -15,6 +15,7 @@ import {
   File as FileIcon, Users, Settings2, Info, HardDrive,
 } from 'lucide-react';
 import { DeleteTorrentModal } from './DeleteTorrentModal';
+import { SpeedLimitInput } from './SpeedLimitInput';
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(2)} GB`;
@@ -39,13 +40,25 @@ function formatEta(seconds: number): string {
   return `${h}h ${m}m`;
 }
 
-/** Mantine color per aria2 status — badges, progress bars, accents. */
+/**
+ * Mantine colour per aria2 status — badges, progress bars, accents.
+ *
+ * The contract, so a colour means one thing:
+ *   teal   in progress          blue  finished (a positive terminal state)
+ *   orange queued               gray  suspended by the user
+ *   red    failed               dark  gone
+ *
+ * `paused` was blue, which already meant action, selection and upload, and
+ * `complete` was gray, which made a finished download look disabled rather
+ * than done. Swapping them makes gray mean the one genuinely inactive state
+ * and gives completion a colour that reads as an achievement.
+ */
 const STATUS_COLORS: Record<string, string> = {
   active: 'teal',
   waiting: 'orange',
-  paused: 'blue',
+  paused: 'gray',
   error: 'red',
-  complete: 'gray',
+  complete: 'blue',
   removed: 'dark',
 };
 
@@ -358,21 +371,19 @@ function OptionsTab({ torrent, isVisible }: Readonly<{ torrent: Torrent; isVisib
         Set to <Text component="span" ff="monospace" size="xs">0</Text> to use the global limit.
       </Text>
       <SimpleGrid type="container" cols={{ base: 1, '520px': 3 }} spacing="md">
-        <NumberInput
+        <SpeedLimitInput
           id="opt-max-dl"
-          label="Max Download (B/s)"
+          label="Max Download"
           size="xs"
-          min={0}
           value={localOpts.max_download_speed ?? current.max_download_speed ?? 0}
-          onChange={v => setLocalOpts(o => ({ ...o, max_download_speed: Number(v) || 0 }))}
+          onChange={v => setLocalOpts(o => ({ ...o, max_download_speed: v }))}
         />
-        <NumberInput
+        <SpeedLimitInput
           id="opt-max-ul"
-          label="Max Upload (B/s)"
+          label="Max Upload"
           size="xs"
-          min={0}
           value={localOpts.max_upload_speed ?? current.max_upload_speed ?? 0}
-          onChange={v => setLocalOpts(o => ({ ...o, max_upload_speed: Number(v) || 0 }))}
+          onChange={v => setLocalOpts(o => ({ ...o, max_upload_speed: v }))}
         />
         <NumberInput
           id="opt-max-conn"
@@ -408,12 +419,26 @@ interface Props {
   torrent: Torrent;
   selected?: boolean;
   onToggleSelected?: () => void;
+  /**
+   * Expansion is owned by the page, not the row. Local state was destroyed
+   * whenever pagination, sorting or filtering unmounted the row, so an open
+   * detail panel silently closed itself; the page also needs to know a row is
+   * open so it can stop the list reordering underneath it.
+   */
+  expanded?: boolean;
+  onToggleExpanded?: () => void;
 }
 
-export function TorrentRow({ torrent, selected = false, onToggleSelected }: Readonly<Props>) {
+export function TorrentRow({
+  torrent, selected = false, onToggleSelected, expanded, onToggleExpanded,
+}: Readonly<Props>) {
   const qc = useQueryClient();
   const [showConfirm, setShowConfirm] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
+  // Uncontrolled fallback keeps the component usable on its own (and in tests)
+  // when a caller does not lift the state.
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const isExpanded = expanded ?? localExpanded;
+  const toggleExpanded = onToggleExpanded ?? (() => setLocalExpanded(v => !v));
   const [activeTab, setActiveTab] = useState<DetailTab>('status');
 
   const pause = useMutation({
@@ -462,7 +487,7 @@ export function TorrentRow({ torrent, selected = false, onToggleSelected }: Read
               color="gray"
               size="sm"
               mt={2}
-              onClick={() => setIsExpanded(!isExpanded)}
+              onClick={toggleExpanded}
               title={isExpanded ? 'Collapse' : 'Expand details'}
               aria-expanded={isExpanded}
             >
@@ -542,16 +567,18 @@ export function TorrentRow({ torrent, selected = false, onToggleSelected }: Read
               variant="light"
               color="blue"
               onClick={() => resume.mutate()}
-              disabled={startDisabled || resume.isPending}
-              title="Start"
+              disabled={startDisabled}
+              loading={resume.isPending}
+              title="Resume"
             >
               <Play size={15} />
             </ActionIcon>
             <ActionIcon
               variant="default"
               onClick={() => pause.mutate()}
-              disabled={stopDisabled || pause.isPending}
-              title="Stop"
+              disabled={stopDisabled}
+              loading={pause.isPending}
+              title="Pause"
             >
               <Pause size={15} />
             </ActionIcon>

@@ -140,6 +140,17 @@ class TestDeleteMule:
         mock_stop.assert_called_once_with(mock_stop.call_args[0][0],
                                           "smuggler-mule-test", remove=False)
 
+    def test_marks_expected_stop_for_watchdog(self, client):
+        """Regression: a graceful stop racing a watchdog sweep must not be
+        reported as "VPN compromised" — the endpoint flags the teardown as
+        user-requested before stopping the container."""
+        with patch("api.mules.get_docker_client"), \
+             patch("api.mules.stop_mule"), \
+             patch("api.mules.mark_expected_stop") as mock_mark:
+            r = client.delete("/api/mules/smuggler-mule-test")
+        assert r.status_code == 200
+        mock_mark.assert_called_once_with("smuggler-mule-test")
+
 
 # ─── POST /api/mules/<name>/kill ─────────────────────────────────────────────
 
@@ -157,6 +168,14 @@ class TestKillMule:
                    side_effect=RuntimeError("Mule not found: 'ghost'")):
             r = client.post("/api/mules/ghost/kill")
         assert r.status_code == 404
+
+    def test_marks_expected_stop_for_watchdog(self, client):
+        with patch("api.mules.get_docker_client"), \
+             patch("api.mules.kill_mule"), \
+             patch("api.mules.mark_expected_stop") as mock_mark:
+            r = client.post("/api/mules/smuggler-mule-test/kill")
+        assert r.status_code == 200
+        mock_mark.assert_called_once_with("smuggler-mule-test")
 
 
 # ─── GET /api/mules/<name>/ip ────────────────────────────────────────────────
