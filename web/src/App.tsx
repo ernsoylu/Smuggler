@@ -12,31 +12,14 @@ import { CommandPalette } from './components/CommandPalette';
 import { AddTorrentModal } from './components/AddTorrentModal';
 import { DeployMuleModal } from './components/DeployMuleModal';
 import { PageView } from './pages/PageView';
+import { MobileTabBar } from './components/MobileTabBar';
+import { PageIcon } from './components/PageIcon';
 import { useHashRoute } from './hooks/useHashRoute';
 import { useKeyboardShortcuts, type Shortcut } from './hooks/useKeyboardShortcuts';
-import { PAGES, type Page } from './lib/router';
+import { PAGES, PAGE_LABELS } from './lib/router';
 import { modKeyLabel } from './lib/platform';
 import { theme, cssVariablesResolver } from './theme';
-import {
-  LayoutDashboard, Server, Settings, FileKey2, Command, Sun, Moon, Monitor,
-  ScrollText,
-} from 'lucide-react';
-
-const TAB_ICONS: Record<Page, ReactNode> = {
-  torrents: <LayoutDashboard size={15} />,
-  mules: <Server size={15} />,
-  configs: <FileKey2 size={15} />,
-  events: <ScrollText size={15} />,
-  settings: <Settings size={15} />,
-};
-
-const TAB_LABELS: Record<Page, string> = {
-  torrents: 'Torrents',
-  mules: 'Mules',
-  configs: 'Configs',
-  events: 'Events',
-  settings: 'Settings',
-};
+import { Command, Sun, Moon, Monitor } from 'lucide-react';
 
 function ThemeToggle() {
   const { preference, cycle } = useTheme();
@@ -95,11 +78,17 @@ function Shell() {
 
   return (
     <UiActionsContext.Provider value={uiActions}>
-      <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/*
+        `.smuggler-shell` is 100dvh where that is supported. A phone browser's
+        100vh includes the space under the collapsing address bar, so the bottom
+        tab bar sat below the fold until the user scrolled — the one element
+        that must never move.
+      */}
+      <div className="smuggler-shell" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         {/* Top bar */}
         <Group
           component="header"
-          px="md"
+          px={{ base: 'sm', sm: 'md' }}
           py={8}
           gap="lg"
           wrap="nowrap"
@@ -112,6 +101,7 @@ function Shell() {
                 width: 30,
                 height: 30,
                 borderRadius: 10,
+                flexShrink: 0,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -122,18 +112,21 @@ function Shell() {
             >
               🫏
             </div>
-            <Text fw={700} tt="uppercase" size="md" lts={1}>Smuggler</Text>
+            {/* The wordmark costs ~90px a phone does not have to spare, and the
+                tab bar names the app's sections anyway. */}
+            <Text fw={700} tt="uppercase" size="md" lts={1} visibleFrom="sm">Smuggler</Text>
           </Group>
 
           {/*
             Five labelled tabs plus the logo and four right-hand controls
             overflow a phone. Below `md` the labels drop and the tabs become
-            icons; the accessible name comes from aria-label either way, so
-            nothing is lost to a screen reader — only to pixels.
+            icons; below `sm` the strip goes entirely and MobileTabBar takes
+            over at the bottom edge. Exactly one of the two is ever displayed,
+            so "Primary" names one nav at every width.
           */}
-          <Group component="nav" gap={4} wrap="nowrap" aria-label="Primary">
+          <Group component="nav" gap={4} wrap="nowrap" aria-label="Primary" visibleFrom="sm">
             {PAGES.map(key => (
-              <Tooltip key={key} label={TAB_LABELS[key]} withArrow hiddenFrom="md">
+              <Tooltip key={key} label={PAGE_LABELS[key]} withArrow hiddenFrom="md">
                 <Button
                   component="a"
                   href={`#/${key}`}
@@ -141,16 +134,19 @@ function Shell() {
                   px={{ base: 8, md: 12 }}
                   variant={page === key ? 'light' : 'subtle'}
                   color={page === key ? 'smuggler' : 'gray'}
-                  leftSection={TAB_ICONS[key]}
-                  aria-label={TAB_LABELS[key]}
+                  leftSection={<PageIcon page={key} size={15} />}
+                  aria-label={PAGE_LABELS[key]}
                   aria-current={page === key ? 'page' : undefined}
                   styles={{ section: { marginInlineEnd: 0 } }}
                 >
-                  <Box visibleFrom="md" ml={6}>{TAB_LABELS[key]}</Box>
+                  <Box visibleFrom="md" ml={6}>{PAGE_LABELS[key]}</Box>
                 </Button>
               </Tooltip>
             ))}
           </Group>
+
+          {/* Where the tab strip is hidden, the header says which page this is. */}
+          <Text fw={600} size="sm" truncate hiddenFrom="sm">{PAGE_LABELS[page]}</Text>
 
           <Group gap={4} wrap="nowrap" ml="auto">
             <Button
@@ -175,6 +171,9 @@ function Shell() {
 
         {/* Persistent status bar + graph footer */}
         <StatusFooter />
+
+        {/* Primary navigation below `sm` — hides itself from `sm` up */}
+        <MobileTabBar page={page} />
 
         {/* Window-wide .torrent drop target */}
         <TorrentDropZone />

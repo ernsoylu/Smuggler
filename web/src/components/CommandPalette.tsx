@@ -1,12 +1,12 @@
 import { useMemo, useRef, useState } from 'react';
 import { Group, Kbd, Paper, Text } from '@mantine/core';
 import { useModalA11y, modalA11yProps } from '../hooks/useModalA11y';
-import { PAGES, type Page } from '../lib/router';
+import { PAGES, PAGE_LABELS, type Page } from '../lib/router';
 import { useTheme } from '../context/ThemeContext';
 import { fuzzyMatch } from '../lib/fuzzy';
+import { PageIcon } from './PageIcon';
 import {
-  Command, LayoutDashboard, Server, FileKey2, Settings, Plus, Rocket,
-  Sun, Moon, Monitor, CornerDownLeft, ScrollText,
+  Command, Plus, Rocket, Sun, Moon, Monitor, CornerDownLeft,
 } from 'lucide-react';
 
 /**
@@ -32,14 +32,6 @@ interface Props {
   onDeployMule: () => void;
 }
 
-const PAGE_ICONS: Record<Page, React.ReactNode> = {
-  torrents: <LayoutDashboard size={16} />,
-  mules: <Server size={16} />,
-  configs: <FileKey2 size={16} />,
-  events: <ScrollText size={16} />,
-  settings: <Settings size={16} />,
-};
-
 export function CommandPalette({ onClose, onNavigate, onAddTorrent, onDeployMule }: Readonly<Props>) {
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
@@ -51,8 +43,8 @@ export function CommandPalette({ onClose, onNavigate, onAddTorrent, onDeployMule
   const actions: PaletteAction[] = useMemo(() => {
     const nav: PaletteAction[] = PAGES.map(p => ({
       id: `go-${p}`,
-      label: `Go to ${p.charAt(0).toUpperCase()}${p.slice(1)}`,
-      icon: PAGE_ICONS[p],
+      label: `Go to ${PAGE_LABELS[p]}`,
+      icon: <PageIcon page={p} size={16} />,
       run: () => onNavigate(p),
     }));
     const themeIcon =

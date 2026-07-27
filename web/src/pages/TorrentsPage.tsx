@@ -6,8 +6,10 @@ import {
 } from '@mantine/core';
 import { getAllTorrents, getMules, pauseTorrent, resumeTorrent, removeTorrent } from '../api/client';
 import { TorrentRow } from '../components/TorrentRow';
+import { TorrentCard } from '../components/TorrentCard';
 import { DeleteTorrentModal } from '../components/DeleteTorrentModal';
 import { SetupLadder } from '../components/SetupLadder';
+import { useBelow } from '../hooks/useBreakpoint';
 import { needsSetup } from '../lib/setup';
 import {
   filterTorrents, sortTorrents, nextSort, paginate, totalPages, statusCounts,
@@ -49,6 +51,16 @@ export function TorrentsPage() {
   const qc = useQueryClient();
   const { openAddTorrent } = useUiActions();
   const { push } = useNotifications();
+  /*
+   * The table declares a 960px minimum, so anything narrower reached Speed, ETA
+   * and the action buttons only by swiping sideways. Below `md` the same rows
+   * render as cards instead.
+   *
+   * A JS branch, not `visibleFrom`: rendering both would mount every torrent
+   * twice — two sets of mutations, two checkboxes answering to the same
+   * accessible name, and two detail panels polling peers.
+   */
+  const compact = useBelow('md');
   const [filter, setFilter] = useState<FilterStatus>('all');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortState | null>(null);
@@ -210,16 +222,50 @@ export function TorrentsPage() {
     ...(hasUncategorised ? [{ value: UNCAT_VALUE, label: 'Uncategorised' }] : []),
   ];
 
+  /* Shared by both layouts, so a phone and a laptop explain an empty list the
+     same way — including the first-run setup ladder. */
+  const emptyState = (() => {
+    if (narrowed) return <Text ta="center" c="dimmed" fw={500}>{narrowedMessage}</Text>;
+    if (needsSetup(runningMules)) return <SetupLadder />;
+    return (
+      <Stack align="center" gap="md">
+        <Text ta="center" c="dimmed" fw={500}>
+          No torrents yet. Paste a magnet link, or drop a{' '}
+          <Text component="span" ff="monospace">.torrent</Text> anywhere in the window.
+        </Text>
+        <Button leftSection={<Plus size={16} strokeWidth={2.5} />} onClick={openAddTorrent}>
+          Add Torrent
+        </Button>
+      </Stack>
+    );
+  })();
+
+  const bulkButtonSize = compact ? 'compact-sm' : 'compact-xs';
+
+  const loadingState = (
+    <Group justify="center" gap="sm">
+      <Loader size="xs" />
+      <Text size="sm" c="dimmed">Loading torrents...</Text>
+    </Group>
+  );
+
   return (
-    <Box p="lg">
-      <Group justify="space-between" align="flex-start" mb="lg" gap="md">
-        <div>
-          <Title order={2}>Torrents</Title>
-          <Text size="sm" c="dimmed" mt={2}>Manage active downloads across all routing mules.</Text>
-        </div>
+    <Box p={{ base: 'sm', sm: 'lg' }}>
+      <Group justify="space-between" align="flex-start" mb={{ base: 'md', sm: 'lg' }} gap="sm" wrap="nowrap">
+        <Box miw={0}>
+          <Title order={2} fz={{ base: 22, sm: 26 }}>Torrents</Title>
+          {/* Two lines of page description cost a phone a whole torrent card. */}
+          <Text size="sm" c="dimmed" mt={2} visibleFrom="sm">
+            Manage active downloads across all routing mules.
+          </Text>
+        </Box>
         {/* The N shortcut existed but was advertised only inside the palette. */}
         <Tooltip label="Add Torrent (N)" withArrow>
-          <Button leftSection={<Plus size={16} strokeWidth={2.5} />} onClick={openAddTorrent}>
+          <Button
+            leftSection={<Plus size={16} strokeWidth={2.5} />}
+            onClick={openAddTorrent}
+            style={{ flexShrink: 0 }}
+          >
             Add Torrent
           </Button>
         </Tooltip>
@@ -228,19 +274,26 @@ export function TorrentsPage() {
       <Stack gap="md">
         {/* Filters + search */}
         <Group gap="sm" align="center">
-          <SegmentedControl
-            value={filter}
-            onChange={v => handleFilterChange(v as FilterStatus)}
-            data={filters.map(f => ({
-              value: f,
-              label: (
-                <Group gap={6} wrap="nowrap">
-                  <Text size="sm" tt="capitalize" component="span">{f}</Text>
-                  {counts[f] > 0 && <Badge size="xs" variant="default" circle={counts[f] < 10}>{counts[f]}</Badge>}
-                </Group>
-              ),
-            }))}
-          />
+          {/*
+            Five filters with their counts run past 450px. Scrolling the strip
+            keeps every option a single tap away and keeps the radio semantics
+            the same at every width, which swapping in a Select would not.
+          */}
+          <Box miw={0} maw="100%" className="smuggler-hscroll">
+            <SegmentedControl
+              value={filter}
+              onChange={v => handleFilterChange(v as FilterStatus)}
+              data={filters.map(f => ({
+                value: f,
+                label: (
+                  <Group gap={6} wrap="nowrap">
+                    <Text size="sm" tt="capitalize" component="span">{f}</Text>
+                    {counts[f] > 0 && <Badge size="xs" variant="default" circle={counts[f] < 10}>{counts[f]}</Badge>}
+                  </Group>
+                ),
+              }))}
+            />
+          </Box>
 
           {(categories.length > 0 || category !== ALL_CATEGORIES) && (
             <Select
@@ -249,8 +302,8 @@ export function TorrentsPage() {
               data={categoryData}
               value={category === UNCATEGORISED ? UNCAT_VALUE : category}
               onChange={v => handleCategory(v === UNCAT_VALUE ? UNCATEGORISED : (v ?? ALL_CATEGORIES))}
-              w={200}
-              ml="auto"
+              w={{ base: '100%', sm: 200 }}
+              ml={{ sm: 'auto' }}
               comboboxProps={{ withinPortal: true }}
             />
           )}
@@ -268,7 +321,7 @@ export function TorrentsPage() {
               </ActionIcon>
             ) : null}
             w={{ base: '100%', md: 280 }}
-            ml={categories.length > 0 || category !== ALL_CATEGORIES ? undefined : 'auto'}
+            ml={categories.length > 0 || category !== ALL_CATEGORIES ? undefined : { sm: 'auto' }}
           />
         </Group>
 
@@ -286,21 +339,23 @@ export function TorrentsPage() {
           >
             <Group gap="sm">
               <Text size="sm" fw={600} c="var(--smg-info)">{selectedVisible.length} selected</Text>
+              {/* compact-xs is a 20px-tall target; fine for a mouse, not for a
+                  thumb, so the touch layout gets the taller variant. */}
               <Group gap="xs" ml="auto">
-                <Button size="compact-xs" variant="default" leftSection={<Pause size={13} />}
+                <Button size={bulkButtonSize} variant="default" leftSection={<Pause size={13} />}
                   onClick={() => bulk.mutate({ kind: 'pause' })} disabled={bulk.isPending}>
                   Pause
                 </Button>
-                <Button size="compact-xs" variant="default" leftSection={<Play size={13} />}
+                <Button size={bulkButtonSize} variant="default" leftSection={<Play size={13} />}
                   onClick={() => bulk.mutate({ kind: 'resume' })} disabled={bulk.isPending}>
                   Resume
                 </Button>
-                <Button size="compact-xs" variant="light" color="red" leftSection={<Trash2 size={13} />}
+                <Button size={bulkButtonSize} variant="light" color="red" leftSection={<Trash2 size={13} />}
                   onClick={() => setConfirmBulkRemove(true)} disabled={bulk.isPending}
                   title="Remove the selected torrents">
                   Remove
                 </Button>
-                <Button size="compact-xs" variant="subtle" color="gray" onClick={clearSelection}>
+                <Button size={bulkButtonSize} variant="subtle" color="gray" onClick={clearSelection}>
                   Clear
                 </Button>
               </Group>
@@ -308,8 +363,41 @@ export function TorrentsPage() {
           </Paper>
         )}
 
-        {/* Table */}
+        {/* The list — cards below `md`, the full table above it */}
         <Paper withBorder radius="lg" style={{ overflow: 'hidden' }}>
+          {compact ? (
+            <Box p="xs">
+              {isLoading && <Box py="xl">{loadingState}</Box>}
+              {!isLoading && visible.length === 0 && <Box py={40} px="sm">{emptyState}</Box>}
+              {!isLoading && rows.length > 0 && (
+                <Stack gap="xs">
+                  {/* The table's header checkbox has nowhere to live here, and
+                      bulk actions are no less useful on a phone. */}
+                  <Group gap="xs" px={6} py={2}>
+                    <Checkbox
+                      size="xs"
+                      aria-label="Select all torrents on this page"
+                      checked={allPageSelected}
+                      onChange={togglePage}
+                    />
+                    <Text size="xs" c="dimmed">
+                      {allPageSelected ? 'Deselect all' : 'Select all'} on this page
+                    </Text>
+                  </Group>
+                  {rows.map(t => (
+                    <TorrentCard
+                      key={torrentKey(t)}
+                      torrent={t}
+                      selected={selected.has(torrentKey(t))}
+                      onToggleSelected={() => toggleOne(torrentKey(t))}
+                      expanded={expanded.has(torrentKey(t))}
+                      onToggleExpanded={() => toggleExpanded(torrentKey(t))}
+                    />
+                  ))}
+                </Stack>
+              )}
+            </Box>
+          ) : (
           <Table.ScrollContainer minWidth={960}>
             <Table verticalSpacing={dense ? 4 : 'sm'} highlightOnHover>
               <Table.Thead>
@@ -361,35 +449,12 @@ export function TorrentsPage() {
               <Table.Tbody>
                 {isLoading && (
                   <Table.Tr>
-                    <Table.Td colSpan={10} py="xl">
-                      <Group justify="center" gap="sm">
-                        <Loader size="xs" />
-                        <Text size="sm" c="dimmed">Loading torrents...</Text>
-                      </Group>
-                    </Table.Td>
+                    <Table.Td colSpan={10} py="xl">{loadingState}</Table.Td>
                   </Table.Tr>
                 )}
                 {!isLoading && visible.length === 0 && (
                   <Table.Tr>
-                    <Table.Td colSpan={10} py={48}>
-                      {(() => {
-                        if (narrowed) {
-                          return <Text ta="center" c="dimmed" fw={500}>{narrowedMessage}</Text>;
-                        }
-                        if (needsSetup(runningMules)) return <SetupLadder />;
-                        return (
-                          <Stack align="center" gap="md">
-                            <Text ta="center" c="dimmed" fw={500}>
-                              No torrents yet. Paste a magnet link, or drop a{' '}
-                              <Text component="span" ff="monospace">.torrent</Text> anywhere in the window.
-                            </Text>
-                            <Button leftSection={<Plus size={16} strokeWidth={2.5} />} onClick={openAddTorrent}>
-                              Add Torrent
-                            </Button>
-                          </Stack>
-                        );
-                      })()}
-                    </Table.Td>
+                    <Table.Td colSpan={10} py={48}>{emptyState}</Table.Td>
                   </Table.Tr>
                 )}
                 {!isLoading && rows.map(t => (
@@ -405,11 +470,13 @@ export function TorrentsPage() {
               </Table.Tbody>
             </Table>
           </Table.ScrollContainer>
+          )}
 
           <Group
             justify="space-between"
             px="md"
             py="sm"
+            gap="sm"
             style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}
           >
             <Group gap="sm">
@@ -418,21 +485,24 @@ export function TorrentsPage() {
                   ? 'No torrents'
                   : `Showing ${(Math.min(page, pageCount) - 1) * pageSize + 1}–${Math.min(page * pageSize, visible.length)} of ${visible.length}`}
               </Text>
-              <Tooltip label={dense ? 'Comfortable rows' : 'Compact rows'} withArrow>
-                <ActionIcon
-                  variant="default"
-                  size="md"
-                  aria-label={dense ? 'Switch to comfortable rows' : 'Switch to compact rows'}
-                  aria-pressed={dense}
-                  onClick={() => {
-                    const next = !dense;
-                    setDense(next);
-                    localStorage.setItem(DENSITY_KEY, next ? 'compact' : 'comfortable');
-                  }}
-                >
-                  {dense ? <Rows3 size={14} /> : <Rows2 size={14} />}
-                </ActionIcon>
-              </Tooltip>
+              {/* Row density is a table concept; the cards have one shape. */}
+              {!compact && (
+                <Tooltip label={dense ? 'Comfortable rows' : 'Compact rows'} withArrow>
+                  <ActionIcon
+                    variant="default"
+                    size="md"
+                    aria-label={dense ? 'Switch to comfortable rows' : 'Switch to compact rows'}
+                    aria-pressed={dense}
+                    onClick={() => {
+                      const next = !dense;
+                      setDense(next);
+                      localStorage.setItem(DENSITY_KEY, next ? 'compact' : 'comfortable');
+                    }}
+                  >
+                    {dense ? <Rows3 size={14} /> : <Rows2 size={14} />}
+                  </ActionIcon>
+                </Tooltip>
+              )}
               <Select
                 aria-label="Torrents per page"
                 size="xs"
@@ -450,6 +520,10 @@ export function TorrentsPage() {
                 total={pageCount}
                 value={Math.min(page, pageCount)}
                 onChange={setPage}
+                // 25 pages of numbered links do not fit a phone; the arrows and
+                // the current page always do.
+                siblings={compact ? 0 : 1}
+                boundaries={compact ? 0 : 1}
               />
             )}
           </Group>

@@ -16,6 +16,21 @@ export const PAGES = ['torrents', 'mules', 'configs', 'events', 'settings'] as c
 export type Page = (typeof PAGES)[number];
 export const DEFAULT_PAGE: Page = 'torrents';
 
+/**
+ * Human name for each route.
+ *
+ * Three surfaces now name pages — the top tab strip, the phone tab bar and the
+ * command palette — and a page called "Configs" in one and "VPN Configs" in
+ * another is a page the user has to learn twice.
+ */
+export const PAGE_LABELS: Record<Page, string> = {
+  torrents: 'Torrents',
+  mules: 'Mules',
+  configs: 'Configs',
+  events: 'Events',
+  settings: 'Settings',
+};
+
 export function isPage(value: string): value is Page {
   return (PAGES as readonly string[]).includes(value);
 }

@@ -303,9 +303,9 @@ export function ConfigsPage() {
   if (file) fileColor = vpnType === 'openvpn' ? 'violet.4' : 'teal.4';
 
   return (
-    <Box p="lg">
-      <Box mb="xl">
-        <Title order={2}>VPN Configurations</Title>
+    <Box p={{ base: 'sm', sm: 'lg' }}>
+      <Box mb={{ base: 'lg', sm: 'xl' }}>
+        <Title order={2} fz={{ base: 22, sm: 26 }}>VPN Configurations</Title>
         <Text size="sm" c="dimmed" mt={2}>
           Upload WireGuard (.conf) or OpenVPN (.ovpn) configs. Deploy mules directly from stored configurations.
         </Text>
@@ -319,12 +319,17 @@ export function ConfigsPage() {
         the control takes.
       */}
       <Paper withBorder radius="md" p="sm" mb="lg" maw={760}>
-        <Group align="center" gap="sm" wrap="nowrap">
+        {/*
+          One row on a laptop, three stacked controls on a phone: the picker
+          alone wants 200px, and a `nowrap` row squeezed the name field to about
+          40 and pushed Upload off the edge.
+        */}
+        <Group align="center" gap="sm" wrap="wrap">
           <UnstyledButton
             component="label"
             htmlFor="config-file-input"
             flex={1}
-            miw={200}
+            miw={{ base: '100%', xs: 200 }}
             px="sm"
             py={6}
             style={{
@@ -378,6 +383,7 @@ export function ConfigsPage() {
             onClick={() => upload.mutate()}
             disabled={!file}
             loading={upload.isPending}
+            flex={{ base: 1, xs: 'unset' }}
           >
             Upload
           </Button>
