@@ -39,7 +39,7 @@
 
 ## Quality Standards
 - **SonarQube:** SonarCloud runs **Automatic Analysis** server-side on push, plus a `sonar.yml` workflow that self-skips without `SONAR_TOKEN`. There is no local scanner — the gate is checked on the PR. Fix all BLOCKERS; a failing gate blocks merge (Project: `ernsoylu_Smuggler`).
-- **Testing:** 473 backend tests + 130 frontend tests. Never let a change reduce the count; branding changes must update `tests/`. Frontend tests run as two vitest projects (`vitest.config.ts`): `unit` for `*.test.ts` in node, `components` for `*.test.tsx` in jsdom with Testing Library (`src/test/` holds the render helper, Mantine/jsdom shims and fixtures). Pure logic belongs in `web/src/lib/` so it stays testable without a DOM — prefer moving a decision there over driving a Mantine dropdown in jsdom.
+- **Testing:** 473 backend tests + 142 frontend tests. Never let a change reduce the count; branding changes must update `tests/`. Frontend tests run as two vitest projects (`vitest.config.ts`): `unit` for `*.test.ts` in node, `components` for `*.test.tsx` in jsdom with Testing Library (`src/test/` holds the render helper, Mantine/jsdom shims and fixtures). Pure logic belongs in `web/src/lib/` so it stays testable without a DOM — prefer moving a decision there over driving a Mantine dropdown in jsdom.
 - **Linting:** `lint.select` is pinned in `pyproject.toml` — widening it is a deliberate decision, not something a ruff upgrade should do silently.
 - **Typing:** Strict Python type hints and TypeScript interfaces.
 

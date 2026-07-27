@@ -4,6 +4,7 @@ import {
   filterTorrents, matchesSearch, sortTorrents, nextSort, paginate, totalPages,
   statusCounts, torrentKey, leastLoadedMule, DEFAULT_PAGE_SIZE,
   categoriesOf, ALL_CATEGORIES, UNCATEGORISED, resolveRoutingTarget, AUTO_MULE,
+  applyFrozenOrder,
 } from './torrentList'
 
 const t = (over: Partial<Torrent> = {}): Torrent => ({
@@ -233,5 +234,38 @@ describe('resolveRoutingTarget', () => {
     // MULE_NAME_RE requires an alphanumeric first character, so no deployed
     // mule can ever be called this.
     expect(AUTO_MULE.charCodeAt(0)).toBe(0)
+  })
+})
+
+describe('applyFrozenOrder', () => {
+  const a = t({ gid: 'a', mule: 'm' })
+  const b = t({ gid: 'b', mule: 'm' })
+  const c = t({ gid: 'c', mule: 'm' })
+
+  it('passes the list through untouched when nothing is frozen', () => {
+    expect(applyFrozenOrder([b, a], null)).toEqual([b, a])
+    expect(applyFrozenOrder([b, a], [])).toEqual([b, a])
+  })
+
+  it('restores the captured order regardless of how the data arrived', () => {
+    // The refetch delivered them re-sorted; the user's view must not move.
+    expect(applyFrozenOrder([c, a, b], ['m:a', 'm:b', 'm:c']).map(x => x.gid))
+      .toEqual(['a', 'b', 'c'])
+  })
+
+  it('puts torrents added since the freeze at the end, not nowhere', () => {
+    const fresh = t({ gid: 'new', mule: 'm' })
+    expect(applyFrozenOrder([fresh, b, a], ['m:a', 'm:b']).map(x => x.gid))
+      .toEqual(['a', 'b', 'new'])
+  })
+
+  it('simply omits torrents that have gone away', () => {
+    expect(applyFrozenOrder([a, c], ['m:a', 'm:b', 'm:c']).map(x => x.gid)).toEqual(['a', 'c'])
+  })
+
+  it('does not mutate the array it was given', () => {
+    const input = [c, a, b]
+    applyFrozenOrder(input, ['m:a', 'm:b', 'm:c'])
+    expect(input.map(x => x.gid)).toEqual(['c', 'a', 'b'])
   })
 })
