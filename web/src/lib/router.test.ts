@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseHash, toHash, isPage, PAGES, DEFAULT_PAGE } from './router'
+import { parseHash, toHash, isPage, PAGES, PAGE_LABELS, DEFAULT_PAGE } from './router'
 
 describe('parseHash', () => {
   it('reads each known page', () => {
@@ -36,5 +36,24 @@ describe('isPage', () => {
     expect(isPage('settings')).toBe(true)
     expect(isPage('workers')).toBe(false)   // the pre-rename name must not resolve
     expect(isPage('')).toBe(false)
+  })
+})
+
+describe('PAGE_LABELS', () => {
+  it('names every route, so no nav surface can render a blank tab', () => {
+    // Three surfaces read this now — the top strip, the phone tab bar and the
+    // command palette — and a page added without a label would show as an
+    // unlabelled icon in all three.
+    for (const p of PAGES) {
+      expect(PAGE_LABELS[p]).toBeTruthy()
+    }
+    expect(Object.keys(PAGE_LABELS)).toHaveLength(PAGES.length)
+  })
+
+  it('never says "worker"', () => {
+    // CLAUDE.md: always "mule".
+    for (const label of Object.values(PAGE_LABELS)) {
+      expect(label.toLowerCase()).not.toContain('worker')
+    }
   })
 })

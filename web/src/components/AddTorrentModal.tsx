@@ -8,6 +8,7 @@ import { getMules, getAllTorrents, addMagnet, addTorrentFile } from '../api/clie
 import { leastLoadedMule, resolveRoutingTarget, AUTO_MULE } from '../lib/torrentList';
 import { useUiActions } from '../context/UiActionsContext';
 import { useNotifications } from '../context/NotificationContext';
+import { useBelow } from '../hooks/useBreakpoint';
 import { UploadCloud, Link as LinkIcon, AlertCircle, Rocket } from 'lucide-react';
 
 interface Props {
@@ -28,6 +29,7 @@ export function AddTorrentModal({ onClose }: Readonly<Props>) {
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const fullScreen = useBelow('sm');
 
   const { data: mules = [] } = useQuery({
     queryKey: ['mules'],
@@ -76,7 +78,11 @@ export function AddTorrentModal({ onClose }: Readonly<Props>) {
       opened
       onClose={onClose}
       centered
-      radius="lg"
+      radius={fullScreen ? 0 : 'lg'}
+      // A centred dialog on a phone loses most of itself the moment the
+      // on-screen keyboard opens under the magnet field. Full screen gives the
+      // form the room it needs and keeps the submit buttons reachable.
+      fullScreen={fullScreen}
       title={<Text fw={700} size="xl">Add Torrent</Text>}
       // Escape is disabled mid-submit so a stray keypress cannot orphan the request.
       closeOnEscape={!add.isPending}

@@ -7,6 +7,7 @@ import { getConfigs } from '../api/client';
 import type { VpnConfig } from '../api/client';
 import { useDeployments } from '../context/DeploymentContext';
 import { useUiActions } from '../context/UiActionsContext';
+import { useBelow } from '../hooks/useBreakpoint';
 import { Rocket, Shield, FileKey2, FileUp } from 'lucide-react';
 
 interface Props {
@@ -18,6 +19,7 @@ export function DeployMuleModal({ onClose }: Readonly<Props>) {
   const [error, setError] = useState('');
   const { start } = useDeployments();
   const { navigate } = useUiActions();
+  const fullScreen = useBelow('sm');
 
   const { data: configs = [], isLoading } = useQuery({
     queryKey: ['configs'],
@@ -48,8 +50,11 @@ export function DeployMuleModal({ onClose }: Readonly<Props>) {
       opened
       onClose={onClose}
       centered
-      radius="lg"
+      radius={fullScreen ? 0 : 'lg'}
       size="lg"
+      // Same reason as Add Torrent: the config list plus its credential fields
+      // do not fit what a phone leaves above the keyboard.
+      fullScreen={fullScreen}
       title={
         <Group gap="xs">
           <Rocket size={22} color="var(--mantine-color-blue-4)" />

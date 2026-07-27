@@ -68,9 +68,9 @@ export function SettingsPage() {
   const monoInput = { input: { fontFamily: 'var(--mantine-font-family-monospace)' } };
 
   return (
-    <Box p="lg">
-      <Box mb="xl">
-        <Title order={2}>Settings</Title>
+    <Box p={{ base: 'sm', sm: 'lg' }}>
+      <Box mb={{ base: 'lg', sm: 'xl' }}>
+        <Title order={2} fz={{ base: 22, sm: 26 }}>Settings</Title>
         <Text size="sm" c="dimmed" mt={2}>Configure global application preferences.</Text>
       </Box>
 

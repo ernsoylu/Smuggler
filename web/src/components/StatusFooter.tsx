@@ -3,30 +3,30 @@
  *
  * Collapsed: shows ↓ DL / ↑ UL speeds, active torrents, active mules.
  * Expanded:  also shows the D3 SpeedGraph with rolling history.
+ *
+ * Below `sm` the expansion becomes a bottom sheet rather than an inline
+ * collapse. A phone gives this bar a single line above the tab bar, and sliding
+ * a 140px graph plus two stat blocks into that line would push the content view
+ * down to almost nothing — the sheet takes its own space and gives it back.
  */
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  Box, Collapse, Divider, Group, SimpleGrid, Stack, Text, UnstyledButton,
+  Box, Collapse, Divider, Drawer, Group, SimpleGrid, Stack, Text, UnstyledButton,
 } from '@mantine/core';
 import { getStats, getAllTorrents, getWatchdogStatus } from '../api/client';
 import { SpeedGraph } from './SpeedGraph';
 import type { DataPoint } from './SpeedGraph';
 import { useUiActions } from '../context/UiActionsContext';
+import { useBelow } from '../hooks/useBreakpoint';
 import { healthSummary, healthLabel } from '../lib/watchdog';
 import { diskSummary } from '../lib/disk';
+import { formatBytes } from '../lib/format';
 import {
   ChevronUp, ChevronDown, Activity, Download, Upload, Server, Shield, ShieldAlert, HardDrive,
 } from 'lucide-react';
 
 const MAX_POINTS = 60;
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(2)} GB`;
-  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
-  if (bytes >= 1_024) return `${(bytes / 1_024).toFixed(0)} KB`;
-  return `${bytes} B`;
-}
 
 /* Colour follows the same contract as everything else: amber warns, red fails. */
 function diskColor(critical: boolean, low: boolean): string {
@@ -66,6 +66,9 @@ export function StatusFooter() {
   const [expanded, setExpanded] = useState(false);
   const [history, setHistory] = useState<DataPoint[]>([]);
   const { navigate } = useUiActions();
+  // JS rather than `hiddenFrom`: the two branches host the same SpeedGraph, and
+  // rendering both would mount two D3 charts and run two resize observers.
+  const compact = useBelow('sm');
 
   const { data: stats } = useQuery({
     queryKey: ['stats'],
@@ -123,6 +126,52 @@ export function StatusFooter() {
 
   const isActive = dl > 0 || ul > 0 || active > 0;
 
+  /*
+    The expanded panel. Identical either way — only its container changes, so
+    the phone sheet cannot drift from the desktop drawer's contents. The `miw`
+    values let it reflow to one column inside the sheet without a second layout.
+  */
+  const details = (
+    <Group px={{ base: 'md', sm: 'lg' }} py="md" gap="xl" align="stretch" wrap="wrap">
+      <Box flex={1} miw={240} pos="relative">
+        <Text
+          size="10px" tt="uppercase" fw={600} c="dimmed" lts={2}
+          pos="absolute" top={-2} left={8} style={{ zIndex: 1 }}
+        >
+          Bandwidth History
+        </Text>
+        <Box pt="md">
+          <SpeedGraph data={history} height={140} />
+        </Box>
+      </Box>
+
+      <Divider orientation="vertical" visibleFrom="md" />
+
+      <Stack gap="xs" miw={150} justify="center">
+        <Text size="10px" tt="uppercase" fw={600} c="dimmed" lts={2}>Transfer Summary</Text>
+        <SummaryRow label="Downloaded" value={formatBytes(totalDownloaded)} />
+        <SummaryRow label="Uploaded" value={formatBytes(totalUploaded)} />
+        <SummaryRow label="Avg Ratio" value={avgRatio.toFixed(3)} />
+      </Stack>
+
+      {/* A vertical rule between two blocks that have wrapped onto separate
+          rows is just a stray tick, so it goes where they stop wrapping. */}
+      <Divider orientation="vertical" visibleFrom="sm" />
+
+      <Stack gap="xs" miw={200} justify="center">
+        <Text size="10px" tt="uppercase" fw={600} c="dimmed" lts={2}>Distribution</Text>
+        <SimpleGrid cols={2} spacing="lg" verticalSpacing={8}>
+          {/* Same colour contract as STATUS_COLORS in lib/format.ts. */}
+          <CountCell label="Active" value={counts.active} color="teal.5" />
+          <CountCell label="Complete" value={counts.complete} color="blue.5" />
+          <CountCell label="Queued" value={counts.waiting} color="orange.5" />
+          <CountCell label="Error" value={counts.error} color="red.5" />
+          <CountCell label="Paused" value={counts.paused} color="gray.5" />
+        </SimpleGrid>
+      </Stack>
+    </Group>
+  );
+
   return (
     <Box
       component="footer"
@@ -133,44 +182,23 @@ export function StatusFooter() {
       }}
     >
       {/* Graph panel — slides open above the bar */}
-      <Collapse expanded={expanded}>
-        <Group px="lg" py="md" gap="xl" align="stretch" wrap="wrap">
-          <Box flex={1} miw={280} pos="relative">
-            <Text
-              size="10px" tt="uppercase" fw={600} c="dimmed" lts={2}
-              pos="absolute" top={-2} left={8} style={{ zIndex: 1 }}
-            >
-              Bandwidth History
-            </Text>
-            <Box pt="md">
-              <SpeedGraph data={history} height={140} />
-            </Box>
-          </Box>
+      {!compact && <Collapse expanded={expanded}>{details}</Collapse>}
 
-          <Divider orientation="vertical" visibleFrom="md" />
-
-          <Stack gap="xs" miw={150} justify="center">
-            <Text size="10px" tt="uppercase" fw={600} c="dimmed" lts={2}>Transfer Summary</Text>
-            <SummaryRow label="Downloaded" value={formatBytes(totalDownloaded)} />
-            <SummaryRow label="Uploaded" value={formatBytes(totalUploaded)} />
-            <SummaryRow label="Avg Ratio" value={avgRatio.toFixed(3)} />
-          </Stack>
-
-          <Divider orientation="vertical" />
-
-          <Stack gap="xs" miw={200} justify="center">
-            <Text size="10px" tt="uppercase" fw={600} c="dimmed" lts={2}>Distribution</Text>
-            <SimpleGrid cols={2} spacing="lg" verticalSpacing={8}>
-              {/* Same colour contract as STATUS_COLORS in TorrentRow. */}
-              <CountCell label="Active" value={counts.active} color="teal.5" />
-              <CountCell label="Complete" value={counts.complete} color="blue.5" />
-              <CountCell label="Queued" value={counts.waiting} color="orange.5" />
-              <CountCell label="Error" value={counts.error} color="red.5" />
-              <CountCell label="Paused" value={counts.paused} color="gray.5" />
-            </SimpleGrid>
-          </Stack>
-        </Group>
-      </Collapse>
+      {/* …or rises over it, on a screen with no room to give. */}
+      {compact && (
+        <Drawer
+          opened={expanded}
+          onClose={() => setExpanded(false)}
+          position="bottom"
+          size="min(75vh, 460px)"
+          radius="lg"
+          title="Transfer activity"
+          padding={0}
+          styles={{ body: { overflowY: 'auto' }, title: { fontWeight: 600 } }}
+        >
+          {details}
+        </Drawer>
+      )}
 
       {/* Status bar */}
       {/*
@@ -182,8 +210,12 @@ export function StatusFooter() {
         <UnstyledButton
           onClick={() => setExpanded(v => !v)}
           title={expanded ? 'Collapse graph' : 'Expand graph'}
+          // Two icons and no text: without this the control is nameless to a
+          // screen reader, which matters more now that it is the only way to
+          // reach the graph on a phone.
+          aria-label={expanded ? 'Hide transfer activity' : 'Show transfer activity'}
           aria-expanded={expanded}
-          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, minHeight: 32, paddingInline: 2 }}
           c="dimmed"
         >
           <Activity size={14} color={isActive ? 'var(--mantine-color-teal-5)' : 'currentColor'} />

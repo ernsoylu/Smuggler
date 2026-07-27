@@ -72,7 +72,8 @@ function WatchdogPanel({ watchdog }: Readonly<{ watchdog: WatchdogStatus | undef
           >
             {watchdogTitle}
           </Text>
-          <Text size="11px" c="dimmed" truncate>
+          {/* Sweep counters lose to the verdict when the strip runs out of room. */}
+          <Text size="11px" c="dimmed" truncate visibleFrom="sm">
             {watchdog.config.interval_seconds}s · {watchdog.stats.total_sweeps} sweeps · {watchdog.stats.total_evacuations} evacuations
             {watchdog.stats.last_run_at && ` · ${new Date(watchdog.stats.last_run_at).toLocaleTimeString()}`}
           </Text>
@@ -101,15 +102,17 @@ function WatchdogPanel({ watchdog }: Readonly<{ watchdog: WatchdogStatus | undef
               py="sm"
               style={{ boxShadow: 'inset 3px 0 0 0 var(--mantine-color-red-5)' }}
             >
-              <Group justify="space-between" gap="sm" wrap="nowrap">
-                <Group gap="sm" wrap="nowrap" miw={0}>
+              {/* The confirm state adds a sentence and two buttons to this row;
+                  on a phone that has to be allowed to take a second line. */}
+              <Group justify="space-between" gap="sm" wrap="wrap">
+                <Group gap="sm" wrap="nowrap" miw={0} flex={1}>
                   <ShieldOff size={14} color="var(--mantine-color-red-5)" style={{ flexShrink: 0 }} />
                   <Stack gap={0} miw={0}>
                     <Text size="sm" fw={600} c="var(--smg-bad)" truncate>{m.name}</Text>
                     <Text size="11px" c="dimmed" truncate>{m.reason}</Text>
                   </Stack>
                   {(m.consecutive_failures ?? 0) > 0 && (
-                    <Badge size="xs" color="red" variant="light">
+                    <Badge size="xs" color="red" variant="light" style={{ flexShrink: 0 }}>
                       {m.consecutive_failures} fail{(m.consecutive_failures ?? 0) > 1 ? 's' : ''}
                     </Badge>
                   )}
@@ -186,13 +189,15 @@ export function MulesPage() {
   }, [watchdog, pushNotification]);
 
   return (
-    <Box p="lg">
-      <Group justify="space-between" align="flex-start" mb="md" gap="md">
-        <div>
-          <Title order={2}>Mules</Title>
-          <Text size="sm" c="dimmed" mt={2}>Deploy and manage isolated VPN containers for secure proxying.</Text>
-        </div>
-        <Button leftSection={<Rocket size={16} />} onClick={openDeployMule}>
+    <Box p={{ base: 'sm', sm: 'lg' }}>
+      <Group justify="space-between" align="flex-start" mb="md" gap="sm" wrap="nowrap">
+        <Box miw={0}>
+          <Title order={2} fz={{ base: 22, sm: 26 }}>Mules</Title>
+          <Text size="sm" c="dimmed" mt={2} visibleFrom="sm">
+            Deploy and manage isolated VPN containers for secure proxying.
+          </Text>
+        </Box>
+        <Button leftSection={<Rocket size={16} />} onClick={openDeployMule} style={{ flexShrink: 0 }}>
           Deploy Mule
         </Button>
       </Group>

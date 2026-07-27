@@ -3,6 +3,12 @@
 ## Tech Stack
 - **Backend:** Python 3.12+ (uv), Flask, Docker SDK, aria2-rpc. CI tests 3.12/3.13/3.14; the API image ships 3.14.
 - **Frontend:** React 19 (Vite), TS, **Mantine**, TanStack Query, D3. Tailwind was removed — do not reintroduce utility classes. Navigation is **single-view hash routing** — one route renders one full-page view (`src/pages/PageView.tsx`); the Dockview multi-pane workbench was removed deliberately, so do not reintroduce dockable panels or a second navigation layer.
+- **Responsive:** the UI is built for phones and tablets as well as desktop, at Mantine's default breakpoints (`src/lib/breakpoints.ts` mirrors them). Two switching mechanisms, and the choice between them is not stylistic:
+  - **CSS (`visibleFrom`/`hiddenFrom`) by default** — free, no flash, but *renders both branches*.
+  - **JS (`useBelow` from `src/hooks/useBreakpoint.ts`) only when both branches must not coexist** — duplicated queries/mutations, a second D3 chart, or two nodes answering to the same accessible name. Used by the torrent list (table ≥ `md`, `TorrentCard` below it), the status footer (inline `Collapse` vs bottom sheet at `sm`) and the form modals (`fullScreen` below `sm`). Under jsdom `matchMedia` always answers false, so component tests take the wide branch.
+  - Primary nav is the top strip from `sm` up and `MobileTabBar` below it; **exactly one is ever displayed**, so `aria-label="Primary"` stays unambiguous. This is one nav rendered responsively, not the second navigation layer forbidden above.
+  - The table row and the phone card share `lib/format.ts`, `hooks/useTorrentActions.ts` and `components/TorrentDetails.tsx` — a mobile layout is never a reimplementation.
+  - Colour used as text needs an `--smg-*` variable with a measured ratio per scheme (see `index.css`); `--mantine-color-*-filled` is a *background* token and fails AA as a foreground in the light scheme.
 - **VPN:** WireGuard (raw wg/ip) & OpenVPN (tun0).
 - **Storage:** SQLite (WAL), Migration-aware.
 
@@ -39,7 +45,7 @@
 
 ## Quality Standards
 - **SonarQube:** SonarCloud runs **Automatic Analysis** server-side on push, plus a `sonar.yml` workflow that self-skips without `SONAR_TOKEN`. There is no local scanner — the gate is checked on the PR. Fix all BLOCKERS; a failing gate blocks merge (Project: `ernsoylu_Smuggler`).
-- **Testing:** 473 backend tests + 212 frontend tests. Never let a change reduce the count; branding changes must update `tests/`. Frontend tests run as two vitest projects (`vitest.config.ts`): `unit` for `*.test.ts` in node, `components` for `*.test.tsx` in jsdom with Testing Library (`src/test/` holds the render helper, Mantine/jsdom shims and fixtures). Pure logic belongs in `web/src/lib/` so it stays testable without a DOM — prefer moving a decision there over driving a Mantine dropdown in jsdom.
+- **Testing:** 473 backend tests + 251 frontend tests. Never let a change reduce the count; branding changes must update `tests/`. Frontend tests run as two vitest projects (`vitest.config.ts`): `unit` for `*.test.ts` in node, `components` for `*.test.tsx` in jsdom with Testing Library (`src/test/` holds the render helper, Mantine/jsdom shims and fixtures). Pure logic belongs in `web/src/lib/` so it stays testable without a DOM — prefer moving a decision there over driving a Mantine dropdown in jsdom.
 - **Linting:** `lint.select` is pinned in `pyproject.toml` — widening it is a deliberate decision, not something a ruff upgrade should do silently.
 - **Typing:** Strict Python type hints and TypeScript interfaces. Typecheck the
   frontend with `npm run typecheck` (`tsc -b`) from `web/`. **`tsc --noEmit` is a
