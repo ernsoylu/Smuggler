@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  ActionIcon, Badge, Box, Button, Checkbox, Group, Loader, NumberInput, Paper,
+  Progress, SimpleGrid, Stack, Table, Tabs, Text, TextInput,
+} from '@mantine/core';
+import {
   removeTorrent, pauseTorrent, resumeTorrent,
   getTorrentPeers, getTorrentOptions, setTorrentOptions, setFileSelection,
   setTorrentCategory,
@@ -8,7 +12,7 @@ import {
 import type { Torrent, Peer, TorrentOptions } from '../api/types';
 import {
   Play, Pause, Trash2, ChevronDown, ChevronRight,
-  File as FileIcon, Users, Settings2, Info, HardDrive
+  File as FileIcon, Users, Settings2, Info, HardDrive,
 } from 'lucide-react';
 import { DeleteTorrentModal } from './DeleteTorrentModal';
 
@@ -35,14 +39,19 @@ function formatEta(seconds: number): string {
   return `${h}h ${m}m`;
 }
 
-const STATUS_VARIANTS: Record<string, { bg: string; text: string; ring: string; line: string }> = {
-  active:   { bg: 'bg-emerald-500/10', text: 'text-emerald-400', ring: 'ring-emerald-500/20', line: 'bg-emerald-500' },
-  waiting:  { bg: 'bg-orange-500/10',  text: 'text-orange-400',  ring: 'ring-orange-500/20',  line: 'bg-orange-500' },
-  paused:   { bg: 'bg-blue-500/10',    text: 'text-blue-400',    ring: 'ring-blue-500/20',    line: 'bg-blue-500' },
-  error:    { bg: 'bg-red-500/10',     text: 'text-red-400',     ring: 'ring-red-500/20',     line: 'bg-red-500' },
-  complete: { bg: 'bg-neutral-500/10', text: 'text-neutral-400', ring: 'ring-neutral-500/20', line: 'bg-neutral-500' },
-  removed:  { bg: 'bg-neutral-800/50', text: 'text-neutral-500', ring: 'ring-transparent',    line: 'bg-neutral-600' },
+/** Mantine color per aria2 status — badges, progress bars, accents. */
+const STATUS_COLORS: Record<string, string> = {
+  active: 'teal',
+  waiting: 'orange',
+  paused: 'blue',
+  error: 'red',
+  complete: 'gray',
+  removed: 'dark',
 };
+
+function statusColor(status: string): string {
+  return STATUS_COLORS[status] ?? 'dark';
+}
 
 type DetailTab = 'status' | 'details' | 'files' | 'peers' | 'options';
 
@@ -56,80 +65,48 @@ const TABS: { id: DetailTab; label: string; icon: React.ReactNode }[] = [
 
 // ── Sub-panels ────────────────────────────────────────────────────────────────
 
+function StatCell({ label, value, color, span }: Readonly<{
+  label: string; value: string | number; color?: string; span?: boolean;
+}>) {
+  return (
+    <Paper withBorder radius="md" px="sm" py={6} style={span ? { gridColumn: '1 / -1' } : undefined}>
+      <Text size="10px" tt="uppercase" fw={600} c="dimmed" lts={1}>{label}</Text>
+      <Text size="xs" ff="monospace" c={color} style={{ wordBreak: 'break-all' }}>{value}</Text>
+    </Paper>
+  );
+}
+
 function StatusTab({ torrent }: Readonly<{ torrent: Torrent }>) {
-  const v = STATUS_VARIANTS[torrent.status] ?? STATUS_VARIANTS['removed'];
+  const color = statusColor(torrent.status);
   const progress = Math.min(100, torrent.progress);
   const remaining = torrent.total_length - torrent.completed_length;
   return (
-    <div className="space-y-4">
-      {/* Large progress bar */}
+    <Stack gap="md">
       <div>
-        <div className="flex justify-between items-center text-xs mb-1.5">
-          <span className="text-neutral-400">{progress.toFixed(2)}% complete</span>
+        <Group justify="space-between" mb={6}>
+          <Text size="xs" c="dimmed">{progress.toFixed(2)}% complete</Text>
           {torrent.eta >= 0 && torrent.status === 'active' && (
-            <span className="text-neutral-500">ETA: {formatEta(torrent.eta)}</span>
+            <Text size="xs" c="dimmed">ETA: {formatEta(torrent.eta)}</Text>
           )}
-        </div>
-        <div className="w-full h-3 bg-neutral-800 rounded-full overflow-hidden">
-          <div
-            className={`h-full ${v.line} transition-all duration-500 rounded-full`}
-            style={{ width: `${progress}%` }}
-          />
-        </div>
+        </Group>
+        <Progress value={progress} color={color} size="md" radius="xl" />
       </div>
-      {/* Stats grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-        <div className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5">
-          <span className="text-neutral-500 font-semibold uppercase tracking-wider block mb-0.5">Downloaded</span>
-          <span className="text-emerald-400 font-mono">{formatBytes(torrent.completed_length)}</span>
-        </div>
-        <div className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5">
-          <span className="text-neutral-500 font-semibold uppercase tracking-wider block mb-0.5">Uploaded</span>
-          <span className="text-blue-400 font-mono">{formatBytes(torrent.uploaded_length)}</span>
-        </div>
-        <div className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5">
-          <span className="text-neutral-500 font-semibold uppercase tracking-wider block mb-0.5">Remaining</span>
-          <span className="text-neutral-200 font-mono">{remaining > 0 ? formatBytes(remaining) : '—'}</span>
-        </div>
-        <div className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5">
-          <span className="text-neutral-500 font-semibold uppercase tracking-wider block mb-0.5">Ratio</span>
-          <span className="text-neutral-200 font-mono">{torrent.ratio.toFixed(3)}</span>
-        </div>
-        <div className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5">
-          <span className="text-neutral-500 font-semibold uppercase tracking-wider block mb-0.5">DL Speed</span>
-          <span className="text-emerald-400 font-mono">{formatSpeed(torrent.download_speed)}</span>
-        </div>
-        <div className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5">
-          <span className="text-neutral-500 font-semibold uppercase tracking-wider block mb-0.5">UL Speed</span>
-          <span className="text-blue-400 font-mono">{formatSpeed(torrent.upload_speed)}</span>
-        </div>
-        <div className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5">
-          <span className="text-neutral-500 font-semibold uppercase tracking-wider block mb-0.5">Seeds</span>
-          <span className="text-neutral-200 font-mono">{torrent.num_seeders}</span>
-        </div>
-        <div className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5">
-          <span className="text-neutral-500 font-semibold uppercase tracking-wider block mb-0.5">Peers</span>
-          <span className="text-neutral-200 font-mono">{torrent.connections}</span>
-        </div>
-        {torrent.is_seed && (
-          <div className="bg-emerald-500/10 rounded-lg px-3 py-2 border border-emerald-500/20">
-            <span className="text-emerald-400 font-semibold">Seeding</span>
-          </div>
-        )}
-        {torrent.tracker && (
-          <div className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5 col-span-2 md:col-span-3">
-            <span className="text-neutral-500 font-semibold uppercase tracking-wider block mb-0.5">Tracker</span>
-            <span className="text-neutral-300 font-mono text-[10px] truncate block">{torrent.tracker}</span>
-          </div>
-        )}
+      <SimpleGrid type="container" cols={{ base: 2, '700px': 4 }} spacing="sm">
+        <StatCell label="Downloaded" value={formatBytes(torrent.completed_length)} color="teal.4" />
+        <StatCell label="Uploaded" value={formatBytes(torrent.uploaded_length)} color="blue.4" />
+        <StatCell label="Remaining" value={remaining > 0 ? formatBytes(remaining) : '—'} />
+        <StatCell label="Ratio" value={torrent.ratio.toFixed(3)} />
+        <StatCell label="DL Speed" value={formatSpeed(torrent.download_speed)} color="teal.4" />
+        <StatCell label="UL Speed" value={formatSpeed(torrent.upload_speed)} color="blue.4" />
+        <StatCell label="Seeds" value={torrent.num_seeders} />
+        <StatCell label="Peers" value={torrent.connections} />
+        {torrent.is_seed && <StatCell label="State" value="Seeding" color="teal.4" />}
+        {torrent.tracker && <StatCell label="Tracker" value={torrent.tracker} span />}
         {torrent.error_message && (
-          <div className="bg-red-500/10 rounded-lg px-3 py-2 border border-red-500/20 col-span-2 md:col-span-4">
-            <span className="text-red-400 font-semibold uppercase tracking-wider block mb-0.5">Error ({torrent.error_code})</span>
-            <span className="text-red-300 text-[11px]">{torrent.error_message}</span>
-          </div>
+          <StatCell label={`Error (${torrent.error_code})`} value={torrent.error_message} color="red.4" span />
         )}
-      </div>
-    </div>
+      </SimpleGrid>
+    </Stack>
   );
 }
 
@@ -143,86 +120,43 @@ function CategoryEditor({ torrent }: Readonly<{ torrent: Torrent }>) {
   const dirty = value.trim() !== (torrent.category ?? '');
 
   return (
-    <div className="flex items-end gap-2">
-      <div className="flex-1">
-        <label htmlFor={`cat-${torrent.gid}`} className="text-neutral-500 font-semibold uppercase tracking-wider block mb-1 text-[10px]">
-          Category
-        </label>
-        <input
-          id={`cat-${torrent.gid}`}
-          type="text"
-          value={value}
-          maxLength={64}
-          placeholder="Uncategorised"
-          onChange={e => setValue(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter' && dirty) save.mutate(); }}
-          className="w-full bg-neutral-950 border border-white/10 rounded-lg text-xs text-neutral-200 px-2.5 py-1.5 placeholder:text-neutral-600 focus:outline-none focus:border-blue-500/50"
-        />
-      </div>
-      <button
-        onClick={() => save.mutate()}
-        disabled={!dirty || save.isPending}
-        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-          dirty && !save.isPending
-            ? 'bg-blue-600 hover:bg-blue-500 text-white'
-            : 'bg-neutral-800 text-neutral-600 cursor-not-allowed'
-        }`}
-      >
+    <Group align="flex-end" gap="xs">
+      <TextInput
+        id={`cat-${torrent.gid}`}
+        label="Category"
+        size="xs"
+        flex={1}
+        value={value}
+        maxLength={64}
+        placeholder="Uncategorised"
+        onChange={e => setValue(e.currentTarget.value)}
+        onKeyDown={e => { if (e.key === 'Enter' && dirty) save.mutate(); }}
+      />
+      <Button size="xs" onClick={() => save.mutate()} disabled={!dirty || save.isPending}>
         {save.isPending ? 'Saving…' : 'Set'}
-      </button>
-    </div>
+      </Button>
+    </Group>
   );
 }
 
 function DetailsTab({ torrent }: Readonly<{ torrent: Torrent }>) {
   return (
-    <div className="flex flex-col gap-3">
-    <CategoryEditor torrent={torrent} />
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-      <div className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5">
-        <span className="text-neutral-500 font-semibold uppercase tracking-wider block mb-0.5">Total Size</span>
-        <span className="text-neutral-200 font-mono">{formatBytes(torrent.total_length)}</span>
-      </div>
-      {torrent.mode && (
-        <div className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5">
-          <span className="text-neutral-500 font-semibold uppercase tracking-wider block mb-0.5">Mode</span>
-          <span className="text-neutral-200 font-mono capitalize">{torrent.mode}</span>
-        </div>
-      )}
-      {torrent.num_pieces > 0 && (
-        <div className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5">
-          <span className="text-neutral-500 font-semibold uppercase tracking-wider block mb-0.5">Pieces</span>
-          <span className="text-neutral-200 font-mono">{torrent.num_pieces} × {formatBytes(torrent.piece_length)}</span>
-        </div>
-      )}
-      {torrent.creation_date > 0 && (
-        <div className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5">
-          <span className="text-neutral-500 font-semibold uppercase tracking-wider block mb-0.5">Created</span>
-          <span className="text-neutral-200 font-mono text-[10px]">
-            {new Date(torrent.creation_date * 1000).toLocaleDateString()}
-          </span>
-        </div>
-      )}
-      {torrent.info_hash && (
-        <div className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5 col-span-2 md:col-span-4">
-          <span className="text-neutral-500 font-semibold uppercase tracking-wider block mb-0.5">Info Hash</span>
-          <span className="text-neutral-300 font-mono text-[10px] break-all">{torrent.info_hash}</span>
-        </div>
-      )}
-      {torrent.save_path && (
-        <div className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5 col-span-2 md:col-span-4">
-          <span className="text-neutral-500 font-semibold uppercase tracking-wider block mb-0.5">Save Path</span>
-          <span className="text-neutral-300 font-mono text-[10px] truncate block">{torrent.save_path}</span>
-        </div>
-      )}
-      {torrent.comment && (
-        <div className="bg-white/[0.03] rounded-lg px-3 py-2 border border-white/5 col-span-2 md:col-span-4">
-          <span className="text-neutral-500 font-semibold uppercase tracking-wider block mb-0.5">Comment</span>
-          <span className="text-neutral-300 text-[11px]">{torrent.comment}</span>
-        </div>
-      )}
-    </div>
-    </div>
+    <Stack gap="sm">
+      <CategoryEditor torrent={torrent} />
+      <SimpleGrid type="container" cols={{ base: 2, '700px': 4 }} spacing="sm">
+        <StatCell label="Total Size" value={formatBytes(torrent.total_length)} />
+        {torrent.mode && <StatCell label="Mode" value={torrent.mode} />}
+        {torrent.num_pieces > 0 && (
+          <StatCell label="Pieces" value={`${torrent.num_pieces} × ${formatBytes(torrent.piece_length)}`} />
+        )}
+        {torrent.creation_date > 0 && (
+          <StatCell label="Created" value={new Date(torrent.creation_date * 1000).toLocaleDateString()} />
+        )}
+        {torrent.info_hash && <StatCell label="Info Hash" value={torrent.info_hash} span />}
+        {torrent.save_path && <StatCell label="Save Path" value={torrent.save_path} span />}
+        {torrent.comment && <StatCell label="Comment" value={torrent.comment} span />}
+      </SimpleGrid>
+    </Stack>
   );
 }
 
@@ -249,98 +183,76 @@ function FilesTab({ torrent }: Readonly<{ torrent: Torrent }>) {
   });
 
   if (!torrent.files || torrent.files.length === 0) {
-    return <p className="text-xs text-neutral-500 py-2">No file information available.</p>;
+    return <Text size="xs" c="dimmed" py="xs">No file information available.</Text>;
   }
 
   return (
-    <table className="w-full text-xs text-left">
-      <thead>
-        <tr className="text-neutral-500 font-semibold uppercase tracking-wider">
-          <th className="w-[40px] pb-2 text-center">#</th>
-          <th className="pb-2">Filename</th>
-          <th className="w-[100px] pb-2 text-right">Size</th>
-          <th className="w-[160px] pb-2 pl-4">Progress</th>
-          <th className="w-[90px] pb-2 text-center">Priority</th>
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-white/5">
+    <Table fz="xs" verticalSpacing={6}>
+      <Table.Thead>
+        <Table.Tr>
+          <Table.Th w={40} ta="center">#</Table.Th>
+          <Table.Th>Filename</Table.Th>
+          <Table.Th w={100} ta="right">Size</Table.Th>
+          <Table.Th w={160}>Progress</Table.Th>
+          <Table.Th w={90} ta="center">Priority</Table.Th>
+        </Table.Tr>
+      </Table.Thead>
+      <Table.Tbody>
         {torrent.files.map((file) => (
-          <tr
-            key={file.index}
-            className={`hover:bg-white/[0.03] transition-colors ${file.selected ? '' : 'opacity-50'}`}
-          >
-            <td className="py-2 text-center text-neutral-500 font-mono">{file.index}</td>
-            <td className="py-2 pr-4">
-              <div className="flex items-center gap-2 min-w-0">
-                <FileIcon size={13} className="text-neutral-500 shrink-0" />
-                <span className="truncate text-neutral-300 max-w-[320px]" title={file.name}>{file.name}</span>
-              </div>
-            </td>
-            <td className="py-2 text-right text-neutral-400 font-mono pr-4">{formatBytes(file.total_length)}</td>
-            <td className="py-2 pl-4">
-              <div className="flex flex-col gap-1">
-                <div className="flex justify-between text-[10px]">
-                  <span className="text-neutral-500">{formatBytes(file.completed_length)}</span>
-                  <span className="text-neutral-400">{file.progress.toFixed(1)}%</span>
-                </div>
-                <div className="w-full h-1 bg-neutral-800 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full ${file.progress === 100 ? 'bg-neutral-500' : 'bg-blue-500'} transition-all`}
-                    style={{ width: `${file.progress}%` }}
-                  />
-                </div>
-              </div>
-            </td>
-            <td className="py-2 text-center">
-              <button
+          <Table.Tr key={file.index} opacity={file.selected ? 1 : 0.5}>
+            <Table.Td ta="center" c="dimmed" ff="monospace">{file.index}</Table.Td>
+            <Table.Td>
+              <Group gap={6} wrap="nowrap">
+                <FileIcon size={13} color="var(--mantine-color-dimmed)" style={{ flexShrink: 0 }} />
+                <Text size="xs" truncate maw={320} title={file.name}>{file.name}</Text>
+              </Group>
+            </Table.Td>
+            <Table.Td ta="right" c="dimmed" ff="monospace">{formatBytes(file.total_length)}</Table.Td>
+            <Table.Td>
+              <Stack gap={4}>
+                <Group justify="space-between">
+                  <Text size="10px" c="dimmed">{formatBytes(file.completed_length)}</Text>
+                  <Text size="10px" c="dimmed">{file.progress.toFixed(1)}%</Text>
+                </Group>
+                <Progress size="xs" value={file.progress} color={file.progress === 100 ? 'gray' : 'blue'} />
+              </Stack>
+            </Table.Td>
+            <Table.Td ta="center">
+              <Button
+                size="compact-xs"
+                variant={file.selected ? 'light' : 'default'}
+                color={file.selected ? 'teal' : 'gray'}
                 onClick={() => toggleFile.mutate(file.index)}
                 disabled={pending.has(file.index)}
-                className={`px-2.5 py-1 rounded text-[10px] font-semibold transition-colors ring-1 ${
-                  file.selected
-                    ? 'bg-emerald-500/10 text-emerald-400 ring-emerald-500/20 hover:bg-emerald-500/20'
-                    : 'bg-neutral-800 text-neutral-500 ring-white/5 hover:bg-neutral-700'
-                }`}
                 title={file.selected ? 'Click to skip this file' : 'Click to download this file'}
               >
                 {file.selected ? 'Normal' : 'Skip'}
-              </button>
-            </td>
-          </tr>
+              </Button>
+            </Table.Td>
+          </Table.Tr>
         ))}
-      </tbody>
-    </table>
+      </Table.Tbody>
+    </Table>
   );
 }
 
-function PeerFlag({ ip }: Readonly<{ ip: string }>) {
-  const { data: flag } = useQuery({
-    queryKey: ['geo-ip', ip],
-    queryFn: async () => {
-      try {
-        // Handle basic IPv6 loopback or local IPs
-        if (ip.startsWith('127.') || ip === '::1' || ip.startsWith('10.') || ip.startsWith('192.168.')) {
-          return '🏠';
-        }
-        const res = await fetch(`https://get.geojs.io/v1/ip/country/${ip}`);
-        if (!res.ok) return '🏳️';
-        const code = (await res.text()).trim();
-        if (!code || code === 'nil' || code.length !== 2) return '🏳️';
-
-        const codePoints = code
-          .toUpperCase()
-          .split('')
-          .map(char => 127397 + (char.codePointAt(0) ?? 0));
-        return String.fromCodePoint(...codePoints);
-      } catch {
-        return '🏳️';
-      }
-    },
-    staleTime: Infinity,
-  });
-  
-  if (!flag) return <span className="inline-block w-4 h-4 bg-white/10 rounded animate-pulse mr-2 align-middle"></span>;
-  return <span className="mr-2 text-[14px] leading-none select-none align-middle" title="Location">{flag}</span>;
-}
+/*
+ * Peer country flags used to be resolved here by fetching
+ * https://get.geojs.io/v1/ip/country/<ip> once per visible peer, from the
+ * browser, over clearnet.
+ *
+ * That inverted the product's entire premise. The backend exists so torrent
+ * traffic only ever leaves through a kill-switched tunnel; the UI was then
+ * handing the peer list — the precise correlation data that architecture
+ * suppresses — to a third-party geolocation service, tagged with the user's
+ * real IP. It is metadata rather than payload, but it is exactly the metadata
+ * the threat model is about.
+ *
+ * Removed rather than relocated: doing the same lookup from the API container
+ * would move the leak, not close it, since the API is not behind the tunnel
+ * either. Restoring flags means resolving offline from a local MMDB (DB-IP
+ * Lite or similar) shipped in the API image — until that lands, no flag.
+ */
 
 function PeersTab({ torrent, isVisible }: Readonly<{ torrent: Torrent; isVisible: boolean }>) {
   const { data: peers = [], isLoading } = useQuery<Peer[]>({
@@ -352,62 +264,57 @@ function PeersTab({ torrent, isVisible }: Readonly<{ torrent: Torrent; isVisible
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 py-4 text-xs text-neutral-500">
-        <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-        Loading peers…
-      </div>
+      <Group gap="xs" py="md">
+        <Loader size="xs" />
+        <Text size="xs" c="dimmed">Loading peers…</Text>
+      </Group>
     );
   }
 
   if (peers.length === 0) {
-    return <p className="text-xs text-neutral-500 py-2">No active peers connected.</p>;
+    return <Text size="xs" c="dimmed" py="xs">No active peers connected.</Text>;
   }
 
   return (
-    <table className="w-full text-xs text-left">
-      <thead>
-        <tr className="text-neutral-500 font-semibold uppercase tracking-wider">
-          <th className="pb-2">IP Address</th>
-          <th className="pb-2 text-right">DL Speed</th>
-          <th className="pb-2 text-right">UL Speed</th>
-          <th className="pb-2 text-center">Progress</th>
-          <th className="pb-2 text-center">Type</th>
-          <th className="pb-2 text-center">Choked</th>
-        </tr>
-      </thead>
-      <tbody className="divide-y divide-white/5">
+    <Table fz="xs" verticalSpacing={6}>
+      <Table.Thead>
+        <Table.Tr>
+          <Table.Th>IP Address</Table.Th>
+          <Table.Th ta="right">DL Speed</Table.Th>
+          <Table.Th ta="right">UL Speed</Table.Th>
+          <Table.Th ta="center">Progress</Table.Th>
+          <Table.Th ta="center">Type</Table.Th>
+          <Table.Th ta="center">Choked</Table.Th>
+        </Table.Tr>
+      </Table.Thead>
+      <Table.Tbody>
         {peers.map((peer) => (
-          <tr key={`${peer.ip}:${peer.port}`} className="hover:bg-white/[0.03] transition-colors">
-            <td className="py-2 font-mono text-neutral-300">
-              <PeerFlag ip={peer.ip} />
-              {peer.ip}:{peer.port}
-            </td>
-            <td className="py-2 text-right text-emerald-400 font-mono">{formatSpeed(peer.download_speed)}</td>
-            <td className="py-2 text-right text-blue-400 font-mono">{formatSpeed(peer.upload_speed)}</td>
-            <td className="py-2 text-center">
-              <div className="flex items-center gap-1 justify-center">
-                <div className="w-16 h-1.5 bg-neutral-800 rounded-full overflow-hidden">
-                  <div className="h-full bg-neutral-500 rounded-full" style={{ width: `${peer.progress * 100}%` }} />
-                </div>
-                <span className="text-neutral-500 text-[10px] font-mono">{(peer.progress * 100).toFixed(0)}%</span>
-              </div>
-            </td>
-            <td className="py-2 text-center">
-              <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${peer.seeder ? 'bg-emerald-500/10 text-emerald-400' : 'bg-neutral-800 text-neutral-500'}`}>
+          <Table.Tr key={`${peer.ip}:${peer.port}`}>
+            <Table.Td ff="monospace">
+                    {peer.ip}:{peer.port}
+            </Table.Td>
+            <Table.Td ta="right" c="var(--smg-ok)" ff="monospace">{formatSpeed(peer.download_speed)}</Table.Td>
+            <Table.Td ta="right" c="var(--smg-info)" ff="monospace">{formatSpeed(peer.upload_speed)}</Table.Td>
+            <Table.Td>
+              <Group gap={4} justify="center" wrap="nowrap">
+                <Progress size="xs" value={peer.progress * 100} color="gray" w={64} />
+                <Text size="10px" c="dimmed" ff="monospace">{(peer.progress * 100).toFixed(0)}%</Text>
+              </Group>
+            </Table.Td>
+            <Table.Td ta="center">
+              <Badge size="xs" variant="light" color={peer.seeder ? 'teal' : 'gray'}>
                 {peer.seeder ? 'Seed' : 'Peer'}
-              </span>
-            </td>
-            <td className="py-2 text-center">
-              {peer.peer_choking ? (
-                <span className="text-orange-400 text-[10px]">Choked</span>
-              ) : (
-                <span className="text-neutral-600 text-[10px]">—</span>
-              )}
-            </td>
-          </tr>
+              </Badge>
+            </Table.Td>
+            <Table.Td ta="center">
+              <Text size="10px" c={peer.peer_choking ? 'orange.4' : 'dimmed'}>
+                {peer.peer_choking ? 'Choked' : '—'}
+              </Text>
+            </Table.Td>
+          </Table.Tr>
         ))}
-      </tbody>
-    </table>
+      </Table.Tbody>
+    </Table>
   );
 }
 
@@ -434,93 +341,64 @@ function OptionsTab({ torrent, isVisible }: Readonly<{ torrent: Torrent; isVisib
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 py-4 text-xs text-neutral-500">
-        <div className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-        Loading options…
-      </div>
+      <Group gap="xs" py="md">
+        <Loader size="xs" />
+        <Text size="xs" c="dimmed">Loading options…</Text>
+      </Group>
     );
   }
 
   const current = { ...options, ...localOpts } as TorrentOptions;
   const isDirty = Object.keys(localOpts).length > 0;
 
-  const inputClass = "w-full bg-neutral-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-neutral-200 font-mono focus:outline-none focus:ring-1 focus:ring-blue-500/50";
-  const labelClass = "text-xs text-neutral-500 font-semibold uppercase tracking-wider block mb-1.5";
-
   return (
-    <div className="space-y-4 max-w-lg">
-      <p className="text-xs text-neutral-500">
-        Override global bandwidth limits for this torrent. Set to <span className="text-neutral-300 font-mono">0</span> to use the global limit.
-      </p>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div>
-          <label htmlFor="opt-max-dl" className={labelClass}>Max Download (B/s)</label>
-          <input
-            id="opt-max-dl"
-            type="number"
-            min={0}
-            className={inputClass}
-            value={localOpts.max_download_speed ?? current.max_download_speed ?? 0}
-            onChange={e => setLocalOpts(o => ({ ...o, max_download_speed: Number(e.target.value) }))}
-          />
-        </div>
-        <div>
-          <label htmlFor="opt-max-ul" className={labelClass}>Max Upload (B/s)</label>
-          <input
-            id="opt-max-ul"
-            type="number"
-            min={0}
-            className={inputClass}
-            value={localOpts.max_upload_speed ?? current.max_upload_speed ?? 0}
-            onChange={e => setLocalOpts(o => ({ ...o, max_upload_speed: Number(e.target.value) }))}
-          />
-        </div>
-        <div>
-          <label htmlFor="opt-max-conn" className={labelClass}>Max Connections</label>
-          <input
-            id="opt-max-conn"
-            type="number"
-            min={1}
-            max={16}
-            className={inputClass}
-            value={localOpts.max_connections ?? current.max_connections ?? 1}
-            onChange={e => setLocalOpts(o => ({ ...o, max_connections: Number(e.target.value) }))}
-          />
-        </div>
-      </div>
-      <label className="flex items-start gap-3 cursor-pointer select-none">
-        <input
-          type="checkbox"
-          className="mt-0.5 w-4 h-4 rounded accent-blue-600 cursor-pointer"
-          checked={localOpts.prioritize_first_last ?? current.prioritize_first_last ?? false}
-          onChange={e => setLocalOpts(o => ({ ...o, prioritize_first_last: e.target.checked }))}
+    <Stack gap="md" maw={520}>
+      <Text size="xs" c="dimmed">
+        Override global bandwidth limits for this torrent.
+        Set to <Text component="span" ff="monospace" size="xs">0</Text> to use the global limit.
+      </Text>
+      <SimpleGrid type="container" cols={{ base: 1, '520px': 3 }} spacing="md">
+        <NumberInput
+          id="opt-max-dl"
+          label="Max Download (B/s)"
+          size="xs"
+          min={0}
+          value={localOpts.max_download_speed ?? current.max_download_speed ?? 0}
+          onChange={v => setLocalOpts(o => ({ ...o, max_download_speed: Number(v) || 0 }))}
         />
-        <span>
-          <span className="block text-xs font-medium text-neutral-300">
-            Prioritise first &amp; last pieces
-          </span>
-          <span className="block text-[11px] text-neutral-500 mt-0.5">
-            Fetches the ends of each file first, so a partial download can be previewed.
-            aria2 has no true sequential mode; this is the equivalent it supports.
-          </span>
-        </span>
-      </label>
-      <div className="flex items-center gap-3">
-        <button
-          onClick={() => save.mutate()}
-          disabled={!isDirty || save.isPending}
-          className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-            isDirty && !save.isPending
-              ? 'bg-blue-600 hover:bg-blue-500 text-white'
-              : 'bg-neutral-800 text-neutral-600 cursor-not-allowed'
-          }`}
-        >
+        <NumberInput
+          id="opt-max-ul"
+          label="Max Upload (B/s)"
+          size="xs"
+          min={0}
+          value={localOpts.max_upload_speed ?? current.max_upload_speed ?? 0}
+          onChange={v => setLocalOpts(o => ({ ...o, max_upload_speed: Number(v) || 0 }))}
+        />
+        <NumberInput
+          id="opt-max-conn"
+          label="Max Connections"
+          size="xs"
+          min={1}
+          max={16}
+          value={localOpts.max_connections ?? current.max_connections ?? 1}
+          onChange={v => setLocalOpts(o => ({ ...o, max_connections: Number(v) || 1 }))}
+        />
+      </SimpleGrid>
+      <Checkbox
+        size="xs"
+        checked={localOpts.prioritize_first_last ?? current.prioritize_first_last ?? false}
+        onChange={e => setLocalOpts(o => ({ ...o, prioritize_first_last: e.currentTarget.checked }))}
+        label="Prioritise first & last pieces"
+        description="Fetches the ends of each file first, so a partial download can be previewed. aria2 has no true sequential mode; this is the equivalent it supports."
+      />
+      <Group gap="sm">
+        <Button size="xs" onClick={() => save.mutate()} disabled={!isDirty || save.isPending}>
           {save.isPending ? 'Saving…' : 'Apply'}
-        </button>
-        {saved && <span className="text-xs text-emerald-400">Saved!</span>}
-        {save.isError && <span className="text-xs text-red-400">Failed to save</span>}
-      </div>
-    </div>
+        </Button>
+        {saved && <Text size="xs" c="var(--smg-ok)">Saved!</Text>}
+        {save.isError && <Text size="xs" c="var(--smg-bad)">Failed to save</Text>}
+      </Group>
+    </Stack>
   );
 }
 
@@ -557,170 +435,165 @@ export function TorrentRow({ torrent, selected = false, onToggleSelected }: Read
   });
 
   const progress = Math.min(100, torrent.progress);
-  
+
   const startDisabled = torrent.status === 'active' || torrent.status === 'waiting';
   const stopDisabled = torrent.status === 'paused' || torrent.status === 'complete' || torrent.status === 'error' || torrent.status === 'removed';
-  
-  const v = STATUS_VARIANTS[torrent.status] ?? STATUS_VARIANTS['removed'];
+
+  const color = statusColor(torrent.status);
 
   return (
     <React.Fragment>
-      <tr className={`group transition-colors ${selected ? 'bg-blue-500/[0.07]' : 'hover:bg-white/[0.02]'}`}>
+      <Table.Tr bg={selected ? 'var(--mantine-color-blue-light)' : undefined}>
         {/* Bulk selection */}
-        <td className="pl-6 pr-2 py-4 w-10">
-          <input
-            type="checkbox"
+        <Table.Td w={40} pl="md">
+          <Checkbox
+            size="xs"
             checked={selected}
             onChange={onToggleSelected}
             aria-label={`Select ${torrent.name}`}
-            className="w-4 h-4 rounded accent-blue-600 cursor-pointer"
           />
-        </td>
+        </Table.Td>
+
         {/* Name */}
-        <td className="px-6 py-4 max-w-[260px] relative">
-          <div className={`absolute left-0 top-0 bottom-0 w-1 ${v.line} opacity-0 group-hover:opacity-100 transition-opacity rounded-r-sm`} />
-          <div className="flex items-start gap-2">
-            <button
+        <Table.Td maw={280}>
+          <Group gap={6} wrap="nowrap" align="flex-start">
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              size="sm"
+              mt={2}
               onClick={() => setIsExpanded(!isExpanded)}
-              className="mt-0.5 p-0.5 rounded hover:bg-white/10 text-neutral-400 transition-colors shrink-0"
               title={isExpanded ? 'Collapse' : 'Expand details'}
+              aria-expanded={isExpanded}
             >
               {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-            </button>
-            <div className="flex flex-col min-w-0">
-              <p className="text-sm text-neutral-100 font-medium truncate" title={torrent.name}>
+            </ActionIcon>
+            <Stack gap={2} miw={0}>
+              <Text size="sm" fw={500} truncate title={torrent.name}>
                 {torrent.name || torrent.gid}
-              </p>
-              <p className="text-[11px] text-neutral-500 font-mono mt-1 tracking-tight truncate">
+              </Text>
+              <Text size="11px" c="dimmed" ff="monospace" truncate>
                 {torrent.mule} • {torrent.gid}
-              </p>
-            </div>
-          </div>
-        </td>
+              </Text>
+            </Stack>
+          </Group>
+        </Table.Td>
 
         {/* Status */}
-        <td className="px-4 py-4 whitespace-nowrap">
-          <span className={`px-2.5 py-1 rounded-md text-xs font-semibold capitalize ring-1 inset-ring ${v.bg} ${v.text} ${v.ring}`}>
+        <Table.Td style={{ whiteSpace: 'nowrap' }}>
+          <Badge variant="light" color={color} tt="capitalize" radius="sm">
             {torrent.status}
             {torrent.is_metadata && ' (Meta)'}
-          </span>
-        </td>
+          </Badge>
+        </Table.Td>
 
         {/* Progress */}
-        <td className="px-4 py-4 min-w-[180px]">
-          <div className="flex flex-col gap-1.5">
-            <div className="flex justify-between items-center text-xs">
-              <span className="text-neutral-400 font-medium">{formatBytes(torrent.completed_length)} / {formatBytes(torrent.total_length)}</span>
-              <span className="text-neutral-300 font-semibold">{progress.toFixed(1)}%</span>
-            </div>
-            <div className="w-full h-1.5 bg-neutral-800 rounded-full overflow-hidden">
-              <div
-                className={`h-full ${v.line} transition-all duration-500 rounded-full`}
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-          </div>
-        </td>
+        <Table.Td miw={180}>
+          <Stack gap={6}>
+            <Group justify="space-between">
+              <Text size="xs" c="dimmed" fw={500}>
+                {formatBytes(torrent.completed_length)} / {formatBytes(torrent.total_length)}
+              </Text>
+              <Text size="xs" fw={600}>{progress.toFixed(1)}%</Text>
+            </Group>
+            <Progress size="sm" value={progress} color={color} radius="xl" />
+          </Stack>
+        </Table.Td>
 
         {/* ETA */}
-        <td className="px-4 py-4 whitespace-nowrap text-right">
-          <span className="text-xs text-neutral-400 font-mono">
+        <Table.Td ta="right" style={{ whiteSpace: 'nowrap' }}>
+          <Text size="xs" c="dimmed" ff="monospace">
             {torrent.status === 'active' && torrent.eta !== 0 ? formatEta(torrent.eta) : '—'}
-          </span>
-        </td>
+          </Text>
+        </Table.Td>
 
         {/* Speed */}
-        <td className="px-4 py-4 whitespace-nowrap text-right">
-          <div className="flex flex-col gap-0.5 text-xs font-medium">
-            <span className="text-emerald-400">{formatSpeed(torrent.download_speed)} ↓</span>
-            <span className="text-blue-400">{formatSpeed(torrent.upload_speed)} ↑</span>
-          </div>
-        </td>
+        <Table.Td ta="right" style={{ whiteSpace: 'nowrap' }}>
+          <Stack gap={2}>
+            <Text size="xs" fw={500} c="var(--smg-ok)">{formatSpeed(torrent.download_speed)} ↓</Text>
+            <Text size="xs" fw={500} c="var(--smg-info)">{formatSpeed(torrent.upload_speed)} ↑</Text>
+          </Stack>
+        </Table.Td>
 
         {/* Seeds / Peers */}
-        <td className="px-4 py-4 whitespace-nowrap text-center">
-          <div className="flex justify-center gap-1.5">
-            <span className="px-2 py-0.5 bg-neutral-800/50 text-neutral-400 rounded ring-1 ring-white/5 text-xs font-mono" title="Seeders">{torrent.num_seeders}</span>
-            <span className="px-2 py-0.5 bg-neutral-800/50 text-neutral-400 rounded ring-1 ring-white/5 text-xs font-mono" title="Peers">{torrent.connections}</span>
-          </div>
-        </td>
+        <Table.Td ta="center" style={{ whiteSpace: 'nowrap' }}>
+          <Group gap={6} justify="center" wrap="nowrap">
+            <Badge variant="default" radius="sm" ff="monospace" title="Seeders">{torrent.num_seeders}</Badge>
+            <Badge variant="default" radius="sm" ff="monospace" title="Peers">{torrent.connections}</Badge>
+          </Group>
+        </Table.Td>
 
         {/* Ratio */}
-        <td className="px-4 py-4 whitespace-nowrap text-right">
-          <span className={`text-xs font-mono ${torrent.ratio >= 1 ? 'text-emerald-400' : 'text-neutral-400'}`}>
+        <Table.Td ta="right" style={{ whiteSpace: 'nowrap' }}>
+          <Text size="xs" ff="monospace" c={torrent.ratio >= 1 ? 'teal.4' : 'dimmed'}>
             {torrent.ratio.toFixed(3)}
-          </span>
-        </td>
+          </Text>
+        </Table.Td>
 
         {/* Mule */}
-        <td className="px-4 py-4 whitespace-nowrap">
-          <span className="px-2 py-1 bg-white/5 text-neutral-300 rounded text-xs font-mono ring-1 ring-white/10">
-            {torrent.mule}
-          </span>
-        </td>
+        <Table.Td style={{ whiteSpace: 'nowrap' }}>
+          <Badge variant="default" radius="sm" ff="monospace" tt="none">{torrent.mule}</Badge>
+        </Table.Td>
 
         {/* Actions */}
-        <td className="px-6 py-4 whitespace-nowrap text-right">
-          <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              className="p-1.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+        <Table.Td ta="right" pr="md" style={{ whiteSpace: 'nowrap' }}>
+          <Group gap={6} justify="flex-end" wrap="nowrap">
+            <ActionIcon
+              variant="light"
+              color="blue"
               onClick={() => resume.mutate()}
               disabled={startDisabled || resume.isPending}
               title="Start"
             >
-              <Play size={16} />
-            </button>
-            <button
-              className="p-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              <Play size={15} />
+            </ActionIcon>
+            <ActionIcon
+              variant="default"
               onClick={() => pause.mutate()}
               disabled={stopDisabled || pause.isPending}
               title="Stop"
             >
-              <Pause size={16} />
-            </button>
-            <button
-              className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors"
+              <Pause size={15} />
+            </ActionIcon>
+            <ActionIcon
+              variant="light"
+              color="red"
               onClick={() => setShowConfirm(true)}
               title="Remove"
             >
-              <Trash2 size={16} />
-            </button>
-          </div>
-        </td>
-      </tr>
+              <Trash2 size={15} />
+            </ActionIcon>
+          </Group>
+        </Table.Td>
+      </Table.Tr>
 
       {/* Expanded Detail Panel with Tabs */}
       {isExpanded && (
-        <tr className="bg-neutral-950/40">
-          <td colSpan={10} className="p-0 border-t border-white/5 shadow-inner">
-            {/* Tab bar */}
-            <div className="flex items-center gap-1 px-14 pt-3 border-b border-white/5">
-              {TABS.map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-t-lg transition-colors ${
-                    activeTab === tab.id
-                      ? 'bg-white/[0.06] text-white border-b-2 border-blue-500 -mb-px'
-                      : 'text-neutral-500 hover:text-neutral-300 hover:bg-white/[0.03]'
-                  }`}
-                >
-                  {tab.icon}
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Tab content */}
-            <div className="px-14 py-4 max-h-[420px] overflow-y-auto custom-scrollbar">
+        <Table.Tr>
+          <Table.Td colSpan={10} p={0} style={{ background: 'var(--mantine-color-default-hover)' }}>
+            <Tabs
+              value={activeTab}
+              onChange={v => setActiveTab((v ?? 'status') as DetailTab)}
+              px="xl"
+              pt="xs"
+            >
+              <Tabs.List>
+                {TABS.map(tab => (
+                  <Tabs.Tab key={tab.id} value={tab.id} leftSection={tab.icon} fz="xs">
+                    {tab.label}
+                  </Tabs.Tab>
+                ))}
+              </Tabs.List>
+            </Tabs>
+            <Box px="xl" py="md" mah={420} style={{ overflowY: 'auto' }}>
               {activeTab === 'status'  && <StatusTab torrent={torrent} />}
               {activeTab === 'details' && <DetailsTab torrent={torrent} />}
               {activeTab === 'files'   && <FilesTab torrent={torrent} />}
               {activeTab === 'peers'   && <PeersTab torrent={torrent} isVisible={isExpanded && activeTab === 'peers'} />}
               {activeTab === 'options' && <OptionsTab torrent={torrent} isVisible={isExpanded && activeTab === 'options'} />}
-            </div>
-          </td>
-        </tr>
+            </Box>
+          </Table.Td>
+        </Table.Tr>
       )}
 
       {/* Delete Confirmation Modal */}

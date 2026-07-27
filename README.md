@@ -43,7 +43,10 @@ The fastest way to run Smuggler is via the included lifecycle script:
 ## Development
 - **Local Debug**: `./start.sh debug` (Vite + Flask with hot-reload).
 - **Setup**: `./setup.sh` (installs deps and builds all 4 images).
-- **Tests**: `uv run pytest tests/` (367 passing tests, plus 59 frontend tests via `npm run test:run`).
+- **Tests**: `uv run pytest tests/` (473 passing tests, plus 130 frontend tests via `npm run test:run`).
+  The suite is hermetic: `conftest.py` strips `SMG_API_TOKEN` and `SMG_MULE_RPC_HOST`
+  after `cli/log.py` loads the repo `.env`, so a machine that has run `./setup.sh`
+  behaves the same as CI, which has no `.env`.
 - **CI/CD**: Path-filtered GitHub Actions workflows (least-privilege permissions, concurrency-cancelled, dependency-cached):
   - **Python CI**: `ruff` lint + `pytest` matrix (3.12, 3.13, 3.14) with coverage.
   - **Frontend CI**: `tsc` type-check, ESLint, `vitest`, and production build.

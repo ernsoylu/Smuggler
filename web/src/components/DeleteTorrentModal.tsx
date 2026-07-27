@@ -1,19 +1,26 @@
-import { useModalA11y, modalA11yProps } from '../hooks/useModalA11y';
 import { useState } from 'react';
-import { createPortal } from 'react-dom';
-import { Trash2, X } from 'lucide-react';
+import { Button, Checkbox, Group, Modal, Paper, Stack, Text, ThemeIcon } from '@mantine/core';
+import { Trash2 } from 'lucide-react';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   onConfirm: (deleteFiles: boolean) => void;
   isPending: boolean;
+  /** Shown when a single torrent is targeted; ignored once count > 1. */
   torrentName: string;
+  /**
+   * How many torrents this confirmation covers. The bulk bar used to remove
+   * its whole selection with no confirmation and no delete-files option, while
+   * removing a single torrent opened this dialog — the caution was inverted,
+   * since the batch is the dangerous one. Both paths come through here now.
+   */
+  count?: number;
 }
 
-export function DeleteTorrentModal({ isOpen, onClose, onConfirm, isPending, torrentName }: Readonly<Props>) {
-  const dialogRef = useModalA11y(isPending ? undefined : onClose, isOpen);
+export function DeleteTorrentModal({ isOpen, onClose, onConfirm, isPending, torrentName, count = 1 }: Readonly<Props>) {
   const [deleteFiles, setDeleteFiles] = useState(false);
+  const bulk = count > 1;
 
   // Reset the checkbox when the modal (re)opens — the render-phase "previous
   // prop" pattern avoids an extra render cycle from doing this in an effect.
@@ -23,88 +30,71 @@ export function DeleteTorrentModal({ isOpen, onClose, onConfirm, isPending, torr
     if (isOpen) setDeleteFiles(false);
   }
 
-  if (!isOpen) return null;
-
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
-      <button
-        type="button"
-        aria-label="Close modal"
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm border-0 p-0 cursor-default"
-        onClick={isPending ? undefined : onClose}
-        disabled={isPending}
-      />
-
-      {/* Modal */}
-      <div
-        ref={dialogRef}
-        {...modalA11yProps}
-        aria-labelledby="delete-torrent-title"
-        className="relative bg-neutral-900 border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl flex flex-col gap-6">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center text-red-500 shrink-0">
-              <Trash2 size={20} />
-            </div>
-            <div>
-              <h2 id="delete-torrent-title" className="text-white font-bold text-lg tracking-tight">Delete Torrent</h2>
-              <p className="text-xs text-neutral-400 mt-0.5">Are you sure you want to remove this?</p>
-            </div>
+  return (
+    <Modal
+      opened={isOpen}
+      onClose={onClose}
+      centered
+      radius="lg"
+      // A stray Escape or backdrop click must not orphan an in-flight delete.
+      closeOnEscape={!isPending}
+      closeOnClickOutside={!isPending}
+      withCloseButton={!isPending}
+      title={
+        <Group gap="sm">
+          <ThemeIcon variant="light" color="red" size={40} radius="md">
+            <Trash2 size={20} />
+          </ThemeIcon>
+          <div>
+            <Text fw={700} size="lg">{bulk ? `Remove ${count} torrents` : 'Remove torrent'}</Text>
+            <Text size="xs" c="dimmed">
+              {bulk
+                ? 'This removes every torrent in the current selection.'
+                : 'Are you sure you want to remove this?'}
+            </Text>
           </div>
-          <button
-            onClick={onClose}
-            disabled={isPending}
-            className="p-1.5 text-neutral-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors disabled:opacity-50"
-          >
-            <X size={20} />
-          </button>
-        </div>
+        </Group>
+      }
+    >
+      <Stack gap="md">
+        <Paper withBorder p="sm" radius="md">
+          <Text size="sm" lineClamp={2} style={{ wordBreak: 'break-all' }}>
+            {bulk ? `${count} torrents selected` : torrentName}
+          </Text>
+        </Paper>
 
-        <div className="bg-neutral-950/50 p-3 rounded-lg border border-white/5 text-sm text-neutral-300 break-all line-clamp-2">
-          {torrentName}
-        </div>
-
-        <label
-          htmlFor="delete-files-checkbox"
-          className="flex items-center gap-3 p-3 rounded-lg bg-red-500/5 border border-red-500/10 cursor-pointer hover:bg-red-500/10 transition-colors text-sm font-medium text-red-400"
+        <Paper
+          withBorder
+          p="sm"
+          radius="md"
+          style={{
+            background: 'var(--mantine-color-red-light)',
+            borderColor: 'var(--mantine-color-red-light-color)',
+          }}
         >
-          <input
+          <Checkbox
             id="delete-files-checkbox"
-            type="checkbox"
+            color="red"
             checked={deleteFiles}
-            onChange={(e) => setDeleteFiles(e.target.checked)}
-            className="w-4 h-4 text-red-500 bg-neutral-950 border-white/10 rounded focus:ring-red-500 focus:ring-offset-neutral-900 shrink-0"
+            onChange={e => setDeleteFiles(e.currentTarget.checked)}
+            label={
+              <Text size="sm" fw={500} c="var(--smg-bad)">
+                {bulk ? 'Delete downloaded files too, for all of them' : 'Delete downloaded files too'}
+              </Text>
+            }
+            description="This action cannot be undone."
           />
-          <span>Delete downloaded files too</span>
-          <span className="text-xs font-normal text-neutral-500 ml-auto">This action cannot be undone.</span>
-        </label>
+        </Paper>
 
-        <div className="flex gap-3">
-          <button
-            onClick={onClose}
-            disabled={isPending}
-            className="flex-1 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-sm font-semibold text-neutral-300 transition-colors disabled:opacity-50"
-          >
+        <Group grow>
+          <Button variant="default" onClick={onClose} disabled={isPending}>
             Cancel
-          </button>
-          <button
-            onClick={() => onConfirm(deleteFiles)}
-            disabled={isPending}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-sm text-white font-bold shadow-lg shadow-red-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
-          >
-            {isPending ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Deleting...
-              </>
-            ) : (
-              'Delete'
-            )}
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body
+          </Button>
+          <Button color="red" onClick={() => onConfirm(deleteFiles)} loading={isPending}>
+            Remove
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }

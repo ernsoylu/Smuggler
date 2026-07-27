@@ -6,10 +6,17 @@
  */
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getStats, getAllTorrents } from '../api/client';
+import {
+  Box, Collapse, Divider, Group, SimpleGrid, Stack, Text, UnstyledButton,
+} from '@mantine/core';
+import { getStats, getAllTorrents, getWatchdogStatus } from '../api/client';
 import { SpeedGraph } from './SpeedGraph';
 import type { DataPoint } from './SpeedGraph';
-import { ChevronUp, ChevronDown, Activity, Download, Upload, Server } from 'lucide-react';
+import { useUiActions } from '../context/UiActionsContext';
+import { healthSummary, healthLabel } from '../lib/watchdog';
+import {
+  ChevronUp, ChevronDown, Activity, Download, Upload, Server, Shield, ShieldAlert,
+} from 'lucide-react';
 
 const MAX_POINTS = 60;
 
@@ -20,9 +27,31 @@ function formatBytes(bytes: number): string {
   return `${bytes} B`;
 }
 
+function SummaryRow({ label, value }: Readonly<{ label: string; value: string }>) {
+  return (
+    <Group justify="space-between" gap="xl" wrap="nowrap">
+      <Text size="sm" c="dimmed">{label}</Text>
+      <Text size="sm" ff="monospace" fw={500}>{value}</Text>
+    </Group>
+  );
+}
+
+function CountCell({ label, value, color }: Readonly<{ label: string; value: number; color: string }>) {
+  return (
+    <Group justify="space-between" gap="sm" wrap="nowrap">
+      <Group gap={6} wrap="nowrap">
+        <Box w={6} h={6} bg={color} style={{ borderRadius: '50%' }} />
+        <Text size="sm">{label}</Text>
+      </Group>
+      <Text size="sm" ff="monospace" fw={500} c={color}>{value}</Text>
+    </Group>
+  );
+}
+
 export function StatusFooter() {
   const [expanded, setExpanded] = useState(false);
   const [history, setHistory] = useState<DataPoint[]>([]);
+  const { navigate } = useUiActions();
 
   const { data: stats } = useQuery({
     queryKey: ['stats'],
@@ -35,6 +64,15 @@ export function StatusFooter() {
     queryFn: getAllTorrents,
     refetchInterval: 2_000,
   });
+
+  // Same key and cadence the Mules page uses, so this shares its cache entry
+  // rather than adding a fifth poll.
+  const { data: watchdog } = useQuery({
+    queryKey: ['watchdog'],
+    queryFn: getWatchdogStatus,
+    refetchInterval: 15_000,
+  });
+  const health = healthSummary(watchdog);
 
   // Build a rolling speed history from polled stats. Genuine time-series
   // accumulation keyed on Date.now() (impure — must run in an effect), so the
@@ -71,128 +109,139 @@ export function StatusFooter() {
   const isActive = dl > 0 || ul > 0 || active > 0;
 
   return (
-    <footer className="fixed bottom-0 left-0 right-0 z-50 bg-neutral-950/90 backdrop-blur-xl border-t border-white/8 shadow-2xl shadow-black/50">
+    <Box
+      component="footer"
+      style={{
+        flexShrink: 0,
+        borderTop: '1px solid var(--mantine-color-default-border)',
+        background: 'var(--mantine-color-body)',
+      }}
+    >
       {/* Graph panel — slides open above the bar */}
-      <div
-        className="overflow-hidden transition-all duration-500 ease-in-out bg-neutral-900 border-b border-black/50"
-        style={{ maxHeight: expanded ? '240px' : '0px' }}
-      >
-        <div className="px-6 py-4 max-w-7xl mx-auto flex flex-col md:flex-row items-center gap-10">
-          <div className="flex-1 w-full relative">
-            <p className="absolute -top-1 left-2 text-[10px] text-neutral-500 uppercase tracking-widest font-semibold z-10">Bandwidth History</p>
-            <div className="pt-4">
+      <Collapse expanded={expanded}>
+        <Group px="lg" py="md" gap="xl" align="stretch" wrap="wrap">
+          <Box flex={1} miw={280} pos="relative">
+            <Text
+              size="10px" tt="uppercase" fw={600} c="dimmed" lts={2}
+              pos="absolute" top={-2} left={8} style={{ zIndex: 1 }}
+            >
+              Bandwidth History
+            </Text>
+            <Box pt="md">
               <SpeedGraph data={history} height={140} />
-            </div>
-          </div>
-          
-          <div className="w-px h-32 bg-white/10 hidden md:block shrink-0"></div>
-          
-          <div className="flex items-start gap-10 shrink-0">
-            <div className="space-y-3 min-w-[140px]">
-              <h4 className="text-[10px] font-semibold text-neutral-500 uppercase tracking-widest mb-4">Transfer Summary</h4>
-              <div className="flex justify-between gap-6 text-sm">
-                <span className="text-neutral-400">Downloaded</span>
-                <span className="text-neutral-200 font-mono font-medium">{formatBytes(totalDownloaded)}</span>
-              </div>
-              <div className="flex justify-between gap-6 text-sm">
-                <span className="text-neutral-400">Uploaded</span>
-                <span className="text-neutral-200 font-mono font-medium">{formatBytes(totalUploaded)}</span>
-              </div>
-              <div className="flex justify-between gap-6 text-sm">
-                <span className="text-neutral-400">Avg Ratio</span>
-                <span className="text-neutral-200 font-mono font-medium">{avgRatio.toFixed(3)}</span>
-              </div>
-            </div>
+            </Box>
+          </Box>
 
-            <div className="w-px h-32 bg-white/10 shrink-0"></div>
+          <Divider orientation="vertical" visibleFrom="md" />
 
-            <div className="space-y-3 min-w-[180px]">
-              <h4 className="text-[10px] font-semibold text-neutral-500 uppercase tracking-widest mb-4">Distribution</h4>
-              <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span><span className="text-neutral-300">Active</span></div>
-                  <span className="text-emerald-400 font-mono font-medium">{counts.active}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-neutral-500"></span><span className="text-neutral-300">Complete</span></div>
-                  <span className="text-neutral-400 font-mono font-medium">{counts.complete}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-orange-500"></span><span className="text-neutral-300">Queued</span></div>
-                  <span className="text-orange-400 font-mono font-medium">{counts.waiting}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-red-500"></span><span className="text-neutral-300">Error</span></div>
-                  <span className="text-red-400 font-mono font-medium">{counts.error}</span>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span><span className="text-neutral-300">Paused</span></div>
-                  <span className="text-blue-400 font-mono font-medium">{counts.paused}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+          <Stack gap="xs" miw={150} justify="center">
+            <Text size="10px" tt="uppercase" fw={600} c="dimmed" lts={2}>Transfer Summary</Text>
+            <SummaryRow label="Downloaded" value={formatBytes(totalDownloaded)} />
+            <SummaryRow label="Uploaded" value={formatBytes(totalUploaded)} />
+            <SummaryRow label="Avg Ratio" value={avgRatio.toFixed(3)} />
+          </Stack>
+
+          <Divider orientation="vertical" />
+
+          <Stack gap="xs" miw={200} justify="center">
+            <Text size="10px" tt="uppercase" fw={600} c="dimmed" lts={2}>Distribution</Text>
+            <SimpleGrid cols={2} spacing="lg" verticalSpacing={8}>
+              <CountCell label="Active" value={counts.active} color="teal.5" />
+              <CountCell label="Complete" value={counts.complete} color="gray.5" />
+              <CountCell label="Queued" value={counts.waiting} color="smuggler.5" />
+              <CountCell label="Error" value={counts.error} color="red.5" />
+              <CountCell label="Paused" value={counts.paused} color="blue.5" />
+            </SimpleGrid>
+          </Stack>
+        </Group>
+      </Collapse>
 
       {/* Status bar */}
-      <div className="max-w-7xl mx-auto px-6 py-2.5 flex items-center gap-6">
-        {/* Expand / collapse toggle */}
-        <button
+      {/*
+        Seven segments do not fit a 380px phone. Speeds and the tunnel-health
+        chip stay at every width — they are the two things worth glancing at —
+        and the rest appear as room allows.
+      */}
+      <Group px="md" py={6} gap="sm" wrap="nowrap" style={{ overflowX: 'auto' }}>
+        <UnstyledButton
           onClick={() => setExpanded(v => !v)}
-          className="flex items-center gap-1.5 text-neutral-400 hover:text-white transition-colors shrink-0"
           title={expanded ? 'Collapse graph' : 'Expand graph'}
+          aria-expanded={expanded}
+          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          c="dimmed"
         >
-          <Activity size={14} className={isActive ? 'text-emerald-400' : 'text-neutral-500'} />
+          <Activity size={14} color={isActive ? 'var(--mantine-color-teal-5)' : 'currentColor'} />
           {expanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-        </button>
+        </UnstyledButton>
 
-        {/* Divider */}
-        <div className="w-px h-4 bg-white/10 shrink-0" />
+        <Divider orientation="vertical" h={16} style={{ alignSelf: 'center' }} />
 
-        {/* Download speed */}
-        <div className="flex items-center gap-2 min-w-[90px]">
-          <Download size={13} className="text-emerald-400 shrink-0" />
-          <span className="font-mono text-xs font-semibold text-emerald-300">{formatBytes(dl)}/s</span>
-        </div>
+        <Group gap={6} wrap="nowrap" miw={{ base: 0, xs: 90 }}>
+          <Download size={13} color="var(--mantine-color-teal-5)" />
+          <Text size="xs" ff="monospace" fw={600} c="var(--smg-ok)">{formatBytes(dl)}/s</Text>
+        </Group>
 
-        {/* Upload speed */}
-        <div className="flex items-center gap-2 min-w-[90px]">
-          <Upload size={13} className="text-blue-400 shrink-0" />
-          <span className="font-mono text-xs font-semibold text-blue-300">{formatBytes(ul)}/s</span>
-        </div>
+        <Group gap={6} wrap="nowrap" miw={{ base: 0, xs: 90 }}>
+          <Upload size={13} color="var(--mantine-color-blue-5)" />
+          <Text size="xs" ff="monospace" fw={600} c="var(--smg-info)">{formatBytes(ul)}/s</Text>
+        </Group>
 
-        {/* Divider */}
-        <div className="w-px h-4 bg-white/10 shrink-0" />
+        <Divider orientation="vertical" h={16} style={{ alignSelf: 'center' }} visibleFrom="xs" />
 
-        {/* Active torrents */}
-        <div className="flex items-center gap-1.5 text-xs text-neutral-400">
-          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${active > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-neutral-600'}`} />
-          <span className="font-semibold text-neutral-200">{active}</span>
-          <span>active</span>
-          {waiting > 0 && (
-            <span className="text-neutral-500 ml-0.5">· {waiting} queued</span>
-          )}
-        </div>
+        <Group gap={6} wrap="nowrap" visibleFrom="xs">
+          <Box
+            w={6} h={6}
+            bg={active > 0 ? 'teal.5' : 'gray.6'}
+            style={{ borderRadius: '50%' }}
+            className={active > 0 ? 'smuggler-pulse' : undefined}
+          />
+          <Text size="xs" fw={600}>{active}</Text>
+          <Text size="xs" c="dimmed">active</Text>
+          {waiting > 0 && <Text size="xs" c="dimmed">· {waiting} queued</Text>}
+        </Group>
 
-        {/* Divider */}
-        <div className="w-px h-4 bg-white/10 shrink-0" />
+        <Divider orientation="vertical" h={16} style={{ alignSelf: 'center' }} visibleFrom="sm" />
 
-        {/* Active mules */}
-        <div className="flex items-center gap-1.5 text-xs text-neutral-400">
-          <Server size={12} className="shrink-0 text-neutral-500" />
-          <span className="font-semibold text-neutral-200">{mules}</span>
-          <span>mule{mules === 1 ? '' : 's'}</span>
-        </div>
+        <Group gap={6} wrap="nowrap" visibleFrom="sm">
+          <Server size={12} color="var(--mantine-color-dimmed)" />
+          <Text size="xs" fw={600}>{mules}</Text>
+          <Text size="xs" c="dimmed">mule{mules === 1 ? '' : 's'}</Text>
+        </Group>
 
-        {/* Spacer */}
-        <div className="flex-1" />
+        {/*
+          Tunnel health — the product's headline signal, and previously visible
+          only on the Mules page. Hidden entirely when there is nothing to
+          report, so an empty system does not display a reassuring "0/0 secure".
+        */}
+        {!health.empty && (
+          <>
+            <Divider orientation="vertical" h={16} style={{ alignSelf: 'center' }} />
+            <UnstyledButton
+              onClick={() => navigate('mules')}
+              title={
+                health.allHealthy
+                  ? 'All mule tunnels verified. Open the Mules page.'
+                  : `${health.compromised} of ${health.total} mule tunnels compromised. Open the Mules page.`
+              }
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              {health.allHealthy
+                ? <Shield size={12} color="var(--mantine-color-teal-5)" />
+                : <ShieldAlert size={12} color="var(--mantine-color-red-5)" />}
+              {/* Never colour alone: the state is spelled out in the label. */}
+              <Text size="xs" fw={500} c={health.allHealthy ? 'teal.4' : 'red.4'} style={{ whiteSpace: 'nowrap' }}>
+                {healthLabel(health)}
+              </Text>
+            </UnstyledButton>
+          </>
+        )}
 
-        {/* Subtle label */}
-        <span className="text-[10px] text-neutral-600 font-mono select-none hidden sm:block">
+        <Box flex={1} />
+
+        <Text size="10px" c="dimmed" ff="monospace" visibleFrom="sm" style={{ userSelect: 'none' }}>
           Smuggler
-        </span>
-      </div>
-    </footer>
+        </Text>
+      </Group>
+    </Box>
   );
 }

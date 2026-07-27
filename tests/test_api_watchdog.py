@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import threading
+
 import pytest
 
 from api.app import create_app
@@ -293,34 +295,52 @@ class TestWatchdogEvacuate:
 class TestStartWatchdogIdempotence:
     """start_watchdog() promises it will not start a second thread."""
 
-    def _reset(self):
+    @pytest.fixture(autouse=True)
+    def _inert_thread(self, monkeypatch):
+        """Let the thread start, but never let it sweep.
+
+        These are the only tests that want a real thread. They used to get a
+        real *sweeping* one: `_reset()` clears the module handle but nothing
+        stops the thread, so each run leaked a daemon that kept issuing HTTP
+        through `requests` for the rest of the session — polluting
+        `responses.calls` in unrelated tests. Swapping the loop for a park
+        keeps the idempotence guard under test and the sweep out of it.
+        """
+        stop = threading.Event()
+        monkeypatch.setenv("SMG_WATCHDOG_ENABLED", "true")
+        monkeypatch.setattr(wd, "_watchdog_loop", stop.wait)
+        wd._watchdog_thread = None
+        yield
+        # Actually stop it. Parking the thread instead of sweeping removes the
+        # HTTP, but a thread left alive is still a leak, and the isolation test
+        # below fails on one.
+        stop.set()
+        thread = wd._watchdog_thread
+        if isinstance(thread, threading.Thread):
+            thread.join(timeout=2)
         wd._watchdog_thread = None
 
     def test_second_call_does_not_start_another_thread(self):
-        self._reset()
-        try:
-            wd.start_watchdog()
-            first = wd._watchdog_thread
-            wd.start_watchdog()
-            assert wd._watchdog_thread is first
-        finally:
-            self._reset()
+        wd.start_watchdog()
+        first = wd._watchdog_thread
+        wd.start_watchdog()
+        assert wd._watchdog_thread is first
 
     def test_restarts_when_previous_thread_died(self):
-        self._reset()
-
         class _Dead:
             ident = 1
             def is_alive(self):
                 return False
 
-        try:
-            wd._watchdog_thread = _Dead()
-            wd.start_watchdog()
-            assert wd._watchdog_thread is not None
-            assert wd._watchdog_thread.is_alive()
-        finally:
-            self._reset()
+        wd._watchdog_thread = _Dead()
+        wd.start_watchdog()
+        assert wd._watchdog_thread is not None
+        assert wd._watchdog_thread.is_alive()
+
+    def test_does_not_start_when_disabled(self, monkeypatch):
+        monkeypatch.setenv("SMG_WATCHDOG_ENABLED", "false")
+        wd.start_watchdog()
+        assert wd._watchdog_thread is None
 
 
 # ─── Evacuation audit events ─────────────────────────────────────────────────
@@ -436,3 +456,33 @@ class TestExpectedStop:
         assert resp.status_code == 200
         with wd._lock:
             assert "smuggler-mule-test" not in wd._expected_stops
+
+
+class TestWatchdogThreadIsolation:
+    """The sweep thread must not run during the suite.
+
+    A live sweep reaches ``requests`` through the aria2 and Docker clients, and
+    ``responses`` patches ``requests`` process-wide — so a sweep landing inside
+    a ``@responses.activate`` test appends to ``responses.calls`` and shifts the
+    call that test asserts on. That produced a failure that appeared only in
+    full runs, roughly one run in three.
+    """
+
+    def test_conftest_disables_the_watchdog(self):
+        assert wd.watchdog_enabled() is False
+
+    def test_create_app_starts_no_sweep_thread(self):
+        wd._watchdog_thread = None
+        create_app()
+        assert wd._watchdog_thread is None
+
+    def test_no_watchdog_thread_is_alive_anywhere_in_the_session(self):
+        # Catches a test that starts a real one and forgets to stop it.
+        live = [t for t in threading.enumerate() if t.name == "smuggler-watchdog" and t.is_alive()]
+        assert live == [], f"leaked watchdog thread(s): {live}"
+
+    def test_enabled_by_default_outside_the_suite(self, monkeypatch):
+        # The guard must not change production behaviour: absent the variable,
+        # the watchdog still runs.
+        monkeypatch.delenv("SMG_WATCHDOG_ENABLED", raising=False)
+        assert wd.watchdog_enabled() is True

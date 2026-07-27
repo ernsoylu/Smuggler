@@ -1,8 +1,14 @@
-import { useModalA11y, modalA11yProps } from '../hooks/useModalA11y';
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { getMules, addMagnet, addTorrentFile } from '../api/client';
-import { X, UploadCloud, Link as LinkIcon } from 'lucide-react';
+import {
+  Alert, Button, Group, Modal, SegmentedControl, Select, Stack, Text, Textarea, ThemeIcon,
+  UnstyledButton,
+} from '@mantine/core';
+import { getMules, getAllTorrents, addMagnet, addTorrentFile } from '../api/client';
+import { leastLoadedMule, resolveRoutingTarget, AUTO_MULE } from '../lib/torrentList';
+import { useUiActions } from '../context/UiActionsContext';
+import { useNotifications } from '../context/NotificationContext';
+import { UploadCloud, Link as LinkIcon, AlertCircle, Rocket } from 'lucide-react';
 
 interface Props {
   onClose: () => void;
@@ -10,9 +16,15 @@ interface Props {
 
 export function AddTorrentModal({ onClose }: Readonly<Props>) {
   const qc = useQueryClient();
+  const { openDeployMule } = useUiActions();
+  const { push } = useNotifications();
   const [mode, setMode] = useState<'magnet' | 'file'>('magnet');
   const [magnet, setMagnet] = useState('');
-  const [mule, setMule] = useState('');
+  // Defaults to auto-routing. Dropping a .torrent already picks the
+  // least-loaded mule without asking; making the button path demand the one
+  // decision a user cannot make well ("which container is least loaded?") made
+  // the same action harder through the more obvious entry point.
+  const [mule, setMule] = useState<string>(AUTO_MULE);
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
@@ -23,167 +35,189 @@ export function AddTorrentModal({ onClose }: Readonly<Props>) {
     staleTime: 10_000,
   });
 
+  // Load only matters for the auto choice; the cache is already warm.
+  const { data: torrents = [] } = useQuery({
+    queryKey: ['torrents'],
+    queryFn: getAllTorrents,
+  });
+
   const runningMules = mules.filter(w => w.status === 'running');
+  const autoTarget = leastLoadedMule(mules, torrents);
 
   const add = useMutation({
     mutationFn: async () => {
-      if (!mule) throw new Error('Select a mule');
+      const target = resolveRoutingTarget(mule, mules, torrents);
+      if (!target) throw new Error('No running mule to receive the torrent');
       if (mode === 'magnet') {
         if (!magnet.trim()) throw new Error('Paste a magnet link');
-        return addMagnet(mule, magnet.trim());
+        await addMagnet(target, magnet.trim());
       } else {
         if (!file) throw new Error('Choose a .torrent file');
-        return addTorrentFile(mule, file);
+        await addTorrentFile(target, file);
       }
+      return target;
     },
-    onSuccess: () => {
+    onSuccess: (target) => {
+      // The drop path already confirms; the button path used to just close,
+      // leaving the user to find the new row in a paginated, filtered list.
+      push({
+        type: 'success',
+        title: mode === 'magnet' ? 'Magnet added' : `Added ${file?.name}`,
+        message: `Routed to ${target}.`,
+      });
       qc.invalidateQueries({ queryKey: ['torrents'] });
       onClose();
     },
     onError: (e: Error) => setError(e.message),
   });
-  // Escape is disabled mid-submit so a stray keypress cannot orphan the request.
-  const dialogRef = useModalA11y(add.isPending ? undefined : onClose);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
-      <button
-        type="button"
-        aria-label="Close modal"
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity border-0 p-0 cursor-default"
-        onClick={onClose}
-      />
-      
-      {/* Modal */}
-      <div
-        ref={dialogRef}
-        {...modalA11yProps}
-        aria-labelledby="add-torrent-title"
-        className="relative bg-neutral-900 border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl flex flex-col gap-6 animate-in fade-in zoom-in-95 duration-200">
-        <div className="flex items-center justify-between">
-          <h2 id="add-torrent-title" className="text-white font-bold text-xl tracking-tight">Add Torrent</h2>
-          <button 
-            className="p-1.5 text-neutral-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors" 
-            onClick={onClose}
-          >
-            <X size={20} />
-          </button>
-        </div>
-
+    <Modal
+      opened
+      onClose={onClose}
+      centered
+      radius="lg"
+      title={<Text fw={700} size="xl">Add Torrent</Text>}
+      // Escape is disabled mid-submit so a stray keypress cannot orphan the request.
+      closeOnEscape={!add.isPending}
+      closeOnClickOutside={!add.isPending}
+    >
+      <Stack gap="md">
         {/* Mode toggle */}
-        <div className="flex rounded-xl bg-neutral-950 p-1 border border-white/5">
-          {(['magnet', 'file'] as const).map(m => (
-            <button
-              key={m}
-              className={`flex items-center justify-center gap-2 flex-1 text-sm font-medium py-2 rounded-lg transition-all ${
-                mode === m
-                  ? 'bg-neutral-800 text-white shadow shadow-black/20 ring-1 ring-white/10'
-                  : 'text-neutral-500 hover:text-neutral-300'
-              }`}
-              onClick={() => { setMode(m); setError(''); }}
-            >
-              {m === 'magnet' ? <LinkIcon size={16}/> : <UploadCloud size={16}/>}
-              {m === 'magnet' ? 'Magnet Link' : '.torrent File'}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          fullWidth
+          value={mode}
+          onChange={v => { setMode(v as 'magnet' | 'file'); setError(''); }}
+          data={[
+            {
+              value: 'magnet',
+              label: (
+                <Group gap={8} justify="center" wrap="nowrap">
+                  <LinkIcon size={16} /> Magnet Link
+                </Group>
+              ),
+            },
+            {
+              value: 'file',
+              label: (
+                <Group gap={8} justify="center" wrap="nowrap">
+                  <UploadCloud size={16} /> .torrent File
+                </Group>
+              ),
+            },
+          ]}
+        />
 
         {/* Input area */}
-        <div className="flex flex-col gap-2">
-          {mode === 'magnet' ? (
-            <>
-              <label htmlFor="add-torrent-magnet" className="text-sm font-medium text-neutral-400">Magnet URI</label>
-              <textarea
-                id="add-torrent-magnet"
-                className="w-full bg-neutral-950 border border-white/10 rounded-xl text-sm text-neutral-200 p-4 font-mono resize-none focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-neutral-600"
-                rows={4}
-                placeholder="magnet:?xt=urn:btih:..."
-                value={magnet}
-                onChange={e => { setMagnet(e.target.value); setError(''); }}
+        {mode === 'magnet' ? (
+          <Textarea
+            id="add-torrent-magnet"
+            label="Magnet URI"
+            rows={4}
+            placeholder="magnet:?xt=urn:btih:..."
+            value={magnet}
+            onChange={e => { setMagnet(e.currentTarget.value); setError(''); }}
+            styles={{ input: { fontFamily: 'var(--mantine-font-family-monospace)' } }}
+          />
+        ) : (
+          <div>
+            <Text size="sm" fw={500} mb={6}>Torrent File</Text>
+            <UnstyledButton
+              component="label"
+              htmlFor="add-torrent-file"
+              w="100%"
+              p="xl"
+              style={{
+                border: '2px dashed var(--mantine-color-default-border)',
+                borderRadius: 'var(--mantine-radius-lg)',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 12,
+                cursor: 'pointer',
+              }}
+            >
+              <ThemeIcon variant="default" size={48} radius="xl">
+                <UploadCloud size={24} />
+              </ThemeIcon>
+              <input
+                id="add-torrent-file"
+                ref={fileRef}
+                type="file"
+                accept=".torrent"
+                style={{ display: 'none' }}
+                onChange={e => { setFile(e.target.files?.[0] ?? null); setError(''); }}
               />
-            </>
-          ) : (
-            <>
-              <p className="text-sm font-medium text-neutral-400">Torrent File</p>
-              <label
-                htmlFor="add-torrent-file"
-                className="w-full border-2 border-dashed border-white/10 hover:border-blue-500/50 hover:bg-blue-500/5 bg-neutral-950/50 rounded-xl p-8 text-center cursor-pointer transition-all flex flex-col items-center gap-3"
-              >
-                <div className="w-12 h-12 rounded-full bg-neutral-900 border border-white/5 flex items-center justify-center text-neutral-400">
-                   <UploadCloud size={24} />
-                </div>
-                <input
-                  id="add-torrent-file"
-                  ref={fileRef}
-                  type="file"
-                  accept=".torrent"
-                  className="hidden"
-                  onChange={e => { setFile(e.target.files?.[0] ?? null); setError(''); }}
-                />
-                {file ? (
-                  <p className="text-sm font-medium text-blue-400">{file.name}</p>
-                ) : (
-                  <p className="text-sm text-neutral-500">Click to choose a .torrent file — or drop one anywhere</p>
-                )}
-              </label>
-            </>
-          )}
-        </div>
+              {file ? (
+                <Text size="sm" fw={500} c="var(--smg-info)">{file.name}</Text>
+              ) : (
+                <Text size="sm" c="dimmed">Click to choose a .torrent file — or drop one anywhere</Text>
+              )}
+            </UnstyledButton>
+          </div>
+        )}
 
         {/* Mule selector */}
-        <div className="flex flex-col gap-2">
-          <label htmlFor="add-torrent-mule" className="text-sm font-medium text-neutral-400">Routing Mule</label>
-          <div className="relative">
-            <select
-              id="add-torrent-mule"
-              className="w-full appearance-none bg-neutral-950 border border-white/10 rounded-xl text-sm text-neutral-200 p-3.5 pr-10 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-medium"
-              value={mule}
-              onChange={e => { setMule(e.target.value); setError(''); }}
-            >
-              <option value="" disabled className="text-neutral-500">— select a mule —</option>
-              {runningMules.map(w => (
-                <option key={w.name} value={w.name}>
-                  {w.name} {w.ip_info ? `(${w.ip_info.country})` : ''}
-                </option>
-              ))}
-            </select>
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-neutral-500">
-               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-            </div>
-          </div>
+        <div>
+          <Select
+            id="add-torrent-mule"
+            label="Routing Mule"
+            allowDeselect={false}
+            value={mule}
+            onChange={v => { setMule(v ?? AUTO_MULE); setError(''); }}
+            data={[
+              {
+                value: AUTO_MULE,
+                label: autoTarget
+                  ? `Auto — least loaded (${autoTarget.name})`
+                  : 'Auto — least loaded',
+              },
+              ...runningMules.map(w => ({
+                value: w.name,
+                label: `${w.name}${w.ip_info ? ` (${w.ip_info.country})` : ''}`,
+              })),
+            ]}
+            comboboxProps={{ withinPortal: true }}
+          />
+          {/* Used to be a sentence. A dead end that names its own fix should
+              perform it, not describe it. */}
           {runningMules.length === 0 && (
-            <p className="text-xs font-medium text-orange-400 mt-1 flex items-center gap-1.5">
-               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-               No running mules — deploy one first.
-            </p>
+            <Group gap="xs" mt={6}>
+              <Group gap={6} wrap="nowrap">
+                <AlertCircle size={14} color="var(--mantine-color-orange-4)" />
+                <Text size="xs" fw={500} c="var(--smg-warn)">No running mules.</Text>
+              </Group>
+              <Button
+                size="compact-xs"
+                variant="default"
+                leftSection={<Rocket size={12} />}
+                onClick={() => { onClose(); openDeployMule(); }}
+              >
+                Deploy one
+              </Button>
+            </Group>
           )}
         </div>
 
-        {error && <p className="text-sm font-medium text-red-400 bg-red-500/10 p-3 rounded-lg border border-red-500/20">{error}</p>}
+        {error && (
+          <Alert color="red" radius="md" p="sm">
+            <Text size="sm" fw={500} c="var(--smg-bad)">{error}</Text>
+          </Alert>
+        )}
 
         {/* Footer */}
-        <div className="flex gap-3 pt-2">
-          <button
-            className="flex-1 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-sm font-semibold text-neutral-300 transition-colors"
-            onClick={onClose}
-          >
-            Cancel
-          </button>
-          <button
-            className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-sm text-white font-bold shadow-lg shadow-blue-500/25 transition-all active:scale-95 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
+        <Group grow pt="xs">
+          <Button variant="default" onClick={onClose}>Cancel</Button>
+          <Button
             onClick={() => add.mutate()}
-            disabled={add.isPending || runningMules.length === 0}
+            loading={add.isPending}
+            disabled={runningMules.length === 0}
           >
-            {add.isPending ? (
-               <>
-                 <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                 Adding...
-               </>
-            ) : 'Add Torrent'}
-          </button>
-        </div>
-      </div>
-    </div>
+            Add Torrent
+          </Button>
+        </Group>
+      </Stack>
+    </Modal>
   );
 }
