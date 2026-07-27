@@ -30,8 +30,49 @@
 - **Unprivileged UI container**: The web container runs as uid 101 on `nginx-unprivileged`, so the container facing the browser holds no root.
 - **Least privilege**: Mules start from `cap_drop: ALL` and add back only the five capabilities they need (no `CAP_SYS_MODULE`, no `NET_RAW`), run with `no-new-privileges` and memory/PID ceilings, and drop aria2 to your uid so downloads are not root-owned. `setup.sh` loads the `wireguard` module on the host instead.
 
-## Quick Start (Docker Compose)
-The fastest way to run Smuggler is via the included lifecycle script:
+## Install (prebuilt images)
+No source checkout and no build toolchain — this pulls published images from GHCR:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ernsoylu/Smuggler/main/install.sh | sh
+```
+
+It installs into `~/.smuggler`, generates `SMG_SECRET_KEY`, `SMG_SECRET_SALT` and
+`SMG_API_TOKEN` into a `0600` `.env`, pulls the four images, and starts the stack on
+<http://127.0.0.1:8887>. It prints the generated API token when it finishes.
+
+Piping a remote script into a shell means trusting whatever the server returns. To read
+it first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ernsoylu/Smuggler/main/install.sh -o install.sh
+less install.sh && sh install.sh
+```
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SMUGGLER_DIR` | `~/.smuggler` | Install directory |
+| `SMG_VERSION` | `sha-<main HEAD>` | Image tag to pin |
+| `SMUGGLER_NO_START` | unset | Set to `1` to install without starting |
+| `SMUGGLER_REGISTRY` | `ghcr.io/ernsoylu` | Image namespace |
+
+An install pins to the **immutable `sha-<12>` tag** of the current `main`, not `:latest`,
+so a later push cannot silently change what the machine runs. Re-running the installer
+moves the pin forward; it never overwrites existing secrets. Stop the stack with
+`cd ~/.smuggler && docker compose down`.
+
+Every push to `main` publishes multi-arch (amd64 + arm64) images — `smuggler-api`,
+`smuggler-web`, `smuggler-mule-wireguard`, `smuggler-mule-openvpn` under
+`ghcr.io/ernsoylu/`. Publishing is gated on **CI Gate**, so a red build never becomes
+`latest`.
+
+> The installer retags the two mule images to the unqualified local tags
+> `smuggler-mule:latest` and `smuggler-mule-ovpn:latest`. The API launches mules by
+> those names and reaches Docker through the filtered socket proxy with `IMAGES=0`, so
+> it can neither build nor pull them itself — the host has to put them in place.
+
+## Quick Start (from source)
+Running from a checkout builds the images locally instead:
 
 ```bash
 ./start.sh build    # 1. Build worker images and start the API/UI stack
@@ -43,7 +84,7 @@ The fastest way to run Smuggler is via the included lifecycle script:
 ## Development
 - **Local Debug**: `./start.sh debug` (Vite + Flask with hot-reload).
 - **Setup**: `./setup.sh` (installs deps and builds all 4 images).
-- **Tests**: `uv run pytest tests/` (473 passing tests, plus 201 frontend tests via `npm run test:run`).
+- **Tests**: `uv run pytest tests/` (473 passing tests, plus 251 frontend tests via `npm run test:run`).
   The suite is hermetic: `conftest.py` strips `SMG_API_TOKEN` and `SMG_MULE_RPC_HOST`
   after `cli/log.py` loads the repo `.env`, so a machine that has run `./setup.sh`
   behaves the same as CI, which has no `.env`.
@@ -53,13 +94,16 @@ The fastest way to run Smuggler is via the included lifecycle script:
   - **Docker CI**: `hadolint` + cached build of all 4 images + `docker compose config` validation.
   - **Shell CI**: `shellcheck` over the mule kill-switch / leak-protection scripts and setup scripts.
   - **Security CI**: `pip-audit` on the resolved Python lock file, `npm audit` (production advisories fail; build-tooling advisories are reported), Trivy CVE scans of all four images, Trivy IaC misconfiguration scanning, and a CycloneDX SBOM artifact. Also runs weekly on a schedule, because a dependency advisory can land without anyone touching the code.
+  - **Release CI**: on a push to `main` and **only after CI Gate passes**, builds all 4 images for amd64 + arm64 and pushes them to GHCR as `:latest` and `:sha-<12>`. The only workflow in the repo holding a write scope (`packages: write`).
   - **SonarQube Cloud**: analysis + quality gate (auto-skips until `SONAR_TOKEN` is set).
 
   Dependabot keeps Python, npm, GitHub Actions and the digest-pinned base images current — scanning reports a CVE, Dependabot is what closes it. All actions are SHA-pinned.
 
   A single `ci.yml` orchestrator detects which areas a change touches and invokes only those reusable workflows, ending in one always-running **CI Gate** job.
 
-  > In branch protection, require just the **`CI / CI Gate`** status. It reports on every PR and fails if any triggered area failed (untouched areas count as passing), so path-filtered jobs never leave a required check stuck "pending". SonarQube runs as a separate, token-gated analysis.
+  > In branch protection, require just the **`CI Gate`** status. It reports on every PR and fails if any triggered area failed (untouched areas count as passing), so path-filtered jobs never leave a required check stuck "pending". SonarQube runs as a separate, token-gated analysis.
+  >
+  > The context string is `CI Gate`, **not** `CI / CI Gate` — `CI` is the workflow name, which GitHub renders as a prefix in the Checks tab but is not part of the status context. A rule naming `CI / CI Gate` matches nothing and silently never enforces.
 
 ---
 **Technical documentation for AI/Developers:**

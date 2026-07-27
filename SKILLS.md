@@ -150,8 +150,16 @@ Commands are defined in `cli/mule_commands.py` and `cli/torrent_commands.py`.
 
 ### Branch, verify, PR
 
-`main` is protected by the **`CI / CI Gate`** status check, and work lands via
-pull request — never by pushing to `main` directly.
+`main` is protected by a repository ruleset requiring a pull request and the
+**`CI Gate`** status check, and work lands via pull request — never by pushing
+to `main` directly. The ruleset also blocks deletion and force-pushes, and
+restricts merges to **squash**. Repo admins are configured as bypass actors, so
+the protection is a guardrail rather than a lockout — do not route around it.
+
+> The required context is `CI Gate`, **not** `CI / CI Gate`. `CI` is the
+> workflow name, which GitHub renders as a prefix in the Checks tab but is not
+> part of the status context; a rule naming `CI / CI Gate` matches nothing and
+> silently never enforces.
 
 1.  **Branch** off `main`:
     ```bash
@@ -175,8 +183,12 @@ pull request — never by pushing to `main` directly.
 3.  **Commit and push the branch**, then open a PR.
 4.  **CI runs on the PR, not on the branch push.** The orchestrator triggers on
     `pull_request` to `main`, so a branch push alone produces no run. Wait for
-    **`CI / CI Gate`** plus the SonarCloud gate to go green.
-5.  **Merge with squash**, matching the existing history.
+    **`CI Gate`** plus the SonarCloud gate to go green.
+5.  **Merge with squash** — the ruleset permits no other merge method.
+6.  **Merging publishes.** The `publish` job runs on the push to `main` once
+    `CI Gate` is green, building multi-arch images and pushing them to GHCR as
+    `:latest` and `:sha-<12>`. A merge is a release — if a change should not
+    reach `latest`, it should not reach `main`.
 
 ### Quality gates
 
