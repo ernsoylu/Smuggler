@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import threading
+
 import pytest
 
 from api.app import create_app
@@ -15,6 +17,7 @@ def reset_watchdog_state():
     """Clear shared watchdog state between tests."""
     with wd._lock:
         wd._mule_states.clear()
+        wd._expected_stops.clear()
         wd._watchdog_stats.update({
             "started_at": None,
             "last_run_at": None,
@@ -292,34 +295,52 @@ class TestWatchdogEvacuate:
 class TestStartWatchdogIdempotence:
     """start_watchdog() promises it will not start a second thread."""
 
-    def _reset(self):
+    @pytest.fixture(autouse=True)
+    def _inert_thread(self, monkeypatch):
+        """Let the thread start, but never let it sweep.
+
+        These are the only tests that want a real thread. They used to get a
+        real *sweeping* one: `_reset()` clears the module handle but nothing
+        stops the thread, so each run leaked a daemon that kept issuing HTTP
+        through `requests` for the rest of the session — polluting
+        `responses.calls` in unrelated tests. Swapping the loop for a park
+        keeps the idempotence guard under test and the sweep out of it.
+        """
+        stop = threading.Event()
+        monkeypatch.setenv("SMG_WATCHDOG_ENABLED", "true")
+        monkeypatch.setattr(wd, "_watchdog_loop", stop.wait)
+        wd._watchdog_thread = None
+        yield
+        # Actually stop it. Parking the thread instead of sweeping removes the
+        # HTTP, but a thread left alive is still a leak, and the isolation test
+        # below fails on one.
+        stop.set()
+        thread = wd._watchdog_thread
+        if isinstance(thread, threading.Thread):
+            thread.join(timeout=2)
         wd._watchdog_thread = None
 
     def test_second_call_does_not_start_another_thread(self):
-        self._reset()
-        try:
-            wd.start_watchdog()
-            first = wd._watchdog_thread
-            wd.start_watchdog()
-            assert wd._watchdog_thread is first
-        finally:
-            self._reset()
+        wd.start_watchdog()
+        first = wd._watchdog_thread
+        wd.start_watchdog()
+        assert wd._watchdog_thread is first
 
     def test_restarts_when_previous_thread_died(self):
-        self._reset()
-
         class _Dead:
             ident = 1
             def is_alive(self):
                 return False
 
-        try:
-            wd._watchdog_thread = _Dead()
-            wd.start_watchdog()
-            assert wd._watchdog_thread is not None
-            assert wd._watchdog_thread.is_alive()
-        finally:
-            self._reset()
+        wd._watchdog_thread = _Dead()
+        wd.start_watchdog()
+        assert wd._watchdog_thread is not None
+        assert wd._watchdog_thread.is_alive()
+
+    def test_does_not_start_when_disabled(self, monkeypatch):
+        monkeypatch.setenv("SMG_WATCHDOG_ENABLED", "false")
+        wd.start_watchdog()
+        assert wd._watchdog_thread is None
 
 
 # ─── Evacuation audit events ─────────────────────────────────────────────────
@@ -361,3 +382,107 @@ class TestEvacuationEvents:
         manual = list_events(kind="evacuation_manual")
         assert len(manual) == 1
         assert manual[0]["payload"] == {"kill_after": True, "migrated": 0, "skipped": 1}
+
+
+# ─── Expected stops (user-initiated teardown must not read as unhealthy) ─────
+
+class TestExpectedStop:
+    def test_sweep_skips_marked_stopping_mule(self):
+        """Regression: a graceful stop racing a sweep raised "VPN compromised"."""
+        wd.mark_expected_stop("smuggler-mule-test")
+        mule = make_mule_info(status="exited")
+        with patch("api.watchdog.get_docker_client"), \
+             patch("api.watchdog.list_mules", return_value=[mule]):
+            results = wd._run_sweep()
+        assert results == []
+        with wd._lock:
+            assert "smuggler-mule-test" not in wd._mule_states
+
+    def test_sweep_drops_prior_state_for_marked_mule(self):
+        with wd._lock:
+            wd._mule_states["smuggler-mule-test"] = {"healthy": False, "consecutive_failures": 1}
+        wd.mark_expected_stop("smuggler-mule-test")
+        mule = make_mule_info(status="exited")
+        with patch("api.watchdog.get_docker_client"), \
+             patch("api.watchdog.list_mules", return_value=[mule]):
+            wd._run_sweep()
+        with wd._lock:
+            assert "smuggler-mule-test" not in wd._mule_states
+
+    def test_expired_marker_flags_exited_mule_again(self):
+        wd.mark_expected_stop("smuggler-mule-test", ttl=-1)
+        mule = make_mule_info(status="exited")
+        with patch("api.watchdog.get_docker_client"), \
+             patch("api.watchdog.list_mules", return_value=[mule]):
+            results = wd._run_sweep()
+        assert len(results) == 1
+        assert results[0]["healthy"] is False
+        assert results[0]["kind"] == "exited"
+
+    def test_marker_does_not_mask_a_running_mule(self):
+        """The marker only excuses non-running statuses — a live container is
+        still probed, so a real VPN failure during the stop window is caught."""
+        wd.mark_expected_stop("smuggler-mule-test")
+        mule = make_mule_info(status="running")
+        with patch("api.watchdog.get_docker_client"), \
+             patch("api.watchdog.list_mules", return_value=[mule]), \
+             patch("api.watchdog.check_mule_vpn", return_value=dict(UNHEALTHY_RESULT)):
+            results = wd._run_sweep()
+        assert len(results) == 1
+        assert results[0]["healthy"] is False
+
+    def test_marker_purged_once_container_is_gone(self):
+        wd.mark_expected_stop("smuggler-mule-test")
+        with patch("api.watchdog.get_docker_client"), \
+             patch("api.watchdog.list_mules", return_value=[]):
+            wd._run_sweep()
+        with wd._lock:
+            assert "smuggler-mule-test" not in wd._expected_stops
+
+    def test_manual_evacuate_endpoint_marks_expected_stop(self, client):
+        report = {"migrated": [], "skipped": [], "killed": True}
+        with patch("api.watchdog.get_docker_client"), \
+             patch("api.watchdog.evacuate_mule", return_value=report):
+            resp = client.post("/api/watchdog/smuggler-mule-test/evacuate")
+        assert resp.status_code == 200
+        with wd._lock:
+            assert "smuggler-mule-test" in wd._expected_stops
+
+    def test_manual_evacuate_keep_does_not_mark(self, client):
+        report = {"migrated": [], "skipped": [], "killed": False}
+        with patch("api.watchdog.get_docker_client"), \
+             patch("api.watchdog.evacuate_mule", return_value=report):
+            resp = client.post("/api/watchdog/smuggler-mule-test/evacuate?kill=false")
+        assert resp.status_code == 200
+        with wd._lock:
+            assert "smuggler-mule-test" not in wd._expected_stops
+
+
+class TestWatchdogThreadIsolation:
+    """The sweep thread must not run during the suite.
+
+    A live sweep reaches ``requests`` through the aria2 and Docker clients, and
+    ``responses`` patches ``requests`` process-wide — so a sweep landing inside
+    a ``@responses.activate`` test appends to ``responses.calls`` and shifts the
+    call that test asserts on. That produced a failure that appeared only in
+    full runs, roughly one run in three.
+    """
+
+    def test_conftest_disables_the_watchdog(self):
+        assert wd.watchdog_enabled() is False
+
+    def test_create_app_starts_no_sweep_thread(self):
+        wd._watchdog_thread = None
+        create_app()
+        assert wd._watchdog_thread is None
+
+    def test_no_watchdog_thread_is_alive_anywhere_in_the_session(self):
+        # Catches a test that starts a real one and forgets to stop it.
+        live = [t for t in threading.enumerate() if t.name == "smuggler-watchdog" and t.is_alive()]
+        assert live == [], f"leaked watchdog thread(s): {live}"
+
+    def test_enabled_by_default_outside_the_suite(self, monkeypatch):
+        # The guard must not change production behaviour: absent the variable,
+        # the watchdog still runs.
+        monkeypatch.delenv("SMG_WATCHDOG_ENABLED", raising=False)
+        assert wd.watchdog_enabled() is True

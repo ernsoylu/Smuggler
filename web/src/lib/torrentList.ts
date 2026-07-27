@@ -178,3 +178,30 @@ export function resolveRoutingTarget(
   if (selection !== AUTO_MULE) return selection || null;
   return leastLoadedMule(mules, torrents)?.name ?? null;
 }
+
+/**
+ * Re-impose a captured row order on freshly-fetched data.
+ *
+ * The list refetches every 2s and sorts on render, so sorting by speed or ETA
+ * reorders rows continuously. That is fine while you are only watching, and
+ * hostile the moment you are not: a row can slide out from under the cursor
+ * between deciding to pause it and clicking, and an expanded row can scroll
+ * away mid-read. The page freezes the order while a selection or an expanded
+ * row exists and passes the captured key order here.
+ *
+ * Torrents added since the freeze are unknown to the snapshot and go last, in
+ * their natural order, rather than being dropped.
+ */
+export function applyFrozenOrder(torrents: Torrent[], frozenKeys: readonly string[] | null): Torrent[] {
+  if (!frozenKeys || frozenKeys.length === 0) return torrents;
+
+  const rank = new Map<string, number>();
+  frozenKeys.forEach((key, i) => rank.set(key, i));
+
+  // Copy before sorting: callers pass the query cache array.
+  return [...torrents].sort((a, b) => {
+    const ra = rank.get(torrentKey(a)) ?? Number.MAX_SAFE_INTEGER;
+    const rb = rank.get(torrentKey(b)) ?? Number.MAX_SAFE_INTEGER;
+    return ra - rb;
+  });
+}

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ActionIcon, Badge, Box, Button, Checkbox, Group, Loader, Pagination, Paper,
-  SegmentedControl, Select, Stack, Table, Text, Title, UnstyledButton,
+  SegmentedControl, Select, Stack, Table, Text, Title, Tooltip, UnstyledButton,
 } from '@mantine/core';
 import { getAllTorrents, getMules, pauseTorrent, resumeTorrent, removeTorrent } from '../api/client';
 import { TorrentRow } from '../components/TorrentRow';
@@ -12,11 +12,14 @@ import { needsSetup } from '../lib/setup';
 import {
   filterTorrents, sortTorrents, nextSort, paginate, totalPages, statusCounts,
   torrentKey, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE, categoriesOf,
-  ALL_CATEGORIES, UNCATEGORISED,
+  ALL_CATEGORIES, UNCATEGORISED, applyFrozenOrder,
   type FilterStatus, type SortKey, type SortState,
 } from '../lib/torrentList';
 import { useUiActions } from '../context/UiActionsContext';
-import { Plus, Search, X, ArrowUp, ArrowDown, Pause, Play, Trash2, Tag } from 'lucide-react';
+import { useNotifications } from '../context/NotificationContext';
+import {
+  Plus, Search, X, ArrowUp, ArrowDown, Pause, Play, Trash2, Tag, Rows2, Rows3,
+} from 'lucide-react';
 import { TextInput } from '@mantine/core';
 
 const COLUMNS: { key: SortKey | null; label: string; align?: 'right' | 'center' }[] = [
@@ -33,9 +36,19 @@ const COLUMNS: { key: SortKey | null; label: string; align?: 'right' | 'center' 
 
 const UNCAT_VALUE = '\u0000uncategorised';
 
+const DENSITY_KEY = 'smuggler.torrents.density';
+
+/** Past tense, for the summary a finished bulk action reports. */
+const BULK_VERB: Record<'pause' | 'resume' | 'remove', string> = {
+  pause: 'Paused',
+  resume: 'Resumed',
+  remove: 'Removed',
+};
+
 export function TorrentsPage() {
   const qc = useQueryClient();
   const { openAddTorrent } = useUiActions();
+  const { push } = useNotifications();
   const [filter, setFilter] = useState<FilterStatus>('all');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<SortState | null>(null);
@@ -43,6 +56,9 @@ export function TorrentsPage() {
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   const [category, setCategory] = useState<string>(ALL_CATEGORIES);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Persisted: density is a workspace preference, not a per-visit choice.
+  const [dense, setDense] = useState(() => localStorage.getItem(DENSITY_KEY) === 'compact');
   const [confirmBulkRemove, setConfirmBulkRemove] = useState(false);
 
   const { data: torrents = [], isLoading } = useQuery({
@@ -57,9 +73,28 @@ export function TorrentsPage() {
   const runningMules = mules.filter(m => m.status === 'running').length;
 
   const counts = useMemo(() => statusCounts(torrents), [torrents]);
-  const visible = useMemo(
+  const ordered = useMemo(
     () => sortTorrents(filterTorrents(torrents, filter, search, category), sort),
     [torrents, filter, search, category, sort],
+  );
+
+  // ── Order freeze ────────────────────────────────────────────────────────────
+  // While the user has a selection or an open detail panel, hold the row order
+  // still. Data refetches every 2s, so sorting by speed or ETA otherwise slides
+  // rows out from under the cursor between deciding to act and clicking.
+  // Render-phase "previous value" pattern, as elsewhere in this codebase — an
+  // effect would cost an extra render and show one frame of the moved order.
+  const interacting = selected.size > 0 || expanded.size > 0;
+  const [frozenKeys, setFrozenKeys] = useState<string[] | null>(null);
+  const [prevInteracting, setPrevInteracting] = useState(interacting);
+  if (interacting !== prevInteracting) {
+    setPrevInteracting(interacting);
+    setFrozenKeys(interacting ? ordered.map(torrentKey) : null);
+  }
+
+  const visible = useMemo(
+    () => applyFrozenOrder(ordered, frozenKeys),
+    [ordered, frozenKeys],
   );
   const categories = useMemo(() => categoriesOf(torrents), [torrents]);
   const hasUncategorised = useMemo(
@@ -105,6 +140,13 @@ export function TorrentsPage() {
 
   const clearSelection = () => setSelected(new Set());
 
+  const toggleExpanded = (key: string) =>
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+
   type BulkAction =
     | { kind: 'pause' }
     | { kind: 'resume' }
@@ -114,14 +156,31 @@ export function TorrentsPage() {
     mutationFn: async (action: BulkAction) => {
       const targets = selectedVisible;
       // Settled, not all: one failing torrent should not abandon the rest.
-      await Promise.allSettled(
+      const results = await Promise.allSettled(
         targets.map(t => {
           if (action.kind === 'pause') return pauseTorrent(t.mule, t.gid);
           if (action.kind === 'resume') return resumeTorrent(t.mule, t.gid);
           return removeTorrent(t.mule, t.gid, action.deleteFiles);
         }),
       );
+      const failed = results.filter(r => r.status === 'rejected').length;
+      return { verb: BULK_VERB[action.kind], total: targets.length, failed };
     },
+    // Those results used to be discarded, so a bulk action that half-failed
+    // looked identical to one that worked: rows just stopped changing.
+    onSuccess: ({ verb, total, failed }) => {
+      if (failed === 0) {
+        push({ type: 'success', title: `${verb} ${total} torrent${total === 1 ? '' : 's'}` });
+      } else {
+        push({
+          type: 'error',
+          title: `${failed} of ${total} could not be ${verb.toLowerCase()}`,
+          message: 'The rest were handled. Check the mule is still running.',
+        });
+      }
+    },
+    onError: (e: Error) =>
+      push({ type: 'error', title: 'Bulk action failed', message: e.message }),
     onSettled: () => {
       setConfirmBulkRemove(false);
       clearSelection();
@@ -249,7 +308,7 @@ export function TorrentsPage() {
         {/* Table */}
         <Paper withBorder radius="lg" style={{ overflow: 'hidden' }}>
           <Table.ScrollContainer minWidth={960}>
-            <Table verticalSpacing="sm" highlightOnHover>
+            <Table verticalSpacing={dense ? 4 : 'sm'} highlightOnHover>
               <Table.Thead>
                 <Table.Tr>
                   <Table.Th w={40} pl="md">
@@ -336,6 +395,8 @@ export function TorrentsPage() {
                     torrent={t}
                     selected={selected.has(torrentKey(t))}
                     onToggleSelected={() => toggleOne(torrentKey(t))}
+                    expanded={expanded.has(torrentKey(t))}
+                    onToggleExpanded={() => toggleExpanded(torrentKey(t))}
                   />
                 ))}
               </Table.Tbody>
@@ -354,6 +415,21 @@ export function TorrentsPage() {
                   ? 'No torrents'
                   : `Showing ${(Math.min(page, pageCount) - 1) * pageSize + 1}–${Math.min(page * pageSize, visible.length)} of ${visible.length}`}
               </Text>
+              <Tooltip label={dense ? 'Comfortable rows' : 'Compact rows'} withArrow>
+                <ActionIcon
+                  variant="default"
+                  size="md"
+                  aria-label={dense ? 'Switch to comfortable rows' : 'Switch to compact rows'}
+                  aria-pressed={dense}
+                  onClick={() => {
+                    const next = !dense;
+                    setDense(next);
+                    localStorage.setItem(DENSITY_KEY, next ? 'compact' : 'comfortable');
+                  }}
+                >
+                  {dense ? <Rows3 size={14} /> : <Rows2 size={14} />}
+                </ActionIcon>
+              </Tooltip>
               <Select
                 aria-label="Torrents per page"
                 size="xs"
