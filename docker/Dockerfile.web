@@ -21,7 +21,7 @@ RUN npm run build
 # 8080, so the container facing the browser holds no root at all. Stock nginx
 # starts as root to bind :80 and only drops its worker processes.
 # Digest only, per the note above. Tag: nginxinc/nginx-unprivileged:alpine.
-FROM nginxinc/nginx-unprivileged@sha256:18d67281256ded39ff65e010ae4f831be18f19356f83c60bc546492c7eb6dd23
+FROM nginxinc/nginx-unprivileged@sha256:f4a6f1ea26f4e500265b60b1935f2a5a0bc0cc5da4ca02ec32b2099426612229
 
 # Copy built assets
 COPY --from=builder /app/dist /usr/share/nginx/html
