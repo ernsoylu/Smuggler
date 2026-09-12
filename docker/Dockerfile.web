@@ -3,7 +3,7 @@
 # Digest only, no tag. A tag alongside a digest is redundant — the digest is
 # what actually resolves — and Sonar (S8431) flags carrying both. The tag is
 # kept in this comment so the update channel stays obvious: node:20-alpine.
-FROM node@sha256:0473e7dc433a1310f436edee02aa79737ec78a4b345433ab0963d4a256f9ad85 AS builder
+FROM node@sha256:e961046fec20896e8904f2b4a8b4c7e5ca91826d84d8d33d83dbaa61f942069e AS builder
 
 WORKDIR /app
 COPY web/package*.json ./
